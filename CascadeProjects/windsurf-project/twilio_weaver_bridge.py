@@ -73,9 +73,47 @@ log.propagate = False
 app = FastAPI(title="Weaver Full-Stack Phone", version="2.0.0")
 
 
+async def _sync_twilio_webhook():
+    """Detect public tunnel URL and point the Twilio number's voice webhook at /twiml."""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        return
+    import httpx as _hx
+    public_url = None
+    for attempt in range(10):
+        await asyncio.sleep(2)
+        try:
+            async with _hx.AsyncClient() as c:
+                r = await c.get("http://127.0.0.1:4040/api/tunnels", timeout=3)
+                tunnels = r.json().get("tunnels", [])
+                for t in tunnels:
+                    if t.get("public_url", "").startswith("https://"):
+                        public_url = t["public_url"]
+                        break
+        except Exception:
+            continue
+        if public_url:
+            break
+    if not public_url:
+        log.warning("⚠️  No tunnel detected — Twilio webhook not updated")
+        return
+    voice_url = f"{public_url}/twiml"
+    try:
+        from twilio.rest import Client as _TwClient
+        client = _TwClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        for num in client.incoming_phone_numbers.list(limit=10):
+            num.update(voice_url=voice_url, voice_method="POST")
+            log.info("📞 Twilio webhook synced: %s → %s", num.phone_number, voice_url)
+    except Exception as e:
+        log.error("❌ Twilio webhook sync failed: %s", e)
+
+
+@app.on_event("startup")
+async def on_startup():
+    asyncio.create_task(_sync_twilio_webhook())
+
+
 @app.middleware("http")
 async def ngrok_bypass_middleware(request: Request, call_next):
-    """Add ngrok-skip-browser-warning header to bypass free-tier interstitial."""
     response = await call_next(request)
     response.headers["ngrok-skip-browser-warning"] = "true"
     return response
