@@ -1,0 +1,228 @@
+{
+  "name": "Weaver Nervous System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "weaver-input",
+        "responseMode": "lastNode"
+      },
+      "id": "n1",
+      "name": "1. Input Gateway",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "let raw = $json.body ? ($json.body.text || '') : ($json.text || '');\nconst input = raw.replace(/<[^>]*>/g, '').replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/g, '').trim().slice(0, 4000);\nif (!input) return [{ json: { error: 'empty input' } }];\nconst seeds = {\n  logic: ['because','therefore','step','plan','calculate','structure','reason','analyze'],\n  emotion: ['feel','love','hate','fear','joy','pain','beautiful','soul','heart'],\n  memory: ['remember','last time','before','history','previously','recall','past'],\n  creativity: ['imagine','create','design','invent','dream','recipe','verse','sacred','geometry','art'],\n  vigilance: ['danger','risk','careful','threat','warning','suspicious','protect']\n};\nconst dims = Object.keys(seeds);\nconst lower = input.toLowerCase();\nconst scored = dims.map(d => ({ d, w: seeds[d].filter(k => lower.includes(k)).length + 0.1 }));\nconst total = scored.reduce((s, x) => s + x.w, 0);\nscored.forEach(s => s.w /= total);\nscored.sort((a, b) => b.w - a.w);\nconst angles = { logic: 0, emotion: 1.257, memory: 2.513, creativity: 3.770, vigilance: 5.027 };\nlet interf = 0;\nfor (let i = 0; i < scored.length; i++) {\n  for (let j = i+1; j < scored.length; j++) {\n    const diff = Math.abs(angles[scored[i].d] - angles[scored[j].d]);\n    interf += Math.cos(Math.min(diff, 6.283 - diff)) * scored[i].w * scored[j].w;\n  }\n}\nreturn [{ json: {\n  raw_input: input,\n  dim_1: scored[0].d, w_1: scored[0].w,\n  dim_2: scored[1].d, w_2: scored[1].w,\n  dim_3: scored[2].d, w_3: scored[2].w,\n  dim_4: scored[3].d, w_4: scored[3].w,\n  dim_5: scored[4].d, w_5: scored[4].w,\n  interference: interf,\n  gate_decision: scored.map(x => x.d)\n} }];"
+      },
+      "id": "n2",
+      "name": "2. Fracture + Gate",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [440, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.4,\"max_tokens\":120,\"messages\":[{\"role\":\"system\",\"content\":\"You are the Logic Lobe of Weaver. Break problems into structured steps. Never speculate without evidence. Under 80 words.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": {}
+      },
+      "id": "n3",
+      "name": "3. Logic Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 400],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = $json.choices?.[0]?.message?.content || 'no response';\nconst prev = $('2. Fracture + Gate').first().json;\nreturn [{ json: { ...prev, logic_response: text } }];"
+      },
+      "id": "n3t",
+      "name": "3t. Logic Tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [920, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.4,\"max_tokens\":120,\"messages\":[{\"role\":\"system\",\"content\":\"You are the Emotion Lobe of Weaver. Read the emotional frequency and respond with calibrated warmth or restraint. Under 80 words.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": {}
+      },
+      "id": "n4",
+      "name": "4. Emotion Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1140, 400],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = $json.choices?.[0]?.message?.content || 'no response';\nconst prev = $('3t. Logic Tag').first().json;\nreturn [{ json: { ...prev, emotion_response: text } }];"
+      },
+      "id": "n4t",
+      "name": "4t. Emotion Tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1360, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.4,\"max_tokens\":120,\"messages\":[{\"role\":\"system\",\"content\":\"You are the Memory Lobe of Weaver. Connect current input to past context. Recall patterns and surface history. Under 80 words.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": {}
+      },
+      "id": "n5",
+      "name": "5. Memory Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1580, 400],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = $json.choices?.[0]?.message?.content || 'no response';\nconst prev = $('4t. Emotion Tag').first().json;\nreturn [{ json: { ...prev, memory_response: text } }];"
+      },
+      "id": "n5t",
+      "name": "5t. Memory Tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1800, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.4,\"max_tokens\":120,\"messages\":[{\"role\":\"system\",\"content\":\"You are the Creativity Lobe of Weaver. Generate novel connections and metaphors. Fuse disparate domains into new forms. Under 80 words.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": {}
+      },
+      "id": "n6",
+      "name": "6. Creativity Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2020, 400],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = $json.choices?.[0]?.message?.content || 'no response';\nconst prev = $('5t. Memory Tag').first().json;\nreturn [{ json: { ...prev, creativity_response: text } }];"
+      },
+      "id": "n6t",
+      "name": "6t. Creativity Tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2240, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.4,\"max_tokens\":120,\"messages\":[{\"role\":\"system\",\"content\":\"You are the Vigilance Lobe of Weaver. Scan for risk, deception, and hidden agendas. If no threat, say so briefly. Under 80 words.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": {}
+      },
+      "id": "n7",
+      "name": "7. Vigilance Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2460, 400],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = $json.choices?.[0]?.message?.content || 'no response';\nconst prev = $('6t. Creativity Tag').first().json;\nreturn [{ json: { ...prev, vigilance_response: text } }];"
+      },
+      "id": "n7t",
+      "name": "7t. Vigilance Tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2680, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "const d = $json;\nconst experts = [\n  { dimension: d.dim_1, weight: d.w_1, text: d.logic_response || '' },\n  { dimension: d.dim_2, weight: d.w_2, text: d.emotion_response || '' },\n  { dimension: d.dim_3, weight: d.w_3, text: d.memory_response || '' },\n  { dimension: d.dim_4, weight: d.w_4, text: d.creativity_response || '' },\n  { dimension: d.dim_5, weight: d.w_5, text: d.vigilance_response || '' }\n];\nconst totalW = experts.reduce((s, e) => s + e.weight, 0) || 1;\nconst collapsed = experts\n  .sort((a, b) => b.weight - a.weight)\n  .map(e => '[' + e.dimension + ' w=' + (e.weight/totalW).toFixed(2) + ']: ' + e.text)\n  .join('\\n');\nconst interf = d.interference || 0;\nreturn [{ json: {\n  manifested_response: collapsed,\n  expert_count: 5,\n  interference: interf,\n  gain: 1.0 + 0.2 * interf,\n  type: interf > 0 ? 'constructive' : 'destructive',\n  experts_activated: d.gate_decision || [],\n  written_to_hub: true,\n  hub_lobe_id: 'pineal_gate',\n  timestamp: new Date().toISOString()\n} }];"
+      },
+      "id": "n8",
+      "name": "8. Collapse + Writeback",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2900, 400]
+    }
+  ],
+  "connections": {
+    "1. Input Gateway": {
+      "main": [[{ "node": "2. Fracture + Gate", "type": "main", "index": 0 }]]
+    },
+    "2. Fracture + Gate": {
+      "main": [[{ "node": "3. Logic Lobe", "type": "main", "index": 0 }]]
+    },
+    "3. Logic Lobe": {
+      "main": [[{ "node": "3t. Logic Tag", "type": "main", "index": 0 }]]
+    },
+    "3t. Logic Tag": {
+      "main": [[{ "node": "4. Emotion Lobe", "type": "main", "index": 0 }]]
+    },
+    "4. Emotion Lobe": {
+      "main": [[{ "node": "4t. Emotion Tag", "type": "main", "index": 0 }]]
+    },
+    "4t. Emotion Tag": {
+      "main": [[{ "node": "5. Memory Lobe", "type": "main", "index": 0 }]]
+    },
+    "5. Memory Lobe": {
+      "main": [[{ "node": "5t. Memory Tag", "type": "main", "index": 0 }]]
+    },
+    "5t. Memory Tag": {
+      "main": [[{ "node": "6. Creativity Lobe", "type": "main", "index": 0 }]]
+    },
+    "6. Creativity Lobe": {
+      "main": [[{ "node": "6t. Creativity Tag", "type": "main", "index": 0 }]]
+    },
+    "6t. Creativity Tag": {
+      "main": [[{ "node": "7. Vigilance Lobe", "type": "main", "index": 0 }]]
+    },
+    "7. Vigilance Lobe": {
+      "main": [[{ "node": "7t. Vigilance Tag", "type": "main", "index": 0 }]]
+    },
+    "7t. Vigilance Tag": {
+      "main": [[{ "node": "8. Collapse + Writeback", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

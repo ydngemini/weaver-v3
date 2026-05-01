@@ -1,0 +1,15 @@
+.env
+token.json
+credentials.json
+__pycache__/
+*.pyc
+*.npz
+*.bak
+Nexus_Vault/
+Weaver_Vault/
+.deepface/
+venv/
+weaver_fracture_1B_lora/
+weaver_merged_1B/
+images/
+ghost_key.json

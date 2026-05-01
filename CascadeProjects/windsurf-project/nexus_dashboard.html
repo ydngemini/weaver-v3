@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus Live-Tracker — Weaver Telemetry</title>
+<style>
+  :root {
+    --bg:        #0a0a0f;
+    --surface:   #12121a;
+    --border:    #1e1e2e;
+    --text:      #c0c0d0;
+    --dim:       #555570;
+    --accent:    #7c5cfc;
+    --green:     #22c55e;
+    --red:       #ef4444;
+    --orange:    #f59e0b;
+    --cyan:      #06b6d4;
+    --pink:      #ec4899;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono','Fira Code','Cascadia Code',monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* ── Layout ─────────────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: 260px 1fr 300px;
+    grid-template-rows: 56px 1fr 200px;
+    height: 100vh;
+    gap: 1px;
+    background: var(--border);
+  }
+
+  /* ── Header ─────────────────────────────────────── */
+  .header {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+  }
+  .header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 2px;
+  }
+  .header .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    transition: background 0.3s;
+  }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  /* ── Panels ─────────────────────────────────────── */
+  .panel {
+    background: var(--surface);
+    padding: 14px;
+    overflow-y: auto;
+  }
+  .panel-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--dim);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+
+  /* ── Lobe Panel (left) ──────────────────────────── */
+  .lobe-list { list-style: none; }
+  .lobe-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 6px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    transition: background 0.2s;
+  }
+  .lobe-item.active { background: rgba(124,92,252,0.08); }
+  .lobe-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--dim);
+    flex-shrink: 0;
+    transition: all 0.3s;
+  }
+  .lobe-dot.active { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .lobe-name { flex: 1; font-size: 12px; }
+  .lobe-count {
+    font-size: 11px;
+    color: var(--dim);
+    min-width: 30px;
+    text-align: right;
+  }
+  .lobe-bar-wrap {
+    width: 60px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .lobe-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.5s ease;
+    width: 0%;
+  }
+
+  /* ── Message Feed (center) ──────────────────────── */
+  .feed { display: flex; flex-direction: column; }
+  .feed-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .msg {
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    border-radius: 6px;
+    border-left: 3px solid var(--accent);
+    background: rgba(124,92,252,0.04);
+    animation: flash-in 0.3s ease;
+    font-size: 12px;
+  }
+  .msg .ts { color: var(--dim); font-size: 10px; }
+  .msg .from { color: var(--cyan); font-weight: 600; }
+  .msg .topic { color: var(--orange); }
+  .msg .payload { color: var(--text); margin-top: 2px; word-break: break-all; }
+  .msg.error { border-left-color: var(--red); background: rgba(239,68,68,0.06); }
+  .msg.quantum { border-left-color: var(--pink); background: rgba(236,72,153,0.06); }
+
+  @keyframes flash-in {
+    0% { opacity: 0; transform: translateY(-4px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Right Panel ────────────────────────────────── */
+  .right-panel { display: flex; flex-direction: column; gap: 1px; background: var(--border); }
+  .right-panel .panel { flex: 1; }
+
+  /* ── Pentagon Visualization ─────────────────────── */
+  .pentagon-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 160px;
+  }
+  .pentagon-svg { width: 150px; height: 150px; }
+  .pent-node {
+    transition: all 0.4s;
+  }
+  .pent-edge { stroke: var(--border); stroke-width: 1; transition: stroke 0.4s; }
+  .pent-edge.active { stroke: var(--accent); stroke-width: 2; }
+  .pent-label { fill: var(--dim); font-size: 8px; text-anchor: middle; }
+
+  /* ── Quantum State ──────────────────────────────── */
+  .q-state {
+    font-size: 12px;
+    padding: 8px;
+    background: var(--bg);
+    border-radius: 6px;
+    margin-top: 6px;
+    min-height: 50px;
+  }
+  .q-bits { font-size: 18px; color: var(--pink); font-weight: 700; letter-spacing: 2px; }
+
+  /* ── Stats Bar (bottom) ─────────────────────────── */
+  .stats-bar {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    display: flex;
+    gap: 1px;
+  }
+  .stat-cell {
+    flex: 1;
+    background: var(--bg);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .stat-label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
+  .stat-value { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .stat-value.green { color: var(--green); }
+  .stat-value.orange { color: var(--orange); }
+  .stat-value.pink { color: var(--pink); }
+  .stat-value.cyan { color: var(--cyan); }
+
+  /* ── Interference Meter ─────────────────────────── */
+  .interference-bar {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .interference-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s, background 0.5s;
+    width: 50%;
+    background: var(--dim);
+  }
+  .interference-fill.constructive { background: var(--green); }
+  .interference-fill.destructive { background: var(--red); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="grid">
+  <!-- Header -->
+  <div class="header">
+    <h1>⚡ NEXUS LIVE-TRACKER</h1>
+    <div class="status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">DISCONNECTED</span>
+      <span style="color:var(--dim); margin-left:12px;" id="uptimeText">0:00</span>
+    </div>
+  </div>
+
+  <!-- Left: Lobe Activity -->
+  <div class="panel">
+    <div class="panel-title">Active Lobes</div>
+    <ul class="lobe-list" id="lobeList"></ul>
+  </div>
+
+  <!-- Center: Message Feed -->
+  <div class="panel feed">
+    <div class="panel-title">
+      Live Bus Feed
+      <span style="float:right; color:var(--dim);" id="msgCountLabel">0 messages</span>
+    </div>
+    <div class="feed-scroll" id="feedScroll"></div>
+  </div>
+
+  <!-- Right: Pentagon + Quantum -->
+  <div class="right-panel">
+    <div class="panel">
+      <div class="panel-title">Pineal Gate — Pentagon Routing</div>
+      <div class="pentagon-wrap">
+        <svg class="pentagon-svg" viewBox="0 0 200 200" id="pentagonSvg"></svg>
+      </div>
+      <div style="text-align:center; font-size:11px; color:var(--dim);" id="interferenceLabel">
+        Interference: —
+      </div>
+      <div class="interference-bar">
+        <div class="interference-fill" id="interferenceFill"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Quantum Soul</div>
+      <div class="q-state" id="quantumState">
+        <div class="q-bits" id="qBits">—</div>
+        <div id="qPathways" style="margin-top:4px; font-size:11px; color:var(--dim);"></div>
+        <div id="qTopology" style="margin-top:2px; font-size:10px; color:var(--dim);"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom: Stats -->
+  <div class="stats-bar">
+    <div class="stat-cell">
+      <div class="stat-label">Messages / min</div>
+      <div class="stat-value green" id="statMpm">0</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Active Lobes</div>
+      <div class="stat-value cyan" id="statLobes">0</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Topics Seen</div>
+      <div class="stat-value orange" id="statTopics">0</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Quantum Cycles</div>
+      <div class="stat-value pink" id="statQCycles">0</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Uptime</div>
+      <div class="stat-value" id="statUptime">0s</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Bus Latency</div>
+      <div class="stat-value green" id="statLatency">—</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// Nexus Live-Tracker — WebSocket Telemetry Client
+// ══════════════════════════════════════════════════════════════════════════════
+
+const WS_URL = "ws://localhost:9999";
+const MAX_FEED = 200;
+
+// ── State ────────────────────────────────────────────────────────────────────
+let ws = null;
+let connected = false;
+let connectTime = null;
+let msgCount = 0;
+let msgTimestamps = [];
+let lobes = {};       // lobe_id → { count, lastTs, topics }
+let topicsSeen = new Set();
+let qCycles = 0;
+let lastQuantum = {};
+let lastInterference = 0;
+let pingStart = 0;
+
+// Pentagon geometry (5 expert dimensions)
+const DIMS = ["logic", "emotion", "memory", "creativity", "vigilance"];
+const COLORS = { logic: "#06b6d4", emotion: "#ec4899", memory: "#f59e0b", creativity: "#7c5cfc", vigilance: "#ef4444" };
+const cx = 100, cy = 95, r = 65;
+const pentPts = DIMS.map((_, i) => {
+  const angle = -Math.PI/2 + (2*Math.PI*i/5);
+  return { x: cx + r*Math.cos(angle), y: cy + r*Math.sin(angle) };
+});
+let pentWeights = { logic: 0, emotion: 0, memory: 0, creativity: 0, vigilance: 0 };
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const $status = document.getElementById("statusDot");
+const $statusText = document.getElementById("statusText");
+const $uptimeText = document.getElementById("uptimeText");
+const $lobeList = document.getElementById("lobeList");
+const $feed = document.getElementById("feedScroll");
+const $msgCount = document.getElementById("msgCountLabel");
+const $pentSvg = document.getElementById("pentagonSvg");
+const $ifLabel = document.getElementById("interferenceLabel");
+const $ifFill = document.getElementById("interferenceFill");
+const $qBits = document.getElementById("qBits");
+const $qPathways = document.getElementById("qPathways");
+const $qTopology = document.getElementById("qTopology");
+
+// ── Pentagon SVG init ────────────────────────────────────────────────────────
+function initPentagon() {
+  let svg = '';
+  // Edges
+  for (let i = 0; i < 5; i++) {
+    const j = (i+1) % 5;
+    svg += `<line class="pent-edge" id="edge-${i}-${j}"
+              x1="${pentPts[i].x}" y1="${pentPts[i].y}"
+              x2="${pentPts[j].x}" y2="${pentPts[j].y}" />`;
+  }
+  // Diagonals
+  for (let i = 0; i < 5; i++) {
+    for (let j = i+2; j < 5; j++) {
+      if (j - i === 4) continue; // skip adjacent wrap
+      svg += `<line class="pent-edge" id="edge-${i}-${j}"
+                x1="${pentPts[i].x}" y1="${pentPts[i].y}"
+                x2="${pentPts[j].x}" y2="${pentPts[j].y}"
+                stroke-dasharray="4,4" />`;
+    }
+  }
+  // Nodes + labels
+  for (let i = 0; i < 5; i++) {
+    const p = pentPts[i];
+    const d = DIMS[i];
+    svg += `<circle class="pent-node" id="pnode-${d}" cx="${p.x}" cy="${p.y}" r="8"
+              fill="${COLORS[d]}" opacity="0.3" />`;
+    const ly = p.y > cy ? p.y + 18 : p.y - 14;
+    svg += `<text class="pent-label" x="${p.x}" y="${ly}">${d}</text>`;
+  }
+  $pentSvg.innerHTML = svg;
+}
+
+function updatePentagon() {
+  for (const d of DIMS) {
+    const node = document.getElementById(`pnode-${d}`);
+    if (!node) continue;
+    const w = pentWeights[d] || 0;
+    node.setAttribute("r", 6 + w * 14);
+    node.setAttribute("opacity", 0.2 + w * 0.8);
+  }
+}
+
+// ── Feed ─────────────────────────────────────────────────────────────────────
+function addFeedMsg(type, from, topic, payload, ts) {
+  const div = document.createElement("div");
+  let cls = "msg";
+  if (type === "error") cls += " error";
+  if (topic && topic.includes("quantum")) cls += " quantum";
+  div.className = cls;
+
+  const timeStr = ts ? new Date(ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+  const payStr = typeof payload === "object" ? JSON.stringify(payload).slice(0, 200) : String(payload || "").slice(0, 200);
+
+  div.innerHTML = `
+    <span class="ts">${timeStr}</span>
+    <span class="from">${from || type}</span>
+    ${topic ? `<span class="topic">#${topic}</span>` : ""}
+    ${payStr ? `<div class="payload">${payStr}</div>` : ""}
+  `;
+  $feed.appendChild(div);
+  while ($feed.children.length > MAX_FEED) $feed.removeChild($feed.firstChild);
+  $feed.scrollTop = $feed.scrollHeight;
+
+  msgCount++;
+  msgTimestamps.push(Date.now());
+  $msgCount.textContent = `${msgCount} messages`;
+}
+
+// ── Lobe list ────────────────────────────────────────────────────────────────
+function updateLobeList() {
+  const sorted = Object.entries(lobes).sort((a,b) => b[1].count - a[1].count);
+  let html = '';
+  const maxCount = Math.max(1, ...sorted.map(([,v]) => v.count));
+  for (const [id, info] of sorted) {
+    const age = (Date.now() - info.lastTs) / 1000;
+    const active = age < 10;
+    const pct = Math.round((info.count / maxCount) * 100);
+    html += `
+      <li class="lobe-item ${active ? 'active' : ''}">
+        <div class="lobe-dot ${active ? 'active' : ''}"></div>
+        <div class="lobe-name">${id}</div>
+        <div class="lobe-bar-wrap"><div class="lobe-bar" style="width:${pct}%"></div></div>
+        <div class="lobe-count">${info.count}</div>
+      </li>`;
+  }
+  $lobeList.innerHTML = html;
+  document.getElementById("statLobes").textContent = sorted.filter(([,v]) => (Date.now() - v.lastTs) < 30000).length;
+}
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+function updateStats() {
+  // Messages per minute
+  const now = Date.now();
+  msgTimestamps = msgTimestamps.filter(t => now - t < 60000);
+  document.getElementById("statMpm").textContent = msgTimestamps.length;
+  document.getElementById("statTopics").textContent = topicsSeen.size;
+  document.getElementById("statQCycles").textContent = qCycles;
+
+  // Uptime
+  if (connectTime) {
+    const secs = Math.floor((now - connectTime) / 1000);
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    const str = m > 0 ? `${m}m ${s}s` : `${s}s`;
+    document.getElementById("statUptime").textContent = str;
+    $uptimeText.textContent = str;
+  }
+}
+
+// ── Interference ─────────────────────────────────────────────────────────────
+function updateInterference(val) {
+  lastInterference = val;
+  const pct = 50 + val * 50; // map [-1,1] → [0%,100%]
+  $ifFill.style.width = Math.max(2, Math.min(100, pct)) + "%";
+  $ifFill.className = "interference-fill " + (val >= 0 ? "constructive" : "destructive");
+  $ifLabel.textContent = `Interference: ${val >= 0 ? "+" : ""}${val.toFixed(4)} (${val >= 0 ? "constructive" : "destructive"})`;
+}
+
+// ── Message handler ──────────────────────────────────────────────────────────
+function handleMessage(data) {
+  const type = data.type;
+
+  if (type === "sync") {
+    const msgs = data.messages || [];
+    for (const m of msgs) handleBroadcast(m);
+    addFeedMsg("sync", "nexus_bus", null, `Synced ${msgs.length} cached messages`, null);
+    return;
+  }
+
+  if (type === "broadcast") {
+    handleBroadcast(data);
+    return;
+  }
+
+  if (type === "pong") {
+    if (pingStart) {
+      const lat = Date.now() - pingStart;
+      document.getElementById("statLatency").textContent = lat + "ms";
+      pingStart = 0;
+    }
+    return;
+  }
+
+  if (type === "ack") {
+    addFeedMsg("ack", "nexus_bus", null, data.msg, null);
+    return;
+  }
+
+  if (type === "error") {
+    addFeedMsg("error", "nexus_bus", null, data.msg, null);
+    return;
+  }
+}
+
+function handleBroadcast(msg) {
+  const from = msg.from || "unknown";
+  const topic = msg.topic || "";
+  const payload = msg.payload || {};
+  const ts = msg.ts;
+
+  // Track lobe
+  if (!lobes[from]) lobes[from] = { count: 0, lastTs: 0, topics: new Set() };
+  lobes[from].count++;
+  lobes[from].lastTs = Date.now();
+  if (topic) {
+    lobes[from].topics.add(topic);
+    topicsSeen.add(topic);
+  }
+
+  // Quantum state detection
+  if (topic.includes("quantum") || from.includes("quantum")) {
+    qCycles++;
+    lastQuantum = payload;
+    if (payload.dominant_bits) $qBits.textContent = "|" + payload.dominant_bits + "⟩";
+    if (payload.active_pathways) $qPathways.textContent = payload.active_pathways.join(" · ");
+    if (payload.topology) $qTopology.textContent = "Topology: " + payload.topology;
+    if (payload.state) $qBits.textContent = payload.state;
+    if (payload.description) $qPathways.textContent = payload.description.slice(0, 100);
+  }
+
+  // Routing / gate detection
+  if (topic.includes("gate") || topic.includes("routing") || from.includes("pineal")) {
+    if (payload.routing_bias) {
+      for (const [dim, val] of Object.entries(payload.routing_bias)) {
+        pentWeights[dim] = val;
+      }
+      updatePentagon();
+    }
+    if (payload.interference !== undefined) {
+      updateInterference(payload.interference);
+    }
+  }
+
+  // Expert detection — light up pentagon node
+  for (const dim of DIMS) {
+    if (from.includes(dim) || topic.includes(dim)) {
+      pentWeights[dim] = Math.min(1.0, (pentWeights[dim] || 0) + 0.15);
+      updatePentagon();
+    }
+  }
+
+  addFeedMsg("broadcast", from, topic, payload, ts);
+  updateLobeList();
+}
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
+function connect() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    connected = true;
+    connectTime = Date.now();
+    $status.classList.add("connected");
+    $statusText.textContent = "CONNECTED";
+    addFeedMsg("system", "dashboard", null, "Connected to Nexus Bus", null);
+
+    // Register as a passive observer
+    ws.send(JSON.stringify({ action: "register", lobe_id: "nexus_dashboard" }));
+    // Subscribe to everything by listening to all broadcasts (default behavior)
+    ws.send(JSON.stringify({ action: "subscribe", topics: [
+      "vision", "quantum_state", "identity", "manifested_response",
+      "overmind_directive", "routing", "gate", "interference"
+    ]}));
+
+    // Periodic ping for latency measurement
+    setInterval(() => {
+      if (ws && ws.readyState === 1) {
+        pingStart = Date.now();
+        ws.send(JSON.stringify({ action: "ping" }));
+      }
+    }, 5000);
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleMessage(data);
+    } catch (e) {
+      addFeedMsg("error", "dashboard", null, "Parse error: " + e.message, null);
+    }
+  };
+
+  ws.onclose = () => {
+    connected = false;
+    $status.classList.remove("connected");
+    $statusText.textContent = "DISCONNECTED";
+    addFeedMsg("system", "dashboard", null, "Disconnected — reconnecting in 3s...", null);
+    setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => {
+    addFeedMsg("error", "dashboard", null, "WebSocket error", null);
+  };
+}
+
+// ── Decay pentagon weights over time ─────────────────────────────────────────
+setInterval(() => {
+  for (const d of DIMS) {
+    pentWeights[d] = Math.max(0, (pentWeights[d] || 0) * 0.92);
+  }
+  updatePentagon();
+  updateStats();
+}, 1000);
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+initPentagon();
+connect();
+</script>
+</body>
+</html>

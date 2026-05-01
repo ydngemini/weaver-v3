@@ -1,0 +1,35 @@
+{
+  "name": "Weaver Minimal Test",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "weaver-input",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "const input = $json.body ? $json.body.text : ($json.text || '');\nreturn [{ json: { received: true, raw_input: input, echo: 'Weaver heard you', timestamp: new Date().toISOString() } }];"
+      },
+      "id": "echo",
+      "name": "Echo",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [480, 400]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Echo", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

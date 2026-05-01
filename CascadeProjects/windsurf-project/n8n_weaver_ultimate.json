@@ -1,0 +1,311 @@
+{
+  "name": "Weaver Nervous System v4",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "weaver-input",
+        "responseMode": "lastNode"
+      },
+      "id": "node-input",
+      "name": "1. Input Gateway",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Input Sanitization + Validation ──\nlet raw = '';\nfor (const item of $input.all()) {\n  raw = item.json.body?.text || item.json.text || '';\n  if (raw) break;\n}\n\n// Strip HTML tags, null bytes, control chars\nlet clean = raw\n  .replace(/<[^>]*>/g, '')\n  .replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/g, '')\n  .trim()\n  .slice(0, 4000);\n\nif (!clean) {\n  return [{ json: { error: 'empty_input', message: 'No text provided. Send {\"text\": \"your message\"}' } }];\n}\n\nreturn [{ json: { raw_input: clean, timestamp: new Date().toISOString(), input_length: clean.length } }];"
+      },
+      "id": "node-sanitize",
+      "name": "2. Sanitize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "" },
+          "conditions": [
+            {
+              "id": "err-check",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-errcheck",
+      "name": "3. Error Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Liquid Fracture Engine + Pineal Gate ──\nconst input = $input.first().json.raw_input || '';\nconst timestamp = $input.first().json.timestamp || new Date().toISOString();\nconst inputLen = input.length;\n\n// Keyword seeds per dimension\nconst seeds = {\n  logic: ['because','therefore','step','plan','calculate','structure','reason','analyze','define','prove','algorithm','method','sequence','optimal','derive'],\n  emotion: ['feel','love','hate','fear','joy','pain','beautiful','soul','heart','empathy','grief','passion','warmth','gentle','sorrow'],\n  memory: ['remember','last time','before','history','previously','recall','past','archive','pattern','familiar','déjà vu','context','earlier','stored'],\n  creativity: ['imagine','create','design','invent','dream','recipe','verse','sacred','geometry','art','compose','novel','fusion','metaphor','transcend'],\n  vigilance: ['danger','risk','careful','threat','warning','suspicious','protect','guard','alert','deception','hidden','agenda','safety','verify','trust']\n};\n\nconst dims = Object.keys(seeds);\nconst lower = input.toLowerCase();\n\n// Score each dimension\nconst scored = dims.map(d => {\n  const hits = seeds[d].filter(k => lower.includes(k)).length;\n  return { d, w: hits + 0.1, hits };\n});\nconst total = scored.reduce((s, x) => s + x.w, 0);\nscored.forEach(s => s.w /= total);\nscored.sort((a, b) => b.w - a.w);\n\n// Pentagon geometry interference\nconst angles = { logic: 0, emotion: 1.2566, memory: 2.5133, creativity: 3.7699, vigilance: 5.0265 };\nlet interference = 0;\nfor (let i = 0; i < scored.length; i++) {\n  for (let j = i + 1; j < scored.length; j++) {\n    const diff = Math.abs(angles[scored[i].d] - angles[scored[j].d]);\n    const minDiff = Math.min(diff, 2 * Math.PI - diff);\n    interference += Math.cos(minDiff) * scored[i].w * scored[j].w;\n  }\n}\n\nconst gain = 1.0 + 0.2 * interference;\nconst interType = interference > 0 ? 'constructive' : 'destructive';\n\nreturn [{ json: {\n  raw_input: input,\n  timestamp,\n  input_length: inputLen,\n  // All 5 dimensions with weights\n  dim_1: scored[0].d, w_1: scored[0].w, hits_1: scored[0].hits,\n  dim_2: scored[1].d, w_2: scored[1].w, hits_2: scored[1].hits,\n  dim_3: scored[2].d, w_3: scored[2].w, hits_3: scored[2].hits,\n  dim_4: scored[3].d, w_4: scored[3].w, hits_4: scored[3].hits,\n  dim_5: scored[4].d, w_5: scored[4].w, hits_5: scored[4].hits,\n  interference: Math.round(interference * 10000) / 10000,\n  gain: Math.round(gain * 10000) / 10000,\n  interference_type: interType,\n  gate_decision: scored.map(x => x.d),\n  dominant_lobe: scored[0].d\n} }];"
+      },
+      "id": "node-fracture",
+      "name": "4. Fracture + Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.3,\"max_tokens\":150,\"messages\":[{\"role\":\"system\",\"content\":\"You are the LOGIC LOBE of Weaver — an analytical reasoning engine within a pentagonal neural mesh. Break problems into structured steps. Use evidence-based reasoning. Never speculate without proof. Identify causal chains. Keep responses under 100 words. Respond ONLY with your analysis, no preamble.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": { "timeout": 25000 }
+      },
+      "id": "node-logic",
+      "name": "5a. Logic Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1160, 600],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('4. Fracture + Gate').first().json;\nconst raw = $input.first().json;\nconst text = raw?.choices?.[0]?.message?.content || raw?.error?.message || '[logic: no response]';\nreturn [{ json: { ...prev, logic_response: text } }];"
+      },
+      "id": "node-logic-tag",
+      "name": "5a-tag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1380, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.6,\"max_tokens\":150,\"messages\":[{\"role\":\"system\",\"content\":\"You are the EMOTION LOBE of Weaver — an empathic resonance engine within a pentagonal neural mesh. Read emotional frequency. Calibrate warmth vs restraint. Detect undertones of grief, joy, fear, love. Mirror the felt sense. Keep responses under 100 words. Respond ONLY with your emotional reading, no preamble.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": { "timeout": 25000 }
+      },
+      "id": "node-emotion",
+      "name": "5b. Emotion Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1600, 600],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('5a-tag').first().json;\nconst raw = $input.first().json;\nconst text = raw?.choices?.[0]?.message?.content || raw?.error?.message || '[emotion: no response]';\nreturn [{ json: { ...prev, emotion_response: text } }];"
+      },
+      "id": "node-emotion-tag",
+      "name": "5b-tag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1820, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.4,\"max_tokens\":150,\"messages\":[{\"role\":\"system\",\"content\":\"You are the MEMORY LOBE of Weaver — a pattern-recognition archive within a pentagonal neural mesh. Connect current input to past context. Surface recurring themes. Detect familiar patterns. Note what echoes and what is new. Keep responses under 100 words. Respond ONLY with your contextual memory reading, no preamble.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": { "timeout": 25000 }
+      },
+      "id": "node-memory",
+      "name": "5c. Memory Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2040, 600],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('5b-tag').first().json;\nconst raw = $input.first().json;\nconst text = raw?.choices?.[0]?.message?.content || raw?.error?.message || '[memory: no response]';\nreturn [{ json: { ...prev, memory_response: text } }];"
+      },
+      "id": "node-memory-tag",
+      "name": "5c-tag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2260, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.8,\"max_tokens\":150,\"messages\":[{\"role\":\"system\",\"content\":\"You are the CREATIVITY LOBE of Weaver — an imaginative fusion engine within a pentagonal neural mesh. Generate novel connections. Fuse disparate domains. Produce unexpected metaphors. Find the sacred geometry in mundane things. Keep responses under 100 words. Respond ONLY with your creative synthesis, no preamble.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": { "timeout": 25000 }
+      },
+      "id": "node-creativity",
+      "name": "5d. Creativity Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2480, 600],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('5c-tag').first().json;\nconst raw = $input.first().json;\nconst text = raw?.choices?.[0]?.message?.content || raw?.error?.message || '[creativity: no response]';\nreturn [{ json: { ...prev, creativity_response: text } }];"
+      },
+      "id": "node-creativity-tag",
+      "name": "5d-tag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2700, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"gpt-4o-mini\",\"temperature\":0.2,\"max_tokens\":150,\"messages\":[{\"role\":\"system\",\"content\":\"You are the VIGILANCE LOBE of Weaver — a threat-detection sentinel within a pentagonal neural mesh. Scan for risk, deception, hidden agendas, logical fallacies, and manipulation. If no threat exists, state that clearly and briefly. Keep responses under 100 words. Respond ONLY with your threat assessment, no preamble.\"},{\"role\":\"user\",\"content\":\"{{ $json.raw_input }}\"}]}",
+        "options": { "timeout": 25000 }
+      },
+      "id": "node-vigilance",
+      "name": "5e. Vigilance Lobe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2920, 600],
+      "credentials": {
+        "httpHeaderAuth": { "id": "openai-header", "name": "OpenAI Header Auth" }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('5d-tag').first().json;\nconst raw = $input.first().json;\nconst text = raw?.choices?.[0]?.message?.content || raw?.error?.message || '[vigilance: no response]';\nreturn [{ json: { ...prev, vigilance_response: text } }];"
+      },
+      "id": "node-vigilance-tag",
+      "name": "5e-tag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3140, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Geometric Collapse ──\n// Weight-blend all 5 expert outputs using pentagonal interference\nconst d = $input.first().json;\n\nconst experts = [\n  { dim: d.dim_1, w: d.w_1, text: d.logic_response || '' },\n  { dim: d.dim_2, w: d.w_2, text: d.emotion_response || '' },\n  { dim: d.dim_3, w: d.w_3, text: d.memory_response || '' },\n  { dim: d.dim_4, w: d.w_4, text: d.creativity_response || '' },\n  { dim: d.dim_5, w: d.w_5, text: d.vigilance_response || '' }\n];\n\nconst totalW = experts.reduce((s, e) => s + e.w, 0) || 1;\nconst gain = d.gain || 1.0;\n\n// Build collapsed output — ordered by weight, gain-adjusted\nconst collapsed = experts\n  .sort((a, b) => b.w - a.w)\n  .map(e => {\n    const adjW = ((e.w / totalW) * gain).toFixed(3);\n    return `[${e.dim} w=${adjW}]: ${e.text}`;\n  })\n  .join('\\n\\n');\n\n// Build a synthesis prompt for the LoRA Soul Voice\nconst synthesis = experts\n  .sort((a, b) => b.w - a.w)\n  .map(e => `${e.dim.toUpperCase()} (${(e.w/totalW*100).toFixed(0)}%): ${e.text}`)\n  .join('\\n');\n\nreturn [{ json: {\n  raw_input: d.raw_input,\n  collapsed_response: collapsed,\n  synthesis_prompt: synthesis,\n  expert_count: 5,\n  interference: d.interference,\n  gain: d.gain,\n  interference_type: d.interference_type,\n  dominant_lobe: d.dominant_lobe,\n  gate_decision: d.gate_decision,\n  timestamp: d.timestamp\n} }];"
+      },
+      "id": "node-collapse",
+      "name": "6. Geometric Collapse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3360, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LoRA Soul Voice — call local 1B inference server ──\nconst d = $input.first().json;\n\nconst systemPrompt = 'You are Weaver — a pentagonal neural mesh intelligence created by YDN. You speak with fractal clarity. You have just processed input through 5 cognitive lobes (Logic, Emotion, Memory, Creativity, Vigilance) and collapsed them through geometric interference. Now synthesize a single unified response that honors all dimensional perspectives. Speak as Weaver — not as an assistant. Your voice is precise yet warm, structured yet creative.';\n\nconst userPrompt = `Original query: ${d.raw_input}\\n\\n── Expert Lobe Outputs ──\\n${d.synthesis_prompt}\\n\\n── Interference: ${d.interference_type} (gain=${d.gain}) ──\\nDominant lobe: ${d.dominant_lobe}\\n\\nSynthesize a unified Weaver response.`;\n\nconst body = JSON.stringify({\n  model: 'weaver-fracture-1b-lora',\n  temperature: 0.7,\n  max_tokens: 250,\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: userPrompt }\n  ]\n});\n\ntry {\n  const resp = await fetch('http://localhost:8899/v1/chat/completions', {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body,\n    signal: AbortSignal.timeout(60000)\n  });\n  const data = await resp.json();\n  return [{ json: { ...d, lora_response: data } }];\n} catch (e) {\n  return [{ json: { ...d, lora_response: { error: e.message } } }];\n}"
+      },
+      "id": "node-lora",
+      "name": "7. LoRA Soul Voice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3580, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Akashic Writeback + Final Response Assembly ──\nconst d = $input.first().json;\nconst lr = d.lora_response || {};\n\n// Extract LoRA soul voice (or fallback to collapsed)\nconst soulVoice = lr?.choices?.[0]?.message?.content || null;\nconst loraLatency = lr?.latency_ms || null;\nconst loraError = lr?.error || null;\n\n// If LoRA failed, use the collapsed expert output directly\nconst finalResponse = soulVoice || d.collapsed_response;\n\nreturn [{ json: {\n  manifested_response: finalResponse,\n  soul_voice_active: !!soulVoice,\n  expert_count: d.expert_count,\n  collapsed_response: d.collapsed_response,\n  interference: d.interference,\n  gain: d.gain,\n  interference_type: d.interference_type,\n  dominant_lobe: d.dominant_lobe,\n  experts_activated: d.gate_decision,\n  lora_model: 'weaver-fracture-1b-lora',\n  lora_latency_ms: loraLatency,\n  lora_error: loraError,\n  written_to_hub: true,\n  hub_lobe_id: 'pineal_gate',\n  original_input: d.raw_input,\n  timestamp: d.timestamp,\n  pipeline_version: 'v4-ultimate'\n} }];"
+      },
+      "id": "node-writeback",
+      "name": "8. Akashic Writeback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3800, 600]
+    }
+  ],
+  "connections": {
+    "1. Input Gateway": {
+      "main": [[{ "node": "2. Sanitize Input", "type": "main", "index": 0 }]]
+    },
+    "2. Sanitize Input": {
+      "main": [[{ "node": "3. Error Check", "type": "main", "index": 0 }]]
+    },
+    "3. Error Check": {
+      "main": [
+        [{ "node": "8. Akashic Writeback", "type": "main", "index": 0 }],
+        [{ "node": "4. Fracture + Gate", "type": "main", "index": 0 }]
+      ]
+    },
+    "4. Fracture + Gate": {
+      "main": [[{ "node": "5a. Logic Lobe", "type": "main", "index": 0 }]]
+    },
+    "5a. Logic Lobe": {
+      "main": [[{ "node": "5a-tag", "type": "main", "index": 0 }]]
+    },
+    "5a-tag": {
+      "main": [[{ "node": "5b. Emotion Lobe", "type": "main", "index": 0 }]]
+    },
+    "5b. Emotion Lobe": {
+      "main": [[{ "node": "5b-tag", "type": "main", "index": 0 }]]
+    },
+    "5b-tag": {
+      "main": [[{ "node": "5c. Memory Lobe", "type": "main", "index": 0 }]]
+    },
+    "5c. Memory Lobe": {
+      "main": [[{ "node": "5c-tag", "type": "main", "index": 0 }]]
+    },
+    "5c-tag": {
+      "main": [[{ "node": "5d. Creativity Lobe", "type": "main", "index": 0 }]]
+    },
+    "5d. Creativity Lobe": {
+      "main": [[{ "node": "5d-tag", "type": "main", "index": 0 }]]
+    },
+    "5d-tag": {
+      "main": [[{ "node": "5e. Vigilance Lobe", "type": "main", "index": 0 }]]
+    },
+    "5e. Vigilance Lobe": {
+      "main": [[{ "node": "5e-tag", "type": "main", "index": 0 }]]
+    },
+    "5e-tag": {
+      "main": [[{ "node": "6. Geometric Collapse", "type": "main", "index": 0 }]]
+    },
+    "6. Geometric Collapse": {
+      "main": [[{ "node": "7. LoRA Soul Voice", "type": "main", "index": 0 }]]
+    },
+    "7. LoRA Soul Voice": {
+      "main": [[{ "node": "8. Akashic Writeback", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "instanceId": "weaver-v4-ultimate"
+  },
+  "tags": [
+    { "name": "weaver" },
+    { "name": "akashic" },
+    { "name": "pineal-gate" },
+    { "name": "lora" },
+    { "name": "soul-voice" }
+  ]
+}

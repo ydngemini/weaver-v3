@@ -1,0 +1,51 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Dockerfile.twilio — Weaver Telephony Lobe (isolated container)
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Build:
+#   docker build -f Dockerfile.twilio -t weaver-telephony .
+#
+# Run:
+#   docker run -d --name weaver-phone \
+#     --env-file .env \
+#     -p 8765:8765 \
+#     --add-host=host.docker.internal:host-gateway \
+#     weaver-telephony
+#
+# The --add-host flag lets the container reach NexusBus on the host at
+# ws://host.docker.internal:9999 (default NEXUS_BUS_URL).
+#
+# Expose to Twilio via ngrok:
+#   ngrok http 8765
+# Then set your Twilio phone number voice webhook to:
+#   https://<ngrok-id>.ngrok-free.app/twiml
+# ──────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.12-slim
+
+LABEL maintainer="ydngemini"
+LABEL description="Weaver Telephony Lobe — Twilio ↔ OpenAI Realtime bridge"
+
+WORKDIR /app
+
+# System deps (none needed beyond pip packages)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python deps — pinned for reproducibility
+COPY requirements-twilio.txt .
+RUN pip install --no-cache-dir -r requirements-twilio.txt
+
+# App code
+COPY twilio_bridge.py .
+
+# Nexus Vault directory for transcript persistence (mount a volume for durability)
+RUN mkdir -p /app/Nexus_Vault
+
+EXPOSE 8765
+
+# Health check — FastAPI /health endpoint
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')" || exit 1
+
+CMD ["uvicorn", "twilio_bridge:app", "--host", "0.0.0.0", "--port", "8765", "--log-level", "info"]

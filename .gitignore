@@ -1,0 +1,6 @@
+# Secrets only
+.env
+token.json
+credentials.json
+ghost_key.json
+lost+found/

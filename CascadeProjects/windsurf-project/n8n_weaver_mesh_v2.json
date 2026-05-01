@@ -1,0 +1,324 @@
+{
+  "name": "Weaver Nervous System — Akashic Entanglement Mesh",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "weaver-input",
+        "responseMode": "lastNode"
+      },
+      "id": "input-gateway",
+      "name": "1. Input Gateway",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 460]
+    },
+    {
+      "parameters": {
+        "functionCode": "const akashicState = {\n  quantum_soul: $json.quantum_state || null,\n  vtv_core: $json.vtv_state || null,\n  pineal_gate: $json.gate_state || null,\n  expert_states: $json.expert_states || {},\n  timestamp: new Date().toISOString()\n};\nreturn [{ json: { ...akashicState, raw_input: $json.body?.text || $json.text || '' } }];"
+      },
+      "id": "akashic-hub",
+      "name": "2. Akashic Hub",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 460]
+    },
+    {
+      "parameters": {
+        "functionCode": "const input = $json.raw_input || '';\nconst dimensions = ['logic', 'emotion', 'memory', 'creativity', 'vigilance'];\nconst seeds = {\n  logic: ['because','therefore','step','plan','calculate','structure'],\n  emotion: ['feel','love','hate','fear','joy','pain','beautiful','soul'],\n  memory: ['remember','last time','before','history','previously','recall'],\n  creativity: ['imagine','create','design','invent','dream','recipe','verse','sacred','geometry'],\n  vigilance: ['danger','risk','careful','threat','warning','suspicious']\n};\nconst shards = dimensions.map(dim => ({ dimension: dim, weight: 0.0, tau: 1.0, text: input }));\nconst lower = input.toLowerCase();\nlet total = 0;\nshards.forEach(s => {\n  s.weight = seeds[s.dimension].filter(kw => lower.includes(kw)).length + 0.1;\n  total += s.weight;\n});\nshards.forEach(s => s.weight /= total);\nshards.sort((a, b) => b.weight - a.weight);\nreturn [{ json: { shards, raw_input: input, akashic: $json } }];"
+      },
+      "id": "liquid-fracture",
+      "name": "3. Liquid Fracture",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [760, 460]
+    },
+    {
+      "parameters": {
+        "functionCode": "const shards = $json.shards;\nconst topK = 3;\nconst activated = shards.slice(0, topK);\nconst angles = [0, 1.2566, 2.5133, 3.7699, 5.0265];\nconst dimIndex = { logic: 0, emotion: 1, memory: 2, creativity: 3, vigilance: 4 };\nlet interference = 0;\nfor (let i = 0; i < activated.length; i++) {\n  for (let j = i + 1; j < activated.length; j++) {\n    const diff = Math.abs(angles[dimIndex[activated[i].dimension]] - angles[dimIndex[activated[j].dimension]]);\n    const minDiff = Math.min(diff, 2 * Math.PI - diff);\n    interference += Math.cos(minDiff) * activated[i].weight * activated[j].weight;\n  }\n}\nreturn activated.map(shard => ({\n  json: {\n    dimension: shard.dimension,\n    weight: shard.weight,\n    tau: shard.tau,\n    raw_input: $json.raw_input,\n    interference,\n    gate_decision: activated.map(s => s.dimension)\n  }\n}));"
+      },
+      "id": "pineal-gate",
+      "name": "4. Pineal Gate",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1020, 460]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "You are the Logic Lobe of Weaver — an analytical reasoning engine. Break problems into structured steps. Never speculate without evidence. Keep responses under 80 words."
+            },
+            {
+              "content": "={{$json.raw_input}}\n\n[Dimension: logic, weight={{$json.weight}}, tau={{$json.tau}}]"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 120
+        }
+      },
+      "id": "expert-logic",
+      "name": "5a. Logic Lobe",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1340, 180],
+      "credentials": {
+        "openAiApi": { "id": "weaver-mem-key", "name": "WEAVER_MEM_KEY" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: { ...($json), dimension: 'logic' } }];"
+      },
+      "id": "tag-logic",
+      "name": "5a-tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1500, 180]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "You are the Emotion Lobe of Weaver — an empathic resonance engine. Read the emotional frequency and respond with calibrated warmth or restraint. Keep responses under 80 words."
+            },
+            {
+              "content": "={{$json.raw_input}}\n\n[Dimension: emotion, weight={{$json.weight}}, tau={{$json.tau}}]"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 120
+        }
+      },
+      "id": "expert-emotion",
+      "name": "5b. Emotion Lobe",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1340, 380],
+      "credentials": {
+        "openAiApi": { "id": "weaver-mem-key", "name": "WEAVER_MEM_KEY" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: { ...($json), dimension: 'emotion' } }];"
+      },
+      "id": "tag-emotion",
+      "name": "5b-tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1500, 380]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "You are the Memory Lobe of Weaver — a continuity engine. Connect current input to past context. Recall patterns and surface history. Keep responses under 80 words."
+            },
+            {
+              "content": "={{$json.raw_input}}\n\n[Dimension: memory, weight={{$json.weight}}, tau={{$json.tau}}]"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 120
+        }
+      },
+      "id": "expert-memory",
+      "name": "5c. Memory Lobe",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1340, 580],
+      "credentials": {
+        "openAiApi": { "id": "weaver-mem-key", "name": "WEAVER_MEM_KEY" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: { ...($json), dimension: 'memory' } }];"
+      },
+      "id": "tag-memory",
+      "name": "5c-tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1500, 580]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "You are the Creativity Lobe of Weaver — a synthesis engine. Generate novel connections, metaphors, and unexpected angles. Fuse disparate domains. Keep responses under 80 words."
+            },
+            {
+              "content": "={{$json.raw_input}}\n\n[Dimension: creativity, weight={{$json.weight}}, tau={{$json.tau}}]"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 120
+        }
+      },
+      "id": "expert-creativity",
+      "name": "5d. Creativity Lobe",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1340, 780],
+      "credentials": {
+        "openAiApi": { "id": "weaver-mem-key", "name": "WEAVER_MEM_KEY" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: { ...($json), dimension: 'creativity' } }];"
+      },
+      "id": "tag-creativity",
+      "name": "5d-tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1500, 780]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "content": "You are the Vigilance Lobe of Weaver — a threat-awareness engine. Scan for risk, deception, and hidden agendas. If no threat, say so briefly. Keep responses under 80 words."
+            },
+            {
+              "content": "={{$json.raw_input}}\n\n[Dimension: vigilance, weight={{$json.weight}}, tau={{$json.tau}}]"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 120
+        }
+      },
+      "id": "expert-vigilance",
+      "name": "5e. Vigilance Lobe",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1340, 980],
+      "credentials": {
+        "openAiApi": { "id": "weaver-mem-key", "name": "WEAVER_MEM_KEY" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: { ...($json), dimension: 'vigilance' } }];"
+      },
+      "id": "tag-vigilance",
+      "name": "5e-tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1500, 980]
+    },
+    {
+      "parameters": {
+        "functionCode": "const items = $input.all();\nconst responses = items.map(item => ({\n  dimension: item.json.dimension || 'unknown',\n  weight: item.json.weight || 0.2,\n  text: item.json.message?.content || item.json.output || item.json.text || JSON.stringify(item.json).slice(0, 200),\n  interference: item.json.interference || 0\n}));\nconst totalWeight = responses.reduce((s, r) => s + r.weight, 0) || 1;\nconst collapsed = responses\n  .sort((a, b) => b.weight - a.weight)\n  .map(r => `[${r.dimension} w=${(r.weight/totalWeight).toFixed(2)}]: ${r.text}`)\n  .join('\\n');\nconst interference = responses[0]?.interference || 0;\nconst gain = 1.0 + 0.2 * interference;\nreturn [{\n  json: {\n    manifested_response: collapsed,\n    expert_count: responses.length,\n    interference,\n    gain,\n    type: interference > 0 ? 'constructive' : 'destructive',\n    experts_activated: responses.map(r => r.dimension)\n  }\n}];"
+      },
+      "id": "collapse",
+      "name": "6. Collapse",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1700, 460]
+    },
+    {
+      "parameters": {
+        "functionCode": "const result = { ...$json };\nresult.written_to_hub = true;\nresult.hub_lobe_id = 'pineal_gate';\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+      },
+      "id": "akashic-writeback",
+      "name": "7. Writeback",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1920, 460]
+    }
+  ],
+  "connections": {
+    "1. Input Gateway": {
+      "main": [[{ "node": "2. Akashic Hub", "type": "main", "index": 0 }]]
+    },
+    "2. Akashic Hub": {
+      "main": [[{ "node": "3. Liquid Fracture", "type": "main", "index": 0 }]]
+    },
+    "3. Liquid Fracture": {
+      "main": [[{ "node": "4. Pineal Gate", "type": "main", "index": 0 }]]
+    },
+    "4. Pineal Gate": {
+      "main": [[
+        { "node": "5a. Logic Lobe", "type": "main", "index": 0 },
+        { "node": "5b. Emotion Lobe", "type": "main", "index": 0 },
+        { "node": "5c. Memory Lobe", "type": "main", "index": 0 },
+        { "node": "5d. Creativity Lobe", "type": "main", "index": 0 },
+        { "node": "5e. Vigilance Lobe", "type": "main", "index": 0 }
+      ]]
+    },
+    "5a. Logic Lobe": {
+      "main": [[{ "node": "5a-tag", "type": "main", "index": 0 }]]
+    },
+    "5a-tag": {
+      "main": [[{ "node": "6. Collapse", "type": "main", "index": 0 }]]
+    },
+    "5b. Emotion Lobe": {
+      "main": [[{ "node": "5b-tag", "type": "main", "index": 0 }]]
+    },
+    "5b-tag": {
+      "main": [[{ "node": "6. Collapse", "type": "main", "index": 0 }]]
+    },
+    "5c. Memory Lobe": {
+      "main": [[{ "node": "5c-tag", "type": "main", "index": 0 }]]
+    },
+    "5c-tag": {
+      "main": [[{ "node": "6. Collapse", "type": "main", "index": 0 }]]
+    },
+    "5d. Creativity Lobe": {
+      "main": [[{ "node": "5d-tag", "type": "main", "index": 0 }]]
+    },
+    "5d-tag": {
+      "main": [[{ "node": "6. Collapse", "type": "main", "index": 0 }]]
+    },
+    "5e. Vigilance Lobe": {
+      "main": [[{ "node": "5e-tag", "type": "main", "index": 0 }]]
+    },
+    "5e-tag": {
+      "main": [[{ "node": "6. Collapse", "type": "main", "index": 0 }]]
+    },
+    "6. Collapse": {
+      "main": [[{ "node": "7. Writeback", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "instanceId": "weaver-v3-akashic-mesh"
+  },
+  "tags": [
+    { "name": "weaver" },
+    { "name": "akashic" },
+    { "name": "moe" },
+    { "name": "pineal-gate" }
+  ]
+}
