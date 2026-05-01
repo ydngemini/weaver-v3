@@ -13,3 +13,6 @@ weaver_fracture_1B_lora/
 weaver_merged_1B/
 images/
 ghost_key.json
+weaver_env/
+.pip_cache/
+node_modules/

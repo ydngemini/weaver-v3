@@ -1,0 +1,22 @@
+{
+  "name": "@ydngemini/weaver-v3",
+  "version": "3.0.0",
+  "description": "Async multi-modal AI hive-mind with pentagon-geometry MoE, quantum circuits, and LoRA inference",
+  "main": "index.js",
+  "bin": {
+    "weaver-v3": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "ai",
+    "multi-modal",
+    "quantum",
+    "mixture-of-experts",
+    "lora"
+  ],
+  "author": "ydngemini",
+  "license": "UNLICENSED",
+  "private": false
+}

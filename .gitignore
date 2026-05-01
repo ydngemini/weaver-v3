@@ -4,3 +4,4 @@ token.json
 credentials.json
 ghost_key.json
 lost+found/
+.pip_cache/
