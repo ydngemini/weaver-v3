@@ -4,3 +4,4 @@
 *.body filter=lfs diff=lfs merge=lfs -text
 *.npz filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
+CascadeProjects/windsurf-project/.pip_cache/http/** filter=lfs diff=lfs merge=lfs -text
