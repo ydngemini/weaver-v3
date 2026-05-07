@@ -18,3 +18,5 @@ node_modules/
 cloudflared
 training_manifest.json
 logs/
+docs/The Fracture Principle*.md
+.windsurf/
