@@ -42,7 +42,8 @@ from aiohttp import web
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent, FileCreatedEvent
 from watchdog.observers import Observer
 
-NEXUS_TOPICS = ["quantum_state", "gate_decision", "lobe_status", "transcript", "phone_transcript"]
+NEXUS_TOPICS = ["quantum_state", "gate_decision", "lobe_status", "transcript", "phone_transcript",
+                 "dream_state", "sms_exchange", "proactive_pulse"]
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -338,11 +339,126 @@ async def _nexus_listener():
             _append_to_node("Nexus", "Lobe Status", f"**{lobe}**: {status}")
             print(f"[BRIDGE] 📡 Lobe status: {lobe}={status}", flush=True)
 
-        elif topic in ("transcript", "phone_transcript"):
+        elif topic == "transcript":
             text = payload.get("content") or payload.get("text", "")
             if text:
                 linked = inject_wikilinks(text[:300])
                 _append_to_node("Weaver", "Transcript", linked)
+
+        elif topic == "phone_transcript":
+            user_text = payload.get("user", "")
+            soul_voice = payload.get("soul_voice", "")
+            caller = payload.get("caller", "unknown")
+            quantum_bias = payload.get("quantum_bias", {})
+
+            if user_text:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                ts_file = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_caller = caller.replace("/", "_").replace("\\", "_")
+                note_name = f"Call_{safe_caller}_{ts_file}"
+                note_path = os.path.join(VAULT_PATH, f"{note_name}.md")
+
+                caller_link = f"[[{caller}]]" if caller != "unknown" else "Unknown caller"
+                dom = quantum_bias.get("dominant", "unknown") if quantum_bias else "unknown"
+
+                body_parts = [
+                    f"---",
+                    f"tags: [weaver, phone-call, synapse]",
+                    f"caller: {caller}",
+                    f"created: {ts}",
+                    f"quantum_pathway: {dom}",
+                    f"---",
+                    f"",
+                    f"# Phone Call — {caller_link}",
+                    f"*{ts}*",
+                    f"",
+                    f"**Caller:** {caller_link}",
+                    f"**Quantum Pathway:** [[{dom.title()}]]" if dom != "unknown" else "",
+                    f"",
+                    f"## Transcript",
+                    f"",
+                    f"**Caller:** {user_text}",
+                ]
+                if soul_voice:
+                    body_parts.append(f"")
+                    body_parts.append(f"**Soul Voice:** {soul_voice}")
+
+                linked_body = inject_wikilinks("\n".join(body_parts))
+
+                # Write as individual note or append to existing call note for same caller+minute
+                existing_pattern = f"Call_{safe_caller}_{datetime.now().strftime('%Y%m%d_%H%M')}"
+                existing_notes = [f for f in os.listdir(VAULT_PATH) if f.startswith(existing_pattern) and f.endswith(".md")]
+
+                if existing_notes:
+                    append_path = os.path.join(VAULT_PATH, existing_notes[0])
+                    append_block = f"\n\n**Caller:** {user_text}"
+                    if soul_voice:
+                        append_block += f"\n**Soul Voice:** {soul_voice}"
+                    append_block = inject_wikilinks(append_block)
+                    try:
+                        with open(append_path, "a", encoding="utf-8") as fh:
+                            fh.write(append_block)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        with open(note_path, "w", encoding="utf-8") as fh:
+                            fh.write(linked_body)
+                        print(f"[BRIDGE] 📞 Phone call note created: {note_name}.md", flush=True)
+                    except Exception as e:
+                        print(f"[BRIDGE] ⚠️  Phone note failed: {e}", flush=True)
+
+                _ensure_stub_notes([caller] if caller != "unknown" else [])
+                _append_to_node("Weaver", "Phone Call", f"{caller_link}: {user_text[:150]}")
+
+        elif topic == "dream_state":
+            dream = payload.get("dream", "")
+            dominant = payload.get("dominant", "unknown")
+            ts_str = payload.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            if dream:
+                linked_dream = inject_wikilinks(dream[:600])
+                body = f"**Quantum Pathway:** [[{dominant.title()}]]\n\n{linked_dream}"
+                _append_to_node("Weaver", "Dream State", body)
+                note_name = f"Dream_{datetime.now().strftime('%Y%m%d_%H%M')}"
+                note_path = os.path.join(VAULT_PATH, f"{note_name}.md")
+                try:
+                    with open(note_path, "w", encoding="utf-8") as fh:
+                        fh.write(
+                            f"---\ntags: [weaver, dream, synapse]\n"
+                            f"created: {ts_str}\nquantum_pathway: {dominant}\n---\n\n"
+                            f"# Dream State Reflection\n*{ts_str}*\n\n{linked_dream}\n"
+                        )
+                    print(f"[BRIDGE] 💤 Dream note created: {note_name}.md", flush=True)
+                except Exception as e:
+                    print(f"[BRIDGE] ⚠️  Dream note failed: {e}", flush=True)
+
+        elif topic == "sms_exchange":
+            sender = payload.get("from", "unknown")
+            body = payload.get("body", "")
+            reply = payload.get("reply", "")
+            media_count = payload.get("media_count", 0)
+            if body or reply:
+                content = f"**From:** {sender}\n**Message:** {body}"
+                if media_count:
+                    content += f"\n**Images:** {media_count}"
+                if reply:
+                    content += f"\n\n**Weaver's Reply:** {reply[:300]}"
+                linked = inject_wikilinks(content)
+                _append_to_node("Weaver", "SMS Exchange", linked)
+
+        elif topic == "proactive_pulse":
+            event = payload.get("event", "")
+            interference = payload.get("interference", 0)
+            lobes = payload.get("lobes", [])
+            dominant = payload.get("dominant", "unknown")
+            content = (
+                f"**Event:** {event}\n"
+                f"**Interference:** {interference:.3f}\n"
+                f"**Lobes:** {' + '.join(lobes)}\n"
+                f"**Dominant:** [[{dominant.title()}]]"
+            )
+            _append_to_node("Quantum Soul", "Proactive Pulse", inject_wikilinks(content))
+            print(f"[BRIDGE] 💓 Proactive pulse → vault", flush=True)
 
     client = NexusClient("obsidian_bridge", topics=NEXUS_TOPICS, on_message=_on_message)
     connected = await client.connect()

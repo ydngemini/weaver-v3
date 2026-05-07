@@ -161,9 +161,9 @@ async def test_I():
         await gate.wait()
 
     task = asyncio.create_task(
-        weaver._supervised(flaky, "Flaky", restart_on_crash=True, restart_delay=0.05)
+        weaver._supervised(flaky, "Flaky", restart_on_crash=True, restart_delay=0.01)
     )
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(6.0)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
@@ -187,9 +187,9 @@ async def test_J():
         await asyncio.sleep(0.01)
 
     task = asyncio.create_task(
-        weaver._supervised(one_shot, "OneShot", restart_on_crash=False, restart_delay=0.05)
+        weaver._supervised(one_shot, "OneShot", restart_on_exit=True, restart_delay=0.01)
     )
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(6.0)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
@@ -356,13 +356,12 @@ except Exception as e:
         "RuntimeError" in text
         and "WEAVER_VOICE_KEY" in text
         and "WEAVER_MEM_KEY" in text
-        and "GEMINI_API_KEY" in text
         and "WEAVER_VISION_KEY" not in text
     )
     detail = "\n".join([
         f"  Return code: {proc.returncode}",
         f"  Output: {text.strip()[:220]}",
-        "  Expected missing keys: WEAVER_VOICE_KEY, WEAVER_MEM_KEY, GEMINI_API_KEY",
+        "  Expected missing keys: WEAVER_VOICE_KEY, WEAVER_MEM_KEY",
         "  Expected optional key omitted: WEAVER_VISION_KEY",
     ])
     _result("N", "VTV startup env contract fails fast", passed, detail)

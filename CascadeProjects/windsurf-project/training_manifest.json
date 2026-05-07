@@ -1,0 +1,16 @@
+{
+  "dataset_path": "/media/ydn/SYPHER_CORE/weaver v3/CascadeProjects/windsurf-project/weaver_soul_dataset.jsonl",
+  "total_samples": 90,
+  "valid_samples": 90,
+  "invalid_samples": 0,
+  "avg_input_chars": 68.0,
+  "avg_output_chars": 345.8,
+  "governor_config": {
+    "qpu_time_box_seconds": 600,
+    "tau_base": 0.5,
+    "lambda_rate": 0.01,
+    "adaptive_threshold_formula": "tau_t = tau_base + lambda * (N_calls / delta_t)",
+    "description": "T_max = 600s (10-minute QPU session cap). Adaptive threshold tau_t rises with call density to prevent rate-limiting during entropy spikes."
+  },
+  "errors": []
+}

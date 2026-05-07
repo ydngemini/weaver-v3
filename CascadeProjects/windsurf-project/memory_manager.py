@@ -38,6 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 import numpy as np
 
 
@@ -271,7 +272,46 @@ class MemoryManager:
         elif event_type == "vector":
             await self.akashic.write(event)
 
-    def build_phone_context(self) -> str:
+    async def fetch_quantum_bias(self, url: str = "http://localhost:9997/quantum/bias",
+                                  timeout: float = 3.0) -> Dict[str, Any]:
+        """Fetch current quantum routing bias from the Quantum API."""
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, timeout=timeout)
+                if r.status_code == 200:
+                    return r.json()
+        except Exception:
+            pass
+        return {"dominant": "unknown", "weights": {}, "last_measurement": None}
+
+    async def update_people_from_transcript(self, lc_llm, transcript_block: str) -> str:
+        """Use LangChain LLM to extract and merge people facts from a transcript.
+
+        Returns the updated people markdown string.
+        """
+        from langchain_core.messages import HumanMessage, SystemMessage
+        current = self.people.get_all()
+        prompt = [
+            SystemMessage(content=(
+                "You are Weaver's people memory. Extract every person mentioned "
+                "in the conversation: their name, relationship to the caller, "
+                "and any key facts (job, personality, topics discussed). "
+                "If the existing list already has an entry, merge and update it. "
+                "Return ONLY the updated people list in markdown bullet format. "
+                "If no new people are mentioned, return the existing list unchanged."
+            )),
+        ]
+        if current:
+            prompt.append(HumanMessage(content=f"Existing people list:\n{current}"))
+        prompt.append(HumanMessage(content=f"Conversation:\n{transcript_block}"))
+        result = await lc_llm.ainvoke(prompt)
+        updated = result.content.strip()
+        if updated and updated != current:
+            self.people._content = updated
+            self.people.people_path.write_text(updated, encoding="utf-8")
+        return updated
+
+    def build_phone_context(self, quantum_bias: Optional[Dict] = None) -> str:
         """Build memory context for phone calls (combines all sources)."""
         parts = []
 
@@ -286,6 +326,12 @@ class MemoryManager:
         main_summary = self.conversations.get_summary(source="main", chars=2000)
         if main_summary:
             parts.append(f"## CONVERSATION MEMORY:\n{main_summary[-1000:]}\n")
+
+        if quantum_bias and quantum_bias.get("dominant", "unknown") != "unknown":
+            dom = quantum_bias["dominant"]
+            weights = quantum_bias.get("weights", {})
+            w_str = ", ".join(f"{k}={v:.2f}" for k, v in weights.items()) if weights else "N/A"
+            parts.append(f"## QUANTUM STATE:\nDominant pathway: {dom}\nWeights: {w_str}\n")
 
         return "\n".join(parts)
 

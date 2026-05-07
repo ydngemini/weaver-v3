@@ -1,0 +1,48 @@
+# ═══════════════════════════════════════════════════════════════
+# Weaver v3 — Core Runtime Dependencies (no LoRA training)
+# ═══════════════════════════════════════════════════════════════
+# Use this for lean containers / CI / prod deploys.
+# Full freeze with all transitive deps: requirements.txt
+
+# Core framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+websockets>=13.0
+aiohttp>=3.10.0
+python-dotenv>=1.0.0
+tenacity>=9.0.0
+numpy>=2.0.0
+psutil>=6.0.0
+
+# AI / LLM
+openai>=1.50.0
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-core>=0.3.0
+
+# Telephony
+twilio>=9.0.0
+
+# Vision / Face Recognition
+opencv-python-headless>=4.10.0
+insightface>=0.7.3
+onnxruntime>=1.19.0
+scikit-learn>=1.5.0
+
+# Quantum
+qiskit>=2.0.0
+qiskit-ibm-runtime>=0.30.0
+
+# Obsidian Bridge
+watchdog>=5.0.0
+
+# Google Drive (optional)
+google-api-python-client>=2.140.0
+google-auth>=2.30.0
+google-auth-oauthlib>=1.2.0
+
+# LoRA inference (CPU-compatible, no training deps)
+torch>=2.4.0
+transformers>=4.44.0
+peft>=0.12.0

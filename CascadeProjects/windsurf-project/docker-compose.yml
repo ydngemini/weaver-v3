@@ -1,0 +1,87 @@
+# ═══════════════════════════════════════════════════════════════
+# Weaver v3 — Docker Compose Full Stack
+# ═══════════════════════════════════════════════════════════════
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f weaver # Follow Weaver logs
+#   docker compose down           # Stop all
+#
+# For local dev (no Docker): use `make run` or `./start_weaver.sh`
+
+services:
+  # ── Weaver Core (master launcher) ──────────────────────────
+  weaver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: weaver-core
+    env_file: .env
+    environment:
+      - NEXUS_BUS_URL=ws://localhost:9999
+      - LORA_API_URL=http://localhost:8899/v1/chat/completions
+      - QUANTUM_BIAS_URL=http://localhost:9997/quantum/bias
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/weaver-input
+    ports:
+      - "8765:8765"     # Phone Bridge
+      - "8899:8899"     # LoRA Server
+      - "9996:9996"     # Health Dashboard
+      - "9997:9997"     # Quantum API
+      - "9995:9995"     # Akashic Hub API
+      - "9998:9998"     # Nexus Bus Health
+      - "9999:9999"     # Nexus Bus
+    volumes:
+      - nexus_vault:/app/Nexus_Vault
+      - obsidian_vault:/root/Weaver_Vault
+      - ./weaver_fracture_1B_lora:/app/weaver_fracture_1B_lora:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9996/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+
+  # ── n8n Workflow Engine ────────────────────────────────────
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: weaver-n8n
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - WEBHOOK_URL=http://n8n:5678/
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+  # ── ngrok Tunnel (Twilio webhook) ──────────────────────────
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: weaver-ngrok
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+    command: http weaver:8765
+    ports:
+      - "4040:4040"     # ngrok dashboard
+    depends_on:
+      weaver:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - tunnel
+
+volumes:
+  nexus_vault:
+    driver: local
+  obsidian_vault:
+    driver: local
+  n8n_data:
+    driver: local

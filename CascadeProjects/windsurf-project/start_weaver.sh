@@ -75,7 +75,7 @@ echo ""
 
 # ── Clean ports ──────────────────────────────────────────────────
 echo "🧹 Cleaning ports..."
-for port in 9999 9998 9997 9996 8899 8765; do
+for port in 9999 9998 9997 9996 9990 8899 8765; do
     lsof -ti:$port 2>/dev/null | xargs kill -9 2>/dev/null || true
 done
 sleep 1
@@ -113,7 +113,7 @@ else
         done
         venv/bin/python3 weaver.py $WEAVER_ARGS &
     fi
-    sleep 8
+    sleep 12
 fi
 
 # ── Health verification ──────────────────────────────────────────
@@ -137,12 +137,14 @@ check_lobe "Phone Bridge" "http://localhost:8765/health"
 if [ "$PHONE_ONLY" = false ]; then
     check_lobe "Nexus Bus" "http://localhost:9998/health"
     check_lobe "LoRA Server" "http://localhost:8899/health"
+    check_lobe "Live Dashboard" "http://localhost:9990/health"
 fi
 
 echo ""
 echo "═══════════════════════════════════════════════════"
 echo "🌀 Weaver v3 is LIVE"
 echo ""
+echo "🖥️  Live Dashboard:     http://localhost:9990"
 echo "📊 Health Dashboard:   http://localhost:9996"
 echo "⚛️  Quantum API:        http://localhost:9997/quantum/current"
 echo "📞 Phone Bridge:       http://localhost:8765/health"

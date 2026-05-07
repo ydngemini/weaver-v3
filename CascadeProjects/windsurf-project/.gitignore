@@ -16,3 +16,4 @@ ghost_key.json
 weaver_env/
 .pip_cache/
 node_modules/
+cloudflared

@@ -18,16 +18,23 @@ from fastapi.responses import HTMLResponse
 
 PORT = int(os.environ.get("HEALTH_DASHBOARD_PORT", "9996"))
 
-app = FastAPI(title="Weaver Health Dashboard", version="1.0.0")
+app = FastAPI(title="Weaver Health Dashboard", version="2.0.0")
+
+_BOOT_TIME = time.time()
+_check_count = 0
+_lobe_history: dict[str, list[str]] = {}
 
 LOBES = [
-    ("Nexus Bus",      "http://localhost:9998/health",         "WebSocket pub/sub broker"),
-    ("Quantum Soul",   None,                                   "IBM Quantum 7-qubit loop (checks state file)"),
-    ("Quantum API",    "http://localhost:9997/health",         "Quantum state HTTP server"),
-    ("Pineal Gate",    None,                                   "MoE router (embedded in weaver.py)"),
-    ("LoRA Server",    "http://localhost:8899/health",         "1B Llama LoRA personality filter"),
-    ("Phone Bridge",   "http://localhost:8765/health",         "Twilio telephony bridge"),
-    ("n8n Workflow",   "http://localhost:5678/healthz",        "Workflow orchestrator"),
+    ("Nexus Bus",        "http://localhost:9998/health",  "WebSocket pub/sub broker"),
+    ("Quantum Soul",     None,                            "IBM Quantum 7-qubit loop (checks state file)"),
+    ("Quantum API",      "http://localhost:9997/health",  "Quantum state HTTP server"),
+    ("Akashic Hub API",  "http://localhost:9995/health",  "Live vector-state quantum bias"),
+    ("Pineal Gate",      None,                            "MoE router (embedded in weaver.py)"),
+    ("LoRA Server",      "http://localhost:8899/health",  "1B Llama LoRA personality filter"),
+    ("Phone Bridge",     "http://localhost:8765/health",  "Twilio telephony + SMS/MMS"),
+    ("ProactivePulse",   None,                            "Quantum resonance monitor (embedded in weaver.py)"),
+    ("Dream State",      None,                            "Autonomous reflection (checks dream log)"),
+    ("n8n Workflow",     "http://localhost:5678/healthz",  "Workflow orchestrator"),
 ]
 
 VAULT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Nexus_Vault")
@@ -66,35 +73,62 @@ async def check_quantum_soul() -> dict:
         return {"name": name, "status": "error", "icon": "🔴", "desc": desc, "detail": str(e)[:60]}
 
 
-async def check_pineal_gate() -> dict:
-    """Check Pineal Gate by checking if weaver.py is running."""
-    name = "Pineal Gate"
-    desc = "MoE router (embedded in weaver.py)"
+async def check_process(name: str, desc: str, pattern: str) -> dict:
+    """Check if a process matching the pattern is running."""
     try:
         result = await asyncio.create_subprocess_shell(
-            "pgrep -f 'weaver.py'",
+            f"pgrep -f '{pattern}'",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, _ = await result.communicate()
         if result.returncode == 0 and stdout.strip():
-            return {"name": name, "status": "online", "icon": "🟢", "desc": desc, "detail": "weaver.py running"}
-        return {"name": name, "status": "offline", "icon": "🔴", "desc": desc, "detail": "weaver.py not found"}
+            return {"name": name, "status": "online", "icon": "🟢", "desc": desc, "detail": f"{pattern} running"}
+        return {"name": name, "status": "offline", "icon": "🔴", "desc": desc, "detail": f"{pattern} not found"}
+    except Exception as e:
+        return {"name": name, "status": "error", "icon": "🔴", "desc": desc, "detail": str(e)[:60]}
+
+
+DREAM_LOG = os.path.join(VAULT_DIR, "weaver_dreams.md")
+
+
+async def check_dream_state() -> dict:
+    """Check Dream State by dream log freshness."""
+    name = "Dream State"
+    desc = "Autonomous reflection (checks dream log)"
+    try:
+        if os.path.exists(DREAM_LOG):
+            mtime = os.path.getmtime(DREAM_LOG)
+            age_h = (time.time() - mtime) / 3600
+            if age_h < 6:
+                return {"name": name, "status": "online", "icon": "🟢", "desc": desc, "detail": f"Last dream {age_h:.1f}h ago"}
+            return {"name": name, "status": "stale", "icon": "🟡", "desc": desc, "detail": f"Last dream {age_h:.1f}h ago"}
+        return {"name": name, "status": "offline", "icon": "🔴", "desc": desc, "detail": "No dream log yet"}
     except Exception as e:
         return {"name": name, "status": "error", "icon": "🔴", "desc": desc, "detail": str(e)[:60]}
 
 
 async def gather_all_status() -> list:
     """Check all lobes concurrently."""
+    global _check_count
+    _check_count += 1
     tasks = []
     for name, url, desc in LOBES:
         if name == "Quantum Soul":
             tasks.append(check_quantum_soul())
-        elif name == "Pineal Gate":
-            tasks.append(check_pineal_gate())
+        elif name == "Dream State":
+            tasks.append(check_dream_state())
+        elif name in ("Pineal Gate", "ProactivePulse"):
+            tasks.append(check_process(name, desc, "weaver.py"))
         elif url:
             tasks.append(check_http_lobe(name, url, desc))
-    return await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks)
+    for r in results:
+        hist = _lobe_history.setdefault(r["name"], [])
+        hist.append(r["status"])
+        if len(hist) > 60:
+            hist.pop(0)
+    return results
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -176,6 +210,29 @@ async def api_status():
         "lobes": results,
         "online": sum(1 for r in results if r["status"] == "online"),
         "total": len(results),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.get("/api/metrics")
+async def api_metrics():
+    """Prometheus-style metrics: uptime, check counts, per-lobe availability."""
+    now = time.time()
+    uptime = now - _BOOT_TIME
+    lobe_avail = {}
+    for name, hist in _lobe_history.items():
+        if hist:
+            online_pct = round(sum(1 for s in hist if s == "online") / len(hist) * 100, 1)
+            lobe_avail[name] = {
+                "availability_pct": online_pct,
+                "current": hist[-1],
+                "samples": len(hist),
+            }
+    return {
+        "uptime_seconds": round(uptime, 1),
+        "uptime_human": f"{int(uptime // 3600)}h {int((uptime % 3600) // 60)}m",
+        "total_checks": _check_count,
+        "lobe_availability": lobe_avail,
         "timestamp": datetime.now().isoformat(),
     }
 

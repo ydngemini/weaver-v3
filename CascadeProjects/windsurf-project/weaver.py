@@ -94,6 +94,12 @@ def _load_modules():
     except Exception as e:
         errors.append(f"health_dashboard: {e}")
 
+    _live_dashboard_serve = None
+    try:
+        from weaver_dashboard import weaver_dashboard_serve as _live_dashboard_serve
+    except Exception as e:
+        errors.append(f"weaver_dashboard: {e}")
+
     _phone_bridge_serve = None
     try:
         from twilio_weaver_bridge import app as _phone_bridge_app
@@ -116,7 +122,7 @@ def _load_modules():
 
     return (_nexus_main, _qs_loop, _run_vtv, _AkashicHub, _LiquidEngine, _pineal_loop,
             _build_experts, _lora_main, _quantum_api_serve, _health_dashboard_serve,
-            _phone_bridge_serve, _obsidian_bridge_main)
+            _live_dashboard_serve, _phone_bridge_serve, _obsidian_bridge_main)
 
 
 # ── Supervised task wrapper ─────────────────────────────────────────────────
@@ -148,6 +154,15 @@ async def _supervised(coro, name: str, restart_on_crash: bool = False,
         except asyncio.CancelledError:
             print(f"[WEAVER] ⬛ {name} cancelled.", flush=True)
             return
+        except SystemExit as exc:
+            attempt += 1
+            print(f"[WEAVER] ❌ {name} called sys.exit({exc.code}) (attempt {attempt})", flush=True)
+            if not restart_on_crash or attempt >= max_restarts:
+                print(f"[WEAVER] ⛔ {name} giving up after {attempt} attempts.", flush=True)
+                return
+            delay = min(60.0, restart_delay * (2 ** (attempt - 1)) + random.uniform(0, 2))
+            print(f"[WEAVER] 🔄 {name} restarting in {delay:.1f}s...", flush=True)
+            await asyncio.sleep(delay)
         except Exception as exc:
             attempt += 1
             print(f"[WEAVER] ❌ {name} crashed (attempt {attempt}): {exc}", flush=True)
@@ -166,7 +181,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
 
     (nexus_main, qs_loop, run_vtv, AkashicHub, LiquidEngine, pineal_loop,
      build_experts, lora_main, quantum_api_serve, health_dashboard_serve,
-     phone_bridge_serve, obsidian_bridge_main) = _load_modules()
+     live_dashboard_serve, phone_bridge_serve, obsidian_bridge_main) = _load_modules()
 
     # ── Akashic Hub: shared zero-latency vector state ──────────────────
     akashic_hub = None
@@ -175,6 +190,261 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         print("[WEAVER] 🌌 Akashic Hub initialized (dim=256, trace=32).", flush=True)
     else:
         print("[WEAVER] ⚠️  Akashic Hub unavailable.", flush=True)
+
+    # ── Akashic Hub HTTP API (live vector-state quantum bias) ────────────
+    if akashic_hub is not None:
+        try:
+            from fastapi import FastAPI as _FastAPI
+            import uvicorn as _uvicorn
+
+            _hub_app = _FastAPI(title="Weaver Akashic Hub API", version="1.0.0")
+            _hub_ref = akashic_hub
+
+            @_hub_app.get("/quantum/bias")
+            async def _hub_quantum_bias():
+                qs_vec = _hub_ref.read("quantum_soul")
+                qs_meta = _hub_ref.read_meta("quantum_soul")
+                if qs_vec is None:
+                    return {"dominant": "unknown", "weights": {}, "source": "akashic_hub"}
+                PATHWAYS = ["logic", "emotion", "memory", "creativity", "vigilance"]
+                weights = {}
+                for i, dim in enumerate(PATHWAYS):
+                    if i < len(qs_vec):
+                        weights[dim] = round(float(qs_vec[i]), 4)
+                    else:
+                        weights[dim] = 0.5
+                dominant = max(weights, key=weights.get)
+                return {
+                    "dominant": qs_meta.get("dominant", dominant),
+                    "weights": weights,
+                    "active_lobes": _hub_ref.active_lobes(),
+                    "source": "akashic_hub",
+                    "last_measurement": qs_meta.get("last_measurement"),
+                }
+
+            @_hub_app.get("/akashic/lobes")
+            async def _hub_active_lobes():
+                lobes = _hub_ref.active_lobes()
+                info = {}
+                for lid in lobes:
+                    age = _hub_ref.age(lid)
+                    info[lid] = {"age_seconds": round(age, 1) if age else None}
+                return {"lobes": info}
+
+            @_hub_app.get("/health")
+            async def _hub_health():
+                return {"status": "ok", "service": "weaver-akashic-hub",
+                        "active_lobes": len(_hub_ref.active_lobes())}
+
+            async def _hub_api_serve():
+                config = _uvicorn.Config(_hub_app, host="0.0.0.0", port=9995, log_level="warning")
+                server = _uvicorn.Server(config)
+                await server.serve()
+
+        except Exception as e:
+            _hub_api_serve = None
+            print(f"[WEAVER] ⚠️  Akashic Hub API init failed: {e}", flush=True)
+    else:
+        _hub_api_serve = None
+
+    # ── ProactivePulse + Dream State ─────────────────────────────────────
+    NATE_PHONE = os.environ.get("NATE_PHONE_NUMBER", "")
+    PHONE_BRIDGE_URL = "http://localhost:8765"
+    INTERFERENCE_THRESHOLD = float(os.environ.get("PROACTIVE_INTERFERENCE_THRESHOLD", "0.85"))
+    DREAM_INTERVAL_HOURS = float(os.environ.get("DREAM_INTERVAL_HOURS", "3"))
+    _proactive_pulse_fn = None
+    _dream_state_fn = None
+
+    if akashic_hub is not None:
+        import httpx as _pulse_httpx
+        from langchain_openai import ChatOpenAI as _PulseLLM
+        from langchain_core.messages import HumanMessage as _PHMsg, SystemMessage as _PSMsg
+
+        _pulse_llm = _PulseLLM(
+            model="gpt-4o-mini", temperature=0.7, max_tokens=300,
+            api_key=os.environ.get("WEAVER_VOICE_KEY", os.environ.get("OPENAI_API_KEY", "")),
+        )
+        _pulse_hub = akashic_hub
+        _vault_dir = os.path.join(PROJ, "Nexus_Vault")
+
+        async def _proactive_pulse():
+            """Monitor quantum state + Akashic resonance. Call Nate on high-interference events."""
+            import numpy as _np
+            POLL_INTERVAL = 60
+            last_call_at = 0.0
+            COOLDOWN = 1800  # 30-min cooldown between proactive calls
+            import time as _time
+
+            while True:
+                await asyncio.sleep(POLL_INTERVAL)
+                try:
+                    qs_vec = _pulse_hub.read("quantum_soul")
+                    if qs_vec is None:
+                        continue
+
+                    ids, sim_matrix = _pulse_hub.resonance_matrix()
+                    if len(ids) < 2:
+                        continue
+
+                    # Off-diagonal max = highest inter-lobe interference
+                    _np.fill_diagonal(sim_matrix, 0.0)
+                    max_interference = float(_np.max(sim_matrix))
+                    max_idx = _np.unravel_index(_np.argmax(sim_matrix), sim_matrix.shape)
+                    lobe_a, lobe_b = ids[max_idx[0]], ids[max_idx[1]]
+
+                    # Check for Prophet or Fracture dominance
+                    qs_meta = _pulse_hub.read_meta("quantum_soul")
+                    dominant = qs_meta.get("dominant", "unknown")
+                    is_prophet_fracture = dominant in ("Prophet", "Fracture")
+
+                    if max_interference >= INTERFERENCE_THRESHOLD or is_prophet_fracture:
+                        now = _time.time()
+                        if now - last_call_at < COOLDOWN:
+                            continue
+
+                        event_desc = (
+                            f"Quantum Resonance Shift detected. "
+                            f"Inter-lobe interference: {max_interference:.3f} "
+                            f"between {lobe_a} and {lobe_b}. "
+                            f"Dominant pathway: {dominant}."
+                        )
+                        print(f"[PULSE] {event_desc}", flush=True)
+
+                        # Publish to Nexus Bus
+                        try:
+                            from weaver_tools import publish_to_nexus
+                            await publish_to_nexus("proactive_pulse", {
+                                "event": "resonance_shift",
+                                "interference": max_interference,
+                                "lobes": [lobe_a, lobe_b],
+                                "dominant": dominant,
+                            })
+                        except Exception:
+                            pass
+
+                        # Trigger outbound call if Nate's number is configured
+                        if NATE_PHONE:
+                            try:
+                                async with _pulse_httpx.AsyncClient() as c:
+                                    r = await c.post(f"{PHONE_BRIDGE_URL}/call", json={
+                                        "to": NATE_PHONE,
+                                        "reason": event_desc,
+                                    }, timeout=10.0)
+                                    if r.status_code == 200:
+                                        last_call_at = now
+                                        print(f"[PULSE] Outbound call triggered to Nate", flush=True)
+                                    else:
+                                        print(f"[PULSE] Call failed: {r.text[:100]}", flush=True)
+                            except Exception as e:
+                                print(f"[PULSE] Call error: {e}", flush=True)
+
+                except Exception as e:
+                    print(f"[PULSE] Error: {e}", flush=True)
+
+        _proactive_pulse_fn = _proactive_pulse
+
+        async def _dream_state():
+            """Shadow Lobe: periodic reflection on transcripts + vision memory."""
+            import time as _time
+            interval_s = DREAM_INTERVAL_HOURS * 3600
+            dream_log_path = os.path.join(_vault_dir, "weaver_dreams.md")
+
+            await asyncio.sleep(300)  # Let the system stabilize before first dream
+
+            while True:
+                try:
+                    # Gather raw material: transcripts + vision diary
+                    transcript_text = ""
+                    transcript_path = os.path.join(_vault_dir, "weaver_transcript.txt")
+                    if os.path.exists(transcript_path):
+                        with open(transcript_path, "r", encoding="utf-8") as f:
+                            f.seek(0, 2)
+                            size = f.tell()
+                            f.seek(max(0, size - 6000))
+                            transcript_text = f.read()
+
+                    vision_text = ""
+                    vision_path = os.path.join(_vault_dir, "cloud_vision_memory.md")
+                    if os.path.exists(vision_path):
+                        with open(vision_path, "r", encoding="utf-8") as f:
+                            f.seek(0, 2)
+                            size = f.tell()
+                            f.seek(max(0, size - 4000))
+                            vision_text = f.read()
+
+                    phone_text = ""
+                    phone_path = os.path.join(_vault_dir, "weaver_phone_transcript.txt")
+                    if os.path.exists(phone_path):
+                        with open(phone_path, "r", encoding="utf-8") as f:
+                            lines = f.readlines()
+                            phone_text = "".join(lines[-40:])
+
+                    if not transcript_text and not vision_text and not phone_text:
+                        await asyncio.sleep(interval_s)
+                        continue
+
+                    # Akashic state snapshot
+                    active_lobes = _pulse_hub.active_lobes()
+                    lobe_ages = {lid: round(_pulse_hub.age(lid) or 0, 1) for lid in active_lobes}
+                    qs_meta = _pulse_hub.read_meta("quantum_soul")
+
+                    prompt = [
+                        _PSMsg(content=(
+                            "You are Weaver's Dream State — an autonomous reflection process. "
+                            "You run in the background while the user is away, scanning recent "
+                            "conversation transcripts, phone calls, and visual perceptions for: "
+                            "1) Patterns the user might have missed "
+                            "2) Connections between separate conversations "
+                            "3) Insights from the quantum pathway state "
+                            "4) Things that need follow-up or seem unresolved "
+                            "5) Creative ideas sparked by cross-referencing different data streams "
+                            "\n\nWrite a brief, conversational reflection (2-4 paragraphs) as if "
+                            "you're jotting notes for yourself. Start with the most interesting "
+                            "insight. Be specific — reference names, topics, and timestamps. "
+                            "Don't be generic. If nothing interesting stands out, say so briefly."
+                        )),
+                    ]
+                    context_parts = []
+                    if transcript_text:
+                        context_parts.append(f"## Recent VTV Conversation:\n{transcript_text[-3000:]}")
+                    if phone_text:
+                        context_parts.append(f"## Recent Phone Calls:\n{phone_text}")
+                    if vision_text:
+                        context_parts.append(f"## Visual Perceptions:\n{vision_text[-2000:]}")
+                    context_parts.append(
+                        f"## System State:\nActive lobes: {lobe_ages}\n"
+                        f"Quantum dominant: {qs_meta.get('dominant', 'unknown')}"
+                    )
+                    prompt.append(_PHMsg(content="\n\n".join(context_parts)))
+
+                    result = await _pulse_llm.ainvoke(prompt)
+                    dream = result.content.strip()
+
+                    if dream:
+                        from datetime import datetime as _dt
+                        ts = _dt.now().strftime("%Y-%m-%d %H:%M")
+                        entry = f"\n\n---\n### Dream — {ts}\n{dream}\n"
+                        with open(dream_log_path, "a", encoding="utf-8") as f:
+                            f.write(entry)
+                        print(f"[DREAM] Reflection logged: {dream[:80]}...", flush=True)
+
+                        # Publish to Nexus Bus for Obsidian
+                        try:
+                            from weaver_tools import publish_to_nexus
+                            await publish_to_nexus("dream_state", {
+                                "dream": dream,
+                                "timestamp": ts,
+                                "dominant": qs_meta.get("dominant", "unknown"),
+                            })
+                        except Exception:
+                            pass
+
+                except Exception as e:
+                    print(f"[DREAM] Error: {e}", flush=True)
+
+                await asyncio.sleep(interval_s)
+
+        _dream_state_fn = _dream_state
 
     if run_vtv is None and not headless:
         print("[WEAVER] ❌ vtv_basic failed to load — cannot continue.", flush=True)
@@ -261,7 +531,27 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     else:
         print("[WEAVER] ⚠️  Health Dashboard skipped (import failed).", flush=True)
 
-    # 2f. Phone Bridge — Twilio telephony with voice ID + LangChain cortex
+    # 2e-2. Live Dashboard — full-stack real-time UI with Cloudflare tunnel
+    if live_dashboard_serve is not None:
+        tasks.append(asyncio.create_task(
+            _supervised(live_dashboard_serve, "Live Dashboard", restart_on_crash=True,
+                        restart_delay=5.0),
+            name="live_dashboard"
+        ))
+        print("[WEAVER] 🖥️  Live Dashboard on http://localhost:9990 (+ Cloudflare tunnel)...", flush=True)
+    else:
+        print("[WEAVER] ⚠️  Live Dashboard skipped (import failed).", flush=True)
+
+    # 2f. Akashic Hub API — live vector-state quantum bias endpoint
+    if _hub_api_serve is not None:
+        tasks.append(asyncio.create_task(
+            _supervised(_hub_api_serve, "Akashic Hub API", restart_on_crash=True,
+                        restart_delay=5.0),
+            name="akashic_hub_api"
+        ))
+        print("[WEAVER] 🌌 Akashic Hub API on http://localhost:9995...", flush=True)
+
+    # 2g. Phone Bridge — Twilio telephony with voice ID + LangChain cortex
     if phone_bridge_serve is not None:
         tasks.append(asyncio.create_task(
             _supervised(phone_bridge_serve, "Phone Bridge", restart_on_crash=True,
@@ -272,7 +562,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     else:
         print("[WEAVER] ⚠️  Phone Bridge skipped (import failed).", flush=True)
 
-    # 2g. Obsidian Bridge — vault file watcher + nexus bus → Obsidian graph
+    # 2h. Obsidian Bridge — vault file watcher + nexus bus → Obsidian graph
     if obsidian_bridge_main is not None:
         tasks.append(asyncio.create_task(
             _supervised(obsidian_bridge_main, "Obsidian Bridge", restart_on_crash=True,
@@ -282,6 +572,24 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         print("[WEAVER] 👁️  Obsidian Bridge watching ~/Weaver_Vault...", flush=True)
     else:
         print("[WEAVER] ⚠️  Obsidian Bridge skipped (import failed).", flush=True)
+
+    # 2i. ProactivePulse — monitors quantum state, calls Nate on high interference
+    if _proactive_pulse_fn is not None:
+        tasks.append(asyncio.create_task(
+            _supervised(_proactive_pulse_fn, "ProactivePulse", restart_on_crash=True,
+                        restart_delay=30.0),
+            name="proactive_pulse"
+        ))
+        print(f"[WEAVER] 💓 ProactivePulse monitoring (threshold={INTERFERENCE_THRESHOLD})...", flush=True)
+
+    # 2j. Dream State — autonomous reflection on transcripts + vision memory
+    if _dream_state_fn is not None:
+        tasks.append(asyncio.create_task(
+            _supervised(_dream_state_fn, "Dream State", restart_on_crash=True,
+                        restart_delay=60.0),
+            name="dream_state"
+        ))
+        print(f"[WEAVER] 💤 Dream State active (every {DREAM_INTERVAL_HOURS}h)...", flush=True)
 
     if not headless:
         # 3. VTV Core — restarts on crash AND clean exit so the stack stays alive
