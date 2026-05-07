@@ -4,7 +4,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const VENV_PATH = path.join(process.cwd(), 'weaver_env');
+const VENV_PATH = path.join(process.cwd(), 'venv');
 
 function setupEnvironment() {
     console.log('Checking Weaver V3 dependencies...');
