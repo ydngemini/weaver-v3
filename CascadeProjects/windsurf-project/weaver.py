@@ -82,6 +82,12 @@ def _load_modules():
     except Exception as e:
         errors.append(f"lora_server: {e}")
 
+    _qwen3b_main = None
+    try:
+        from qwen3b_server import main as _qwen3b_main
+    except Exception as e:
+        errors.append(f"qwen3b_server: {e}")
+
     _quantum_api_serve = None
     try:
         from quantum_api import quantum_api_serve as _quantum_api_serve
@@ -121,8 +127,9 @@ def _load_modules():
         print(f"  ⚠️  Import warning — {err}", flush=True)
 
     return (_nexus_main, _qs_loop, _run_vtv, _AkashicHub, _LiquidEngine, _pineal_loop,
-            _build_experts, _lora_main, _quantum_api_serve, _health_dashboard_serve,
-            _live_dashboard_serve, _phone_bridge_serve, _obsidian_bridge_main)
+            _build_experts, _lora_main, _qwen3b_main, _quantum_api_serve,
+            _health_dashboard_serve, _live_dashboard_serve, _phone_bridge_serve,
+            _obsidian_bridge_main)
 
 
 # ── Supervised task wrapper ─────────────────────────────────────────────────
@@ -180,8 +187,9 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     print(BANNER, flush=True)
 
     (nexus_main, qs_loop, run_vtv, AkashicHub, LiquidEngine, pineal_loop,
-     build_experts, lora_main, quantum_api_serve, health_dashboard_serve,
-     live_dashboard_serve, phone_bridge_serve, obsidian_bridge_main) = _load_modules()
+     build_experts, lora_main, qwen3b_main, quantum_api_serve,
+     health_dashboard_serve, live_dashboard_serve, phone_bridge_serve,
+     obsidian_bridge_main) = _load_modules()
 
     # ── Akashic Hub: shared zero-latency vector state ──────────────────
     akashic_hub = None
@@ -508,6 +516,20 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         print("[WEAVER] 🧠 LoRA Soul Voice server on http://localhost:8899...", flush=True)
     else:
         print("[WEAVER] ⚠️  LoRA Soul Voice skipped (import failed).", flush=True)
+
+    # 2c-b. Qwen2 3B — local 3B inference server for n8n pipeline (parallel with LoRA)
+    if qwen3b_main is not None:
+        async def _run_qwen3b():
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, qwen3b_main)
+        tasks.append(asyncio.create_task(
+            _supervised(_run_qwen3b, "Qwen2 3B", restart_on_crash=True,
+                        restart_delay=10.0),
+            name="qwen3b_server"
+        ))
+        print("[WEAVER] 🧠 Qwen2 3B server on http://localhost:8898...", flush=True)
+    else:
+        print("[WEAVER] ⚠️  Qwen2 3B skipped (import failed).", flush=True)
 
     # 2d. Quantum API — serves quantum state via HTTP
     if quantum_api_serve is not None:
