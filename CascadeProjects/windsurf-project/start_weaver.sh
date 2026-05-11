@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-# start_weaver.sh — Full-Stack Weaver v3 Launcher
+# start_weaver.sh — Full-Stack Weaver v4 Launcher
 # ═══════════════════════════════════════════════════════════════════
 # Starts all components in the correct order with health verification.
 #
@@ -44,7 +44,7 @@ trap cleanup SIGINT SIGTERM
 
 # ── Pre-flight checks ────────────────────────────────────────────
 echo "╔══════════════════════════════════════════════════╗"
-echo "║      W E A V E R   v 3   S T A R T U P         ║"
+echo "║      W E A V E R   v 4   S T A R T U P         ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 
@@ -75,7 +75,7 @@ echo ""
 
 # ── Clean ports ──────────────────────────────────────────────────
 echo "🧹 Cleaning ports..."
-for port in 9999 9998 9997 9996 9990 8899 8765; do
+for port in 9999 9998 9997 9996 9995 9990 8899 8898 8765; do
     lsof -ti:$port 2>/dev/null | xargs kill -9 2>/dev/null || true
 done
 sleep 1
@@ -142,7 +142,7 @@ fi
 
 echo ""
 echo "═══════════════════════════════════════════════════"
-echo "🌀 Weaver v3 is LIVE"
+echo "🌀 Weaver v4 is LIVE"
 echo ""
 echo "🖥️  Live Dashboard:     http://localhost:9990"
 echo "📊 Health Dashboard:   http://localhost:9996"

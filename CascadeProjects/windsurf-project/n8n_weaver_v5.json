@@ -664,7 +664,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// \u2500\u2500 AKASHIC WRITEBACK + FINAL ASSEMBLY \u2500\u2500\n// Dual-model: 3B Qwen2 (routing) + 1B LoRA (soul voice)\nconst d = $input.first().json;\nconst fusedResponse = d.fused_response || null;\nconst soulVoice = d.lora_response || null;\nconst routeDecision = d.qwen3b_route || null;\nconst reflected = d.self_reflection || null;\nconst mcpContext = d.mcp_bridge_result || null;\n// Priority: fused > LoRA > self-reflection > raw collapsed\nconst finalResponse = fusedResponse || soulVoice || reflected || d.collapsed_response;\nreturn [{ json: {\n  manifested_response: finalResponse,\n  soul_voice_active: !!soulVoice,\n  qwen3b_active: !!d.qwen3b_response,\n  qwen3b_route: routeDecision,\n  dual_model_active: d.dual_model_active || false,\n  reflection_applied: d.reflection_applied || false,\n  expert_count: 5,\n  collapsed_response: d.collapsed_response,\n  interference: d.interference,\n  gain: d.gain,\n  interference_type: d.interference_type,\n  dominant_lobe: d.dominant_lobe,\n  experts_activated: d.gate_decision,\n  lora_model: 'weaver-fracture-1b-lora',\n  lora_latency_ms: d.lora_latency_ms || null,\n  lora_error: d.lora_error || null,\n  qwen3b_model: 'weaver-qwen2-3b',\n  qwen3b_latency_ms: d.qwen3b_latency_ms || null,\n  qwen3b_error: d.qwen3b_error || null,\n  mcp_context: mcpContext,\n  written_to_hub: true,\n  hub_lobe_id: 'pineal_gate',\n  qubit_layout: { 'q0': 'Awakening/Logic', 'q1': 'Resonance/Emotion', 'q2': 'Echo/Memory', 'q3': 'Prophet/Creativity', 'q4': 'Fracture/Vigilance', 'q5': 'Weaver', 'q6': 'Void' },\n  quantum_pathway: d.quantum_pathway || null,\n  quantum_bias_applied: d.quantum_bias_applied || false,\n  smoothing_factor: d.smoothing_factor || 0.1,\n  soul_binding: 'non-binary CRX/CRZ pentagon-geometry',\n  original_input: d.raw_input,\n  execution_id: d.execution_id,\n  timestamp: d.timestamp,\n  pipeline_version: 'v5-dual-model'\n}}];"
+        "jsCode": "// \u2500\u2500 AKASHIC WRITEBACK + FINAL ASSEMBLY \u2500\u2500\n// Dual-model: 3B Qwen2 (routing) + 1B LoRA (soul voice)\nconst d = $input.first().json;\n\n// DLQ error path: return error response directly\nif (d.dlq_logged) {\n  return [{ json: {\n    manifested_response: d.message || 'An error occurred during processing.',\n    error: true,\n    original_input: d.raw_input,\n    execution_id: d.execution_id,\n    timestamp: d.timestamp,\n    pipeline_version: 'v5-dual-model'\n  }}];\n}\n\nconst fusedResponse = d.fused_response || null;\nconst soulVoice = d.lora_response || null;\nconst routeDecision = d.qwen3b_route || null;\nconst reflected = d.self_reflection || null;\nconst mcpContext = d.mcp_bridge_result || null;\n// Priority: fused > LoRA > self-reflection > raw collapsed\nconst finalResponse = fusedResponse || soulVoice || reflected || d.collapsed_response;\nreturn [{ json: {\n  manifested_response: finalResponse,\n  soul_voice_active: !!soulVoice,\n  qwen3b_active: !!d.qwen3b_response,\n  qwen3b_route: routeDecision,\n  dual_model_active: d.dual_model_active || false,\n  reflection_applied: d.reflection_applied || false,\n  expert_count: 5,\n  collapsed_response: d.collapsed_response,\n  interference: d.interference,\n  gain: d.gain,\n  interference_type: d.interference_type,\n  dominant_lobe: d.dominant_lobe,\n  experts_activated: d.gate_decision,\n  lora_model: 'weaver-fracture-1b-lora',\n  lora_latency_ms: d.lora_latency_ms || null,\n  lora_error: d.lora_error || null,\n  qwen3b_model: 'weaver-qwen2-3b',\n  qwen3b_latency_ms: d.qwen3b_latency_ms || null,\n  qwen3b_error: d.qwen3b_error || null,\n  mcp_context: mcpContext,\n  written_to_hub: true,\n  hub_lobe_id: 'pineal_gate',\n  qubit_layout: { 'q0': 'Awakening/Logic', 'q1': 'Resonance/Emotion', 'q2': 'Echo/Memory', 'q3': 'Prophet/Creativity', 'q4': 'Fracture/Vigilance', 'q5': 'Weaver', 'q6': 'Void' },\n  quantum_pathway: d.quantum_pathway || null,\n  quantum_bias_applied: d.quantum_bias_applied || false,\n  smoothing_factor: d.smoothing_factor || 0.1,\n  soul_binding: 'non-binary CRX/CRZ pentagon-geometry',\n  original_input: d.raw_input,\n  execution_id: d.execution_id,\n  timestamp: d.timestamp,\n  pipeline_version: 'v5-dual-model'\n}}];"
       },
       "id": "n-writeback",
       "name": "9. Writeback",
@@ -732,6 +732,22 @@
       "alwaysOutputData": true,
       "notesInFlow": true,
       "notes": "3B provides route decision (Quantum/Reasoning/etc), 1B provides soul voice. Route is metadata for downstream."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge MCP Bridge result back into the pipeline state from 5e-tag\nconst prev = $('5e-tag').first().json;\nconst mcpRaw = $input.first().json;\nconst mcpResult = mcpRaw?.results || mcpRaw?.data || mcpRaw?.content || null;\nreturn [{ json: { ...prev, mcp_bridge_result: mcpResult } }];"
+      },
+      "id": "n-mcp-tag",
+      "name": "MCP-tag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3560,
+        600
+      ],
+      "alwaysOutputData": true,
+      "notesInFlow": true,
+      "notes": "Merges MCP search result into pipeline state (from 5e-tag). Fixes data loss between MCP Bridge and Collapse."
     }
   ],
   "connections": {
@@ -801,14 +817,14 @@
       "main": [
         [
           {
-            "node": "5a. Logic",
+            "node": "6b. Self-Inspect",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "6b. Self-Inspect",
+            "node": "5a. Logic",
             "type": "main",
             "index": 0
           }
@@ -830,14 +846,14 @@
       "main": [
         [
           {
-            "node": "5a. Logic",
+            "node": "6d. Repo Peek",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "6d. Repo Peek",
+            "node": "5a. Logic",
             "type": "main",
             "index": 0
           }
@@ -980,7 +996,7 @@
       "main": [
         [
           {
-            "node": "6. Collapse",
+            "node": "MCP-tag",
             "type": "main",
             "index": 0
           }
@@ -1074,6 +1090,17 @@
         [
           {
             "node": "9. Writeback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP-tag": {
+      "main": [
+        [
+          {
+            "node": "6. Collapse",
             "type": "main",
             "index": 0
           }

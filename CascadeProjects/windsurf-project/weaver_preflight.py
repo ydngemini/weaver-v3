@@ -29,12 +29,15 @@ OPTIONAL_ENV = [
 
 PORTS = [
     (9999, "Nexus Bus"),
-    (9995, "Akashic Hub API"),
     (9998, "Nexus Bus Health"),
     (9997, "Quantum API"),
     (9996, "Health Dashboard"),
+    (9995, "Akashic Hub API"),
+    (9990, "Live Dashboard"),
     (8899, "LoRA Server"),
+    (8898, "Qwen3B Server"),
     (8765, "Phone Bridge"),
+    (5679, "Obsidian Bridge"),
     (5678, "n8n Workflow"),
 ]
 
