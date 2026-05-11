@@ -195,7 +195,15 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     akashic_hub = None
     if AkashicHub is not None:
         akashic_hub = AkashicHub(dim=256, trace_depth=32)
-        print("[WEAVER] 🌌 Akashic Hub initialized (dim=256, trace=32).", flush=True)
+        persist_path = os.path.join(PROJ, "Nexus_Vault", "akashic_persist")
+        if os.path.isdir(persist_path):
+            try:
+                akashic_hub.load(persist_path)
+                print(f"[WEAVER] 🌌 Akashic Hub restored from {persist_path}.", flush=True)
+            except Exception as e:
+                print(f"[WEAVER] 🌌 Akashic Hub initialized fresh (load failed: {e}).", flush=True)
+        else:
+            print("[WEAVER] 🌌 Akashic Hub initialized (dim=256, trace=32).", flush=True)
     else:
         print("[WEAVER] ⚠️  Akashic Hub unavailable.", flush=True)
 
