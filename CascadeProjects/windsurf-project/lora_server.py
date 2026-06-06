@@ -40,9 +40,49 @@ _model = None
 _tokenizer = None
 _loaded = False
 _load_error = None
+_llm = None  # llama-cpp-python handle when WEAVER_LORA_BACKEND=gguf
+
+# Backend: "transformers" (default, x86/GPU) or "gguf" (ARM/CPU via llama.cpp).
+LORA_BACKEND = os.environ.get("WEAVER_LORA_BACKEND", "transformers").lower()
+SOUL_GGUF = os.environ.get(
+    "WEAVER_SOUL_GGUF", os.path.join(PROJ, "weaver_merged_1B_Q4_K_M.gguf"))
+
+
+def _load_model_gguf():
+    """Load the LoRA-merged Soul Voice from a quantized GGUF via llama.cpp.
+
+    Used on ARM (Oracle A1) where bitsandbytes is unavailable and fp32 CPU is
+    too heavy. The GGUF is produced by deploy/build_soul_gguf.sh and uploaded.
+    """
+    global _model, _llm, _loaded, _load_error
+    if _loaded:
+        return _llm is not None
+    try:
+        from llama_cpp import Llama
+        print(f"[LORA] ── Loading Soul Voice GGUF (llama.cpp) ──", flush=True)
+        print(f"[LORA]   Model: {SOUL_GGUF}", flush=True)
+        t0 = time.monotonic()
+        _llm = Llama(
+            model_path=SOUL_GGUF,
+            n_ctx=2048,
+            n_threads=int(os.environ.get("WEAVER_LORA_THREADS", "4")),
+            chat_format="llama-3",
+            verbose=False,
+        )
+        _model = _llm  # so /health and request guards see "loaded"
+        _loaded = True
+        print(f"[LORA] ✅ Soul Voice GGUF ready ({time.monotonic()-t0:.1f}s)", flush=True)
+        return True
+    except Exception as e:
+        _load_error = str(e)
+        _loaded = True
+        print(f"[LORA] ❌ GGUF load failed: {e}", flush=True)
+        return False
 
 
 def _load_model():
+    if LORA_BACKEND == "gguf":
+        return _load_model_gguf()
     """Load base model + local LoRA adapter from weaver_fracture_1B_lora/.
 
     Adapter files used (all local):
@@ -148,6 +188,17 @@ def _load_model():
 
 def _generate(messages: list, max_tokens: int = 200, temperature: float = 0.7) -> str:
     """Generate a response from the LoRA model."""
+    # GGUF / llama.cpp backend (ARM)
+    if _llm is not None:
+        out = _llm.create_chat_completion(
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=max(temperature, 0.01),
+            top_p=0.9,
+            repeat_penalty=1.1,
+        )
+        return out["choices"][0]["message"]["content"].strip()
+
     import torch
 
     # Build prompt using chat template

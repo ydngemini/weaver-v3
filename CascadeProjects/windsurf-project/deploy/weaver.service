@@ -1,0 +1,24 @@
+[Unit]
+Description=Weaver v4 headless full stack (Nexus Bus, Quantum Soul, Pineal Gate, Experts, Soul Voice)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+# Adjust if you cloned elsewhere:
+WorkingDirectory=/home/ubuntu/weaver/CascadeProjects/windsurf-project
+EnvironmentFile=/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env
+ExecStart=/home/ubuntu/weaver/CascadeProjects/windsurf-project/venv/bin/python3 weaver.py --headless
+Restart=on-failure
+RestartSec=10
+# weaver.py takes ~50s to load all lobes; give it room before health-based restarts.
+TimeoutStartSec=120
+# Memory guardrail on the 24 GB box (raise if you add the 3B):
+MemoryHigh=8G
+MemoryMax=10G
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

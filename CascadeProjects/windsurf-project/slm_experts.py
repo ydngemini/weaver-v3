@@ -83,8 +83,15 @@ EXPERT_PROMPTS: Dict[str, str] = {
     ),
 }
 
-# Model config
-SLM_MODEL = "gpt-4o-mini"
+# Model config — backend selected by WEAVER_LLM_BACKEND:
+#   "azure" (default, paid)  |  "gemini" (free tier)  |  "local" (llama.cpp, $0)
+LLM_BACKEND = os.environ.get("WEAVER_LLM_BACKEND", "azure").lower()
+if LLM_BACKEND == "gemini":
+    SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "gemini-2.0-flash")
+elif LLM_BACKEND == "local":
+    SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "local-model")
+else:
+    SLM_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
 SLM_TEMPERATURE = 0.4
 SLM_MAX_TOKENS = 120
 
@@ -130,10 +137,30 @@ class SLMExpertLobe(ExpertLobe):
         self._circuit_cooldown = 60.0     # seconds before retrying
 
     def _get_client(self):
-        """Lazy-initialize the OpenAI async client."""
+        """Lazy-initialize the async chat client per WEAVER_LLM_BACKEND.
+
+        azure  → AsyncAzureOpenAI (paid, default — unchanged behavior)
+        gemini → AsyncOpenAI on Gemini's OpenAI-compat endpoint (free tier)
+        local  → AsyncOpenAI on a local llama.cpp server (truly $0, CPU)
+        """
         if self._client is None:
             import openai
-            self._client = openai.AsyncOpenAI(api_key=self.api_key)
+            if LLM_BACKEND == "gemini":
+                self._client = openai.AsyncOpenAI(
+                    api_key=os.environ.get("GEMINI_API_KEY", self.api_key),
+                    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                )
+            elif LLM_BACKEND == "local":
+                self._client = openai.AsyncOpenAI(
+                    api_key=os.environ.get("WEAVER_LOCAL_LLM_KEY", "local"),
+                    base_url=os.environ.get("WEAVER_LOCAL_LLM_URL", "http://127.0.0.1:8090/v1"),
+                )
+            else:
+                self._client = openai.AsyncAzureOpenAI(
+                    api_key=os.environ.get("AZURE_OPENAI_KEY", self.api_key),
+                    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", "https://ydn-mp0oxh6q-eastus2.cognitiveservices.azure.com/"),
+                    api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+                )
         return self._client
 
     async def process(self, shard: FractureShard,
@@ -165,6 +192,11 @@ class SLMExpertLobe(ExpertLobe):
             for attempt in range(max_retries + 1):
                 try:
                     client = self._get_client()
+                    # Azure's newer API uses max_completion_tokens; the OpenAI-compat
+                    # endpoints (Gemini, llama.cpp) use the classic max_tokens.
+                    _tok_kw = ({"max_tokens": self.max_tokens}
+                               if LLM_BACKEND in ("gemini", "local")
+                               else {"max_completion_tokens": self.max_tokens})
                     resp = await client.chat.completions.create(
                         model=self.model,
                         messages=[
@@ -172,7 +204,7 @@ class SLMExpertLobe(ExpertLobe):
                             {"role": "user", "content": user_msg},
                         ],
                         temperature=self.temperature,
-                        max_tokens=self.max_tokens,
+                        **_tok_kw,
                     )
                     text = resp.choices[0].message.content.strip()
                     self._consecutive_failures = 0  # reset on success
