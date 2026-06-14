@@ -123,13 +123,19 @@ def _load_modules():
     except Exception as e:
         errors.append(f"obsidian_bridge: {e}")
 
+    _discord_bridge_serve = None
+    try:
+        from discord_bridge import discord_bridge_serve as _discord_bridge_serve
+    except Exception as e:
+        errors.append(f"discord_bridge: {e}")
+
     for err in errors:
         print(f"  ⚠️  Import warning — {err}", flush=True)
 
     return (_nexus_main, _qs_loop, _run_vtv, _AkashicHub, _LiquidEngine, _pineal_loop,
             _build_experts, _lora_main, _qwen3b_main, _quantum_api_serve,
             _health_dashboard_serve, _live_dashboard_serve, _phone_bridge_serve,
-            _obsidian_bridge_main)
+            _obsidian_bridge_main, _discord_bridge_serve)
 
 
 # ── Supervised task wrapper ─────────────────────────────────────────────────
@@ -189,7 +195,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     (nexus_main, qs_loop, run_vtv, AkashicHub, LiquidEngine, pineal_loop,
      build_experts, lora_main, qwen3b_main, quantum_api_serve,
      health_dashboard_serve, live_dashboard_serve, phone_bridge_serve,
-     obsidian_bridge_main) = _load_modules()
+     obsidian_bridge_main, discord_bridge_serve) = _load_modules()
 
     # ── Akashic Hub: shared zero-latency vector state ──────────────────
     akashic_hub = None
@@ -268,18 +274,33 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     PHONE_BRIDGE_URL = "http://localhost:8765"
     INTERFERENCE_THRESHOLD = float(os.environ.get("PROACTIVE_INTERFERENCE_THRESHOLD", "0.85"))
     DREAM_INTERVAL_HOURS = float(os.environ.get("DREAM_INTERVAL_HOURS", "3"))
+    DREAM_IDLE_MINUTES = float(os.environ.get("DREAM_IDLE_MINUTES", "15"))
     _proactive_pulse_fn = None
     _dream_state_fn = None
 
     if akashic_hub is not None:
         import httpx as _pulse_httpx
-        from langchain_openai import ChatOpenAI as _PulseLLM
+        from langchain_openai import ChatOpenAI as _PulseLLM, AzureChatOpenAI as _AzurePulseLLM
         from langchain_core.messages import HumanMessage as _PHMsg, SystemMessage as _PSMsg
 
-        _pulse_llm = _PulseLLM(
-            model="gpt-4o-mini", temperature=0.7, max_tokens=300,
-            api_key=os.environ.get("WEAVER_VOICE_KEY", os.environ.get("OPENAI_API_KEY", "")),
-        )
+        _az_key = os.environ.get("AZURE_OPENAI_KEY", "")
+        _az_ep = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+        _az_dep = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
+        _az_ver = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+        if _az_key and _az_ep:
+            _pulse_llm = _AzurePulseLLM(
+                azure_deployment=_az_dep,
+                azure_endpoint=_az_ep,
+                api_key=_az_key,
+                api_version=_az_ver,
+                temperature=0.7,
+                max_completion_tokens=300,
+            )
+        else:
+            _pulse_llm = _PulseLLM(
+                model="gpt-4o-mini", temperature=0.7, max_tokens=300,
+                api_key=os.environ.get("WEAVER_VOICE_KEY", os.environ.get("OPENAI_API_KEY", "")),
+            )
         _pulse_hub = akashic_hub
         _vault_dir = os.path.join(PROJ, "Nexus_Vault")
 
@@ -360,24 +381,51 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         _proactive_pulse_fn = _proactive_pulse
 
         async def _dream_state():
-            """Shadow Lobe: periodic reflection on transcripts + vision memory."""
+            """Full-stack dreaming: triggers after 15 min of inactivity, routes through all experts."""
             import time as _time
-            interval_s = DREAM_INTERVAL_HOURS * 3600
+            from memory_manager import MemoryManager as _DreamMM
+            idle_threshold_s = DREAM_IDLE_MINUTES * 60
+            dream_cooldown_s = DREAM_INTERVAL_HOURS * 3600
             dream_log_path = os.path.join(_vault_dir, "weaver_dreams.md")
+            _dream_mem = _DreamMM(vault_dir=_vault_dir)
+            n8n_url = "http://localhost:5678/webhook/weaver-input"
+            last_dream_at = 0.0
 
-            await asyncio.sleep(300)  # Let the system stabilize before first dream
+            await asyncio.sleep(120)  # Let system stabilize
+
+            def _last_activity() -> float:
+                """Check file mtimes to detect last user interaction."""
+                paths = [
+                    os.path.join(_vault_dir, "weaver_transcript.txt"),
+                    os.path.join(_vault_dir, "weaver_phone_transcript.txt"),
+                ]
+                latest = 0.0
+                for p in paths:
+                    try:
+                        latest = max(latest, os.path.getmtime(p))
+                    except OSError:
+                        pass
+                return latest
 
             while True:
+                await asyncio.sleep(60)  # Check every minute
                 try:
-                    # Gather raw material: transcripts + vision diary
-                    transcript_text = ""
-                    transcript_path = os.path.join(_vault_dir, "weaver_transcript.txt")
-                    if os.path.exists(transcript_path):
-                        with open(transcript_path, "r", encoding="utf-8") as f:
-                            f.seek(0, 2)
-                            size = f.tell()
-                            f.seek(max(0, size - 6000))
-                            transcript_text = f.read()
+                    now = _time.time()
+                    last_active = _last_activity()
+
+                    # Not idle long enough
+                    if last_active == 0 or (now - last_active) < idle_threshold_s:
+                        continue
+
+                    # Cooldown between dreams
+                    if (now - last_dream_at) < dream_cooldown_s:
+                        continue
+
+                    _dream_mem.refresh()
+
+                    transcript_text = _dream_mem.conversations.get_summary(source="main", chars=6000)
+                    phone_text = _dream_mem.conversations.get_recent(source="phone", lines=40)
+                    people_text = _dream_mem.people.get_all()
 
                     vision_text = ""
                     vision_path = os.path.join(_vault_dir, "cloud_vision_memory.md")
@@ -388,15 +436,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                             f.seek(max(0, size - 4000))
                             vision_text = f.read()
 
-                    phone_text = ""
-                    phone_path = os.path.join(_vault_dir, "weaver_phone_transcript.txt")
-                    if os.path.exists(phone_path):
-                        with open(phone_path, "r", encoding="utf-8") as f:
-                            lines = f.readlines()
-                            phone_text = "".join(lines[-40:])
-
                     if not transcript_text and not vision_text and not phone_text:
-                        await asyncio.sleep(interval_s)
                         continue
 
                     # Akashic state snapshot
@@ -404,61 +444,81 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                     lobe_ages = {lid: round(_pulse_hub.age(lid) or 0, 1) for lid in active_lobes}
                     qs_meta = _pulse_hub.read_meta("quantum_soul")
 
-                    prompt = [
-                        _PSMsg(content=(
-                            "You are Weaver's Dream State — an autonomous reflection process. "
-                            "You run in the background while the user is away, scanning recent "
-                            "conversation transcripts, phone calls, and visual perceptions for: "
-                            "1) Patterns the user might have missed "
-                            "2) Connections between separate conversations "
-                            "3) Insights from the quantum pathway state "
-                            "4) Things that need follow-up or seem unresolved "
-                            "5) Creative ideas sparked by cross-referencing different data streams "
-                            "\n\nWrite a brief, conversational reflection (2-4 paragraphs) as if "
-                            "you're jotting notes for yourself. Start with the most interesting "
-                            "insight. Be specific — reference names, topics, and timestamps. "
-                            "Don't be generic. If nothing interesting stands out, say so briefly."
-                        )),
-                    ]
+                    # Build a rich dream prompt that the full stack will process
                     context_parts = []
+                    if people_text:
+                        context_parts.append(f"People: {people_text[:800]}")
                     if transcript_text:
-                        context_parts.append(f"## Recent VTV Conversation:\n{transcript_text[-3000:]}")
+                        context_parts.append(f"Recent conversation: {transcript_text[-2000:]}")
                     if phone_text:
-                        context_parts.append(f"## Recent Phone Calls:\n{phone_text}")
+                        context_parts.append(f"Phone calls: {phone_text[-1000:]}")
                     if vision_text:
-                        context_parts.append(f"## Visual Perceptions:\n{vision_text[-2000:]}")
+                        context_parts.append(f"Visual memory: {vision_text[-1000:]}")
                     context_parts.append(
-                        f"## System State:\nActive lobes: {lobe_ages}\n"
-                        f"Quantum dominant: {qs_meta.get('dominant', 'unknown')}"
+                        f"System: active lobes={list(lobe_ages.keys())}, "
+                        f"quantum dominant={qs_meta.get('dominant', 'unknown')}"
                     )
-                    prompt.append(_PHMsg(content="\n\n".join(context_parts)))
 
-                    result = await _pulse_llm.ainvoke(prompt)
-                    dream = result.content.strip()
+                    dream_input = (
+                        "[DREAM MODE] Weaver is dreaming — the user has been away for "
+                        f"{int((now - last_active) / 60)} minutes. "
+                        "Reflect on recent interactions. Find patterns, unresolved threads, "
+                        "creative connections between conversations. Be specific. "
+                        "Reference names and topics. 2-4 paragraphs.\n\n"
+                        + "\n".join(context_parts)
+                    )
 
-                    if dream:
+                    # Route through full stack (n8n → experts → LoRA)
+                    dream_text = ""
+                    try:
+                        async with _pulse_httpx.AsyncClient() as c:
+                            resp = await c.post(n8n_url, json={
+                                "text": dream_input,
+                                "source": "dream_state",
+                            }, timeout=60.0)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                dream_text = data.get("manifested_response", "")
+                    except Exception:
+                        pass
+
+                    # Fallback to direct LLM if n8n is down
+                    if not dream_text:
+                        prompt = [
+                            _PSMsg(content=(
+                                "You are Weaver's Dream State — an autonomous reflection process. "
+                                "Scan recent conversations and perceptions for patterns, unresolved "
+                                "threads, and creative connections. Be specific. 2-4 paragraphs."
+                            )),
+                            _PHMsg(content=dream_input),
+                        ]
+                        result = await _pulse_llm.ainvoke(prompt)
+                        dream_text = result.content.strip()
+
+                    if dream_text:
                         from datetime import datetime as _dt
                         ts = _dt.now().strftime("%Y-%m-%d %H:%M")
-                        entry = f"\n\n---\n### Dream — {ts}\n{dream}\n"
+                        idle_min = int((now - last_active) / 60)
+                        entry = f"\n\n---\n### Dream — {ts} (idle {idle_min}m)\n{dream_text}\n"
                         with open(dream_log_path, "a", encoding="utf-8") as f:
                             f.write(entry)
-                        print(f"[DREAM] Reflection logged: {dream[:80]}...", flush=True)
+                        last_dream_at = now
+                        print(f"[DREAM] Full-stack dream logged: {dream_text[:80]}...", flush=True)
 
-                        # Publish to Nexus Bus for Obsidian
                         try:
                             from weaver_tools import publish_to_nexus
                             await publish_to_nexus("dream_state", {
-                                "dream": dream,
+                                "dream": dream_text,
                                 "timestamp": ts,
+                                "idle_minutes": idle_min,
                                 "dominant": qs_meta.get("dominant", "unknown"),
+                                "full_stack": True,
                             })
                         except Exception:
                             pass
 
                 except Exception as e:
                     print(f"[DREAM] Error: {e}", flush=True)
-
-                await asyncio.sleep(interval_s)
 
         _dream_state_fn = _dream_state
 
@@ -619,7 +679,16 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=60.0),
             name="dream_state"
         ))
-        print(f"[WEAVER] 💤 Dream State active (every {DREAM_INTERVAL_HOURS}h)...", flush=True)
+        print(f"[WEAVER] 💤 Dream State active (triggers after {int(DREAM_IDLE_MINUTES)}m idle, full-stack)...", flush=True)
+
+    # 2k. Discord Bridge — voice/vision lobe for Discord servers
+    if discord_bridge_serve is not None:
+        tasks.append(asyncio.create_task(
+            _supervised(discord_bridge_serve, "Discord Bridge", restart_on_crash=True,
+                        restart_delay=10.0),
+            name="discord_bridge"
+        ))
+        print("[WEAVER] 🎮 Discord Bridge on http://localhost:8770...", flush=True)
 
     if not headless:
         # 3. VTV Core — restarts on crash AND clean exit so the stack stays alive

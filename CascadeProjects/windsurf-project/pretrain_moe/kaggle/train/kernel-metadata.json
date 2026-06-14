@@ -1,0 +1,25 @@
+{
+  "id": "nathaniellockwood/weaver-moe-train",
+  "title": "Weaver MoE Train",
+  "code_file": "kaggle_train.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "enable_internet": true,
+  "keywords": [
+    "gpu",
+    "deep-learning",
+    "nlp"
+  ],
+  "dataset_sources": [
+    "nathaniellockwood/weaver-moe-code",
+    "nathaniellockwood/weaver-moe-ckpt"
+  ],
+  "kernel_sources": [
+    "nathaniellockwood/weaver-moe-prep"
+  ],
+  "competition_sources": [],
+  "model_sources": []
+}

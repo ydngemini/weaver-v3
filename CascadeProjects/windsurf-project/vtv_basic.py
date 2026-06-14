@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 load_dotenv()
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
-OPENAI_VISION_BEST = "gpt-4o"       # diary / registration
-OPENAI_VISION_FAST = "gpt-4o-mini"  # real-time injection
+OPENAI_VISION_BEST = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+OPENAI_VISION_FAST = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 
 import json
@@ -25,7 +25,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 DRIVE_FOLDER_ID = '1ccTAqsrDq2lEtweYQwAeZmzCQrdM8pt3'
@@ -212,7 +212,16 @@ async def run_vtv(heartbeat: bool = True) -> None:
     if missing:
         raise RuntimeError(f"Set {', '.join(missing)} in .env")
 
-    openai_vision_client = openai.AsyncOpenAI(api_key=mem_api_key)
+    _az_vision_key = os.environ.get("AZURE_OPENAI_KEY", "")
+    _az_vision_ep = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+    if _az_vision_key and _az_vision_ep:
+        openai_vision_client = openai.AsyncAzureOpenAI(
+            api_key=_az_vision_key,
+            azure_endpoint=_az_vision_ep,
+            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+        )
+    else:
+        openai_vision_client = openai.AsyncOpenAI(api_key=mem_api_key)
 
     # --- INITIATE THE NEXUS VAULT (ABSOLUTE PATH LOCK) ---
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -378,12 +387,26 @@ async def run_vtv(heartbeat: bool = True) -> None:
         base_instruction += "\n\nYour current source-code self map:\n" + self_code_map
 
     # --- LANGCHAIN CORTEX: Conversation Memory + Reasoning ---
-    lc_llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.3,
-        max_tokens=500,
-        api_key=mem_api_key,
-    )
+    _az_key = os.environ.get("AZURE_OPENAI_KEY", "")
+    _az_ep = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+    _az_dep = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
+    _az_ver = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    if _az_key and _az_ep:
+        lc_llm = AzureChatOpenAI(
+            azure_deployment=_az_dep,
+            azure_endpoint=_az_ep,
+            api_key=_az_key,
+            api_version=_az_ver,
+            temperature=0.3,
+            max_completion_tokens=500,
+        )
+    else:
+        lc_llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0.3,
+            max_tokens=500,
+            api_key=mem_api_key,
+        )
     brain_queue: asyncio.Queue = asyncio.Queue()
     lc_history: list = []
     lc_summary: list[str] = [cloud_memories]
@@ -739,7 +762,7 @@ async def run_vtv(heartbeat: bool = True) -> None:
                 response = await openai_vision_client.chat.completions.create(
                     model=OPENAI_VISION_BEST,
                     messages=[{"role": "user", "content": diary_content}],
-                    max_tokens=300,
+                    max_completion_tokens=300,
                 )
                 description = (response.choices[0].message.content or "").strip()
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -762,13 +785,24 @@ async def run_vtv(heartbeat: bool = True) -> None:
     print("[READY] Weaver is listening and watching...")
 
     async def _run_forever():
-        realtime_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
+        _azure_ep = os.environ.get("AZURE_OPENAI_ENDPOINT", "").rstrip("/").replace("https://", "")
+        _azure_rt_deploy = os.environ.get("AZURE_OPENAI_RT_DEPLOYMENT", "gpt-realtime")
+        _azure_rt_ver = os.environ.get("AZURE_OPENAI_RT_API_VERSION", "2024-10-01-preview")
+        if _azure_ep:
+            realtime_url = f"wss://{_azure_ep}/openai/realtime?api-version={_azure_rt_ver}&deployment={_azure_rt_deploy}"
+        else:
+            realtime_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
 
         reconnect_count = 0
+        _quota_exhausted = False
         while True:
             if reconnect_count > 0:
-                print(f"\n[RECONNECT] Restarting Realtime session (attempt {reconnect_count})...", flush=True)
-                await asyncio.sleep(2)
+                delay = min(60, 2 * (2 ** min(reconnect_count - 1, 5)))
+                if _quota_exhausted:
+                    delay = 60
+                print(f"\n[RECONNECT] Restarting Realtime session (attempt {reconnect_count}, wait {delay}s)...", flush=True)
+                await asyncio.sleep(delay)
+                _quota_exhausted = False
                 while not _mic_queue.empty():
                     with contextlib.suppress(Exception):
                         _mic_queue.get_nowait()
@@ -784,12 +818,13 @@ async def run_vtv(heartbeat: bool = True) -> None:
             _greeted = [False]  # one-shot greeting per connection
 
             try:
+                _rt_headers = {"api-key": os.environ.get("AZURE_OPENAI_KEY", voice_api_key)} if _azure_ep else {
+                    "Authorization": f"Bearer {voice_api_key}",
+                    "OpenAI-Beta": "realtime=v1",
+                }
                 async with websockets.connect(
                     realtime_url,
-                    additional_headers={
-                        "Authorization": f"Bearer {voice_api_key}",
-                        "OpenAI-Beta": "realtime=v1",
-                    },
+                    additional_headers=_rt_headers,
                     ping_interval=20,
                     ping_timeout=None,
                 ) as ws:
@@ -913,7 +948,7 @@ async def run_vtv(heartbeat: bool = True) -> None:
                                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
                                         {"type": "text", "text": vision_text},
                                     ]}],
-                                    max_tokens=100,
+                                    max_completion_tokens=100,
                                 )
                                 description = (_vision_resp.choices[0].message.content or "").strip()
                                 with contextlib.suppress(Exception):
@@ -1170,7 +1205,7 @@ async def run_vtv(heartbeat: bool = True) -> None:
                                                             "distinguishing features. Be specific and objective."
                                                         )},
                                                     ]}],
-                                                    max_tokens=200,
+                                                    max_completion_tokens=200,
                                                 )
                                                 appearance = (_appear_resp.choices[0].message.content or "").strip()
                                                 existing = people_memory[0]
@@ -1369,6 +1404,9 @@ async def run_vtv(heartbeat: bool = True) -> None:
 
             except* (Exception,) as eg:
                 reconnect_count += 1
+                err_str = str(eg.exceptions[0])
+                if "insufficient_quota" in err_str or "rate_limit" in err_str:
+                    _quota_exhausted = True
                 print(f"\n[SESSION DROP] {eg.exceptions[0]}. Reconnecting...", flush=True)
 
     try:

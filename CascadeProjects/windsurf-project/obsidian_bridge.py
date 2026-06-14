@@ -42,6 +42,8 @@ from aiohttp import web
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent, FileCreatedEvent
 from watchdog.observers import Observer
 
+from memory_manager import MemoryManager
+
 NEXUS_TOPICS = ["quantum_state", "gate_decision", "lobe_status", "transcript", "phone_transcript",
                  "dream_state", "sms_exchange", "proactive_pulse"]
 
@@ -97,6 +99,27 @@ SYNAPSE_MAP: Dict[str, str] = {
     "lora":          "LoRA",
     "llama":         "Llama",
 }
+
+
+# ── Dynamic Synapse Map (people from MemoryManager) ─────────────────────────
+
+def _enrich_synapse_map():
+    """Add people from MemoryManager to the synapse map for auto-linking."""
+    try:
+        mem = _get_memory()
+        mem.people.refresh()
+        content = mem.people.get_all()
+        for line in content.splitlines():
+            line = line.strip()
+            if not line.startswith("- **"):
+                continue
+            match = re.match(r"- \*\*(.+?)\*\*", line)
+            if match:
+                name = match.group(1).strip()
+                if name.lower() not in SYNAPSE_MAP and name.lower() != "weaver":
+                    SYNAPSE_MAP[name.lower()] = name
+    except Exception:
+        pass
 
 
 # ── Synaptic Linker ──────────────────────────────────────────────────────────
@@ -166,6 +189,119 @@ def _append_to_node(node_name: str, section: str, content_text: str):
             fh.write(block)
     except Exception:
         pass
+
+
+# ── Memory Manager Integration ───────────────────────────────────────────────
+
+PROJ = os.path.dirname(os.path.abspath(__file__))
+_memory: Optional[MemoryManager] = None
+
+
+def _get_memory() -> MemoryManager:
+    """Lazy-init the global MemoryManager instance."""
+    global _memory
+    if _memory is None:
+        vault_dir = os.path.join(PROJ, "Nexus_Vault")
+        _memory = MemoryManager(vault_dir=vault_dir)
+    return _memory
+
+
+def _parse_people_entries(content: str) -> List[Dict[str, str]]:
+    """Parse people_memory.md bullet entries into structured dicts."""
+    people = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line.startswith("- **"):
+            continue
+        match = re.match(r"- \*\*(.+?)\*\*\s*(.*)$", line)
+        if match:
+            name = match.group(1).strip()
+            rest = match.group(2).strip()
+            if rest.startswith("—"):
+                rest = rest[1:].strip()
+            people.append({"name": name, "details": rest})
+    return people
+
+
+def _sync_people_to_vault():
+    """Read all people from MemoryManager and create/update vault person notes.
+    Each person gets a dedicated note with backlinks to related vault nodes."""
+    _enrich_synapse_map()
+    mem = _get_memory()
+    mem.people.refresh()
+    content = mem.people.get_all()
+    if not content:
+        return
+
+    people = _parse_people_entries(content)
+    synced = 0
+
+    for person in people:
+        name = person["name"]
+        details = person["details"]
+
+        if name.lower() in ("weaver",):
+            continue
+
+        safe_name = name.replace("/", "_").replace("\\", "_")
+        note_path = os.path.join(VAULT_PATH, f"{safe_name}.md")
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        backlinks = ["[[Weaver]]"]
+        details_lower = details.lower()
+        for keyword, target in SYNAPSE_MAP.items():
+            if keyword in details_lower and target != name:
+                backlinks.append(f"[[{target}]]")
+
+        links_str = " · ".join(sorted(set(backlinks)))
+
+        if os.path.exists(note_path):
+            try:
+                with open(note_path, "r", encoding="utf-8") as fh:
+                    existing = fh.read()
+                if "## Memory Profile" in existing:
+                    continue
+                block = (
+                    f"\n\n---\n## Memory Profile\n*Updated: {ts}*\n\n"
+                    f"{details}\n\n"
+                    f"**Connections:** {links_str}\n"
+                )
+                with open(note_path, "a", encoding="utf-8") as fh:
+                    fh.write(block)
+                synced += 1
+            except Exception:
+                pass
+        else:
+            note_content = (
+                f"---\n"
+                f"tags: [weaver, person, synapse]\n"
+                f"created: {ts}\n"
+                f"---\n\n"
+                f"# {name}\n\n"
+                f"## Memory Profile\n"
+                f"{details}\n\n"
+                f"**Connections:** {links_str}\n"
+            )
+            try:
+                with open(note_path, "w", encoding="utf-8") as fh:
+                    fh.write(note_content)
+                synced += 1
+            except Exception:
+                pass
+
+    if synced > 0:
+        print(f"[BRIDGE] 👥 Synced {synced} people to vault notes", flush=True)
+
+
+async def _periodic_memory_sync():
+    """Periodically sync MemoryManager state to vault (every 10 minutes)."""
+    _sync_people_to_vault()
+    while True:
+        await asyncio.sleep(600)
+        try:
+            _sync_people_to_vault()
+        except Exception as e:
+            print(f"[BRIDGE] ⚠️  Memory sync error: {e}", flush=True)
 
 
 # ── Watcher: Obsidian → Weaver ────────────────────────────────────────────────
@@ -385,7 +521,6 @@ async def _nexus_listener():
 
                 linked_body = inject_wikilinks("\n".join(body_parts))
 
-                # Write as individual note or append to existing call note for same caller+minute
                 existing_pattern = f"Call_{safe_caller}_{datetime.now().strftime('%Y%m%d_%H%M')}"
                 existing_notes = [f for f in os.listdir(VAULT_PATH) if f.startswith(existing_pattern) and f.endswith(".md")]
 
@@ -410,6 +545,23 @@ async def _nexus_listener():
 
                 _ensure_stub_notes([caller] if caller != "unknown" else [])
                 _append_to_node("Weaver", "Phone Call", f"{caller_link}: {user_text[:150]}")
+
+                # Cross-link: append call reference to person's vault note
+                if caller != "unknown":
+                    call_ref = f"Called at {ts} — [[{note_name}]]\n> {user_text[:100]}"
+                    _append_to_node(caller, "Phone Call", call_ref)
+
+                # Store conversation in MemoryManager
+                try:
+                    mem = _get_memory()
+                    asyncio.get_event_loop().create_task(mem.remember({
+                        "type": "conversation",
+                        "speaker": caller,
+                        "content": user_text,
+                        "source": "phone",
+                    }))
+                except Exception:
+                    pass
 
         elif topic == "dream_state":
             dream = payload.get("dream", "")
@@ -523,6 +675,10 @@ async def main():
                   "Creativity Lobe", "Vigilance Lobe"]
     _ensure_stub_notes(core_nodes)
 
+    # Start MemoryManager sync (people → vault notes + periodic refresh)
+    memory_sync_task = asyncio.create_task(_periodic_memory_sync())
+    print(f"[BRIDGE] 👥 MemoryManager sync active (people → vault notes)", flush=True)
+
     try:
         # Run forever
         while True:
@@ -530,7 +686,12 @@ async def main():
     except asyncio.CancelledError:
         pass
     finally:
+        memory_sync_task.cancel()
         nexus_task.cancel()
+        try:
+            await memory_sync_task
+        except (asyncio.CancelledError, Exception):
+            pass
         try:
             await nexus_task
         except (asyncio.CancelledError, Exception):

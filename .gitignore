@@ -5,3 +5,21 @@ credentials.json
 ghost_key.json
 lost+found/
 .pip_cache/
+
+# Large model weights, checkpoints & tokenized data (never push to GitHub)
+*.pt
+*.bin
+*.gguf
+*.safetensors
+CascadeProjects/3b/
+CascadeProjects/windsurf-project/pretrain_moe/kaggle_output/
+CascadeProjects/windsurf-project/pretrain_moe/kaggle_prep_output/
+CascadeProjects/windsurf-project/pretrain_moe/kaggle_train_output/
+CascadeProjects/windsurf-project/pretrain_moe/kaggle_smoke/
+
+# Python / IDE / local-agent cruft
+__pycache__/
+*.pyc
+.claude/
+CascadeProjects/.claude/
+CascadeProjects/windsurf-project/Quantum Computing Architecture_files/

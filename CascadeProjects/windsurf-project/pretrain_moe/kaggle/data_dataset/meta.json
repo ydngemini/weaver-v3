@@ -1,0 +1,15 @@
+{
+  "vocab_size": 16384,
+  "ctx_len": 1024,
+  "dtype": "uint16",
+  "eos_id": 0,
+  "train_tokens": 30002840,
+  "val_tokens": 10000000,
+  "total_docs": 16719,
+  "config_hash": "62bd878e5e3314af",
+  "train_bin": "/kaggle/working/train.bin",
+  "val_bin": "/kaggle/working/val.bin",
+  "finished": true,
+  "train_windows": 29299,
+  "val_windows": 9765
+}

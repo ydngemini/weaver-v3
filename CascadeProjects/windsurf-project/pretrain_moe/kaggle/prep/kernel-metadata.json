@@ -1,0 +1,21 @@
+{
+  "id": "nathaniellockwood/weaver-moe-prep",
+  "title": "Weaver MoE Prep",
+  "code_file": "kaggle_prep.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "keywords": [
+    "data-cleaning",
+    "nlp"
+  ],
+  "dataset_sources": [
+    "nathaniellockwood/weaver-moe-code",
+    "nathaniellockwood/weaver-moe-data"
+  ],
+  "kernel_sources": [],
+  "competition_sources": [],
+  "model_sources": []
+}

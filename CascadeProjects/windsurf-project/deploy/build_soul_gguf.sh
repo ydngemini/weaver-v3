@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."                      # → windsurf-project/
 PROJ="$(pwd)"
 
-LLAMA_CPP="${LLAMA_CPP:-/media/ydn/SYPHER_CORE/Untitled Folder/llama.cpp}"
+LLAMA_CPP="${LLAMA_CPP:-/media/ydn/SYPHER_CORE/Untitled Folder/llama.cpp/llama.cpp}"
 MERGED_DIR="${MERGED_DIR:-$PROJ/weaver_merged_1B}"
 OUT_GGUF="$PROJ/weaver_merged_1B_Q4_K_M.gguf"
 F16_GGUF="$PROJ/weaver_merged_1B_f16.gguf"

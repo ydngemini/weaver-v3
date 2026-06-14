@@ -1,0 +1,10 @@
+{
+  "vocab_size": 16384,
+  "real_vocab_size": 16384,
+  "eos_token": "<|endoftext|>",
+  "eos_id": 0,
+  "ctx_len": 1024,
+  "pretokenizer": "gpt2-regex+bytelevel",
+  "config_hash": "62bd878e5e3314af",
+  "trained_at": "2026-06-13T18:27:00"
+}

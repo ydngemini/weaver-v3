@@ -1,0 +1,23 @@
+{
+  "title": "Weaver MoE Code",
+  "id": "nathaniellockwood/weaver-moe-code",
+  "licenses": [
+    {
+      "name": "CC0-1.0"
+    }
+  ],
+  "resources": [
+    {
+      "path": "model.py",
+      "description": "MoEGPT architecture (random init only). Imported by train.py / kaggle_train.py."
+    },
+    {
+      "path": "prepare_data.py",
+      "description": "Streaming corpus packer + 16k BPE tokenizer trainer. Provides the --corpus kaggle preset."
+    },
+    {
+      "path": "train.py",
+      "description": "Multi-session pretraining loop with atomic resume + wall-clock guard."
+    }
+  ]
+}

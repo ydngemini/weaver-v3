@@ -29,13 +29,14 @@ import os
 import sys
 import time
 from datetime import datetime
+from typing import Optional
 
 import httpx
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import Response
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from voice_recognition import VoiceRecognizer
 from memory_manager import MemoryManager
@@ -48,17 +49,27 @@ load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-OPENAI_API_KEY     = os.environ.get("WEAVER_VOICE_KEY", "")
+OPENAI_API_KEY     = os.environ.get("AZURE_OPENAI_KEY", os.environ.get("WEAVER_VOICE_KEY", ""))
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN", "")
 NEXUS_BUS_URL      = os.environ.get("NEXUS_BUS_URL", "ws://localhost:9999")
 N8N_WEBHOOK_URL    = os.environ.get("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/weaver-input")
 LORA_API_URL       = os.environ.get("LORA_API_URL", "http://localhost:8899/v1/chat/completions")
 QUANTUM_BIAS_URL   = os.environ.get("QUANTUM_BIAS_URL", "http://localhost:9997/quantum/bias")
-OPENAI_RT_URL      = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
 HOST               = os.environ.get("TWILIO_BRIDGE_HOST", "0.0.0.0")
 PORT               = int(os.environ.get("TWILIO_BRIDGE_PORT", "8765"))
 WEAVER_VOICE       = os.environ.get("WEAVER_VOICE", "shimmer")
+
+# Azure OpenAI config
+_AZURE_EP = os.environ.get("AZURE_OPENAI_ENDPOINT", "").rstrip("/").replace("https://", "")
+_AZURE_DEPLOY = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
+_AZURE_VER = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+_AZURE_RT_DEPLOY = os.environ.get("AZURE_OPENAI_RT_DEPLOYMENT", "gpt-realtime")
+_AZURE_RT_VER = os.environ.get("AZURE_OPENAI_RT_API_VERSION", "2024-10-01-preview")
+if _AZURE_EP:
+    OPENAI_RT_URL = f"wss://{_AZURE_EP}/openai/realtime?api-version={_AZURE_RT_VER}&deployment={_AZURE_RT_DEPLOY}"
+else:
+    OPENAI_RT_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
 
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 VAULT_DIR      = os.path.join(BASE_DIR, "Nexus_Vault")
@@ -85,41 +96,113 @@ memory = MemoryManager(vault_dir=VAULT_DIR)
 # Twilio Webhook Sync
 # ══════════════════════════════════════════════════════════════════════════════
 
+_tunnel_url: Optional[str] = None
+_tunnel_proc = None
+
 async def _sync_twilio_webhook():
-    """Detect public tunnel URL and point the Twilio number's voice webhook at /twiml."""
+    """Launch Cloudflare tunnel and sync Twilio webhooks. Retries until success."""
+    global _tunnel_url, _tunnel_proc
+    import re as _re
     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        log.warning("Twilio credentials missing — webhook sync skipped")
         return
+
+    # Wait for FastAPI to be fully up
+    await asyncio.sleep(3)
+
+    # ── Step 1: Kill stale tunnels + launch fresh ─────────────────────────────
     public_url = None
-    for attempt in range(10):
-        await asyncio.sleep(2)
-        try:
-            async with httpx.AsyncClient() as c:
-                r = await c.get("http://127.0.0.1:4040/api/tunnels", timeout=3)
-                tunnels = r.json().get("tunnels", [])
-                for t in tunnels:
-                    if t.get("public_url", "").startswith("https://"):
-                        public_url = t["public_url"]
-                        break
-        except Exception:
-            continue
-        if public_url:
+
+    cf_bin = None
+    for candidate in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloudflared"),
+        "/usr/local/bin/cloudflared",
+        "/usr/bin/cloudflared",
+    ]:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            cf_bin = candidate
             break
-    if not public_url:
-        log.warning("No tunnel detected — Twilio webhook not updated")
+    if not cf_bin:
+        import shutil
+        cf_bin = shutil.which("cloudflared")
+
+    if not cf_bin:
+        log.error("cloudflared not found — cannot create tunnel")
         return
+
+    # Kill any existing cloudflared for our port to get a clean state
+    try:
+        kill_proc = await asyncio.create_subprocess_exec(
+            "pkill", "-f", f"cloudflared.*{PORT}",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await kill_proc.wait()
+        await asyncio.sleep(2)
+    except Exception:
+        pass
+
+    log.info("Launching cloudflared tunnel for port %d...", PORT)
+    try:
+        _tunnel_proc = await asyncio.create_subprocess_exec(
+            cf_bin, "tunnel", "--url", f"http://localhost:{PORT}",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        # Parse URL from stderr output — cloudflared prints it within ~10 seconds
+        deadline = time.time() + 25
+        while time.time() < deadline:
+            try:
+                line = await asyncio.wait_for(_tunnel_proc.stderr.readline(), timeout=4)
+            except asyncio.TimeoutError:
+                continue
+            if not line:
+                break
+            text = line.decode(errors="replace")
+            match = _re.search(r"(https://[a-zA-Z0-9_-]+\.trycloudflare\.com)", text)
+            if match:
+                public_url = match.group(1)
+                log.info("Cloudflare tunnel live: %s", public_url)
+                break
+    except Exception as e:
+        log.error("Cloudflare tunnel launch failed: %s", e)
+
+    if not public_url:
+        log.error("Failed to get tunnel URL — Twilio webhook NOT updated")
+        return
+
+    _tunnel_url = public_url
+    log.info("Phone bridge tunnel: %s", public_url)
+
+    # ── Step 2: Update Twilio webhooks ───────────────────────────────────────
     voice_url = f"{public_url}/twiml"
     sms_url = f"{public_url}/sms"
     try:
         from twilio.rest import Client as _TwClient
         client = _TwClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        for num in client.incoming_phone_numbers.list(limit=10):
+        numbers = client.incoming_phone_numbers.list(limit=10)
+        if not numbers:
+            log.warning("No Twilio numbers found on account")
+            return
+        for num in numbers:
             num.update(
                 voice_url=voice_url, voice_method="POST",
                 sms_url=sms_url, sms_method="POST",
             )
-            log.info("Twilio webhooks synced: %s -> voice=%s sms=%s", num.phone_number, voice_url, sms_url)
+            log.info("✓ Twilio synced: %s → %s", num.phone_number, voice_url)
     except Exception as e:
         log.error("Twilio webhook sync failed: %s", e)
+
+    # ── Step 3: Verify the webhook by hitting it ─────────────────────────────
+    try:
+        await asyncio.sleep(2)
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+            r = await c.get(f"{public_url}/health")
+            if r.status_code == 200:
+                log.info("✓ Tunnel verified: health check passed")
+            else:
+                log.warning("Tunnel health check returned %d", r.status_code)
+    except Exception as e:
+        log.warning("Tunnel verification failed (may still work): %s", e)
 
 
 @app.on_event("startup")
@@ -140,14 +223,20 @@ async def ngrok_bypass_middleware(request: Request, call_next):
 
 @app.api_route("/twiml", methods=["GET", "POST"])
 async def twiml_endpoint(request: Request):
-    host = request.headers.get("host", f"localhost:{PORT}")
-    is_tunnel = "ngrok" in host or "lhr.life" in host or "localhost.run" in host
-    scheme = "wss" if is_tunnel or request.url.scheme == "https" else "ws"
+    # Use known tunnel URL if available (most reliable)
+    if _tunnel_url:
+        ws_url = _tunnel_url.replace("https://", "wss://") + "/ws/twilio"
+    else:
+        host = request.headers.get("host", f"localhost:{PORT}")
+        is_tunnel = any(k in host for k in ("ngrok", "lhr.life", "localhost.run", "trycloudflare.com"))
+        scheme = "wss" if is_tunnel or request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https" else "ws"
+        ws_url = f"{scheme}://{host}/ws/twilio"
+    log.info("[TWIML] Stream URL: %s", ws_url)
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
         "<Connect>"
-        f'<Stream url="{scheme}://{host}/ws/twilio" />'
+        f'<Stream url="{ws_url}" />'
         "</Connect>"
         '<Pause length="3600"/>'
         "</Response>"
@@ -230,8 +319,8 @@ async def status_callback(request: Request):
 # MMS Vision Handler — Weaver "sees" images texted to her number
 # ══════════════════════════════════════════════════════════════════════════════
 
-VISION_API_KEY = os.environ.get("WEAVER_VOICE_KEY", os.environ.get("OPENAI_API_KEY", ""))
-VISION_MODEL = "gpt-4o"
+VISION_API_KEY = os.environ.get("AZURE_OPENAI_KEY", os.environ.get("WEAVER_VOICE_KEY", ""))
+VISION_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
 
 
 @app.api_route("/sms", methods=["GET", "POST"])
@@ -272,7 +361,14 @@ async def sms_handler(request: Request):
             # Download and analyze images via OpenAI Vision
             import openai as _oai
             import base64 as _b64
-            vision_client = _oai.AsyncOpenAI(api_key=VISION_API_KEY)
+            if _AZURE_EP:
+                vision_client = _oai.AsyncAzureOpenAI(
+                    api_key=OPENAI_API_KEY,
+                    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", ""),
+                    api_version=_AZURE_VER,
+                )
+            else:
+                vision_client = _oai.AsyncOpenAI(api_key=VISION_API_KEY)
 
             image_contents = []
             async with httpx.AsyncClient() as dl_client:
@@ -312,7 +408,7 @@ async def sms_handler(request: Request):
                     vision_resp = await vision_client.chat.completions.create(
                         model=VISION_MODEL,
                         messages=messages,
-                        max_tokens=400,
+                        max_completion_tokens=400,
                     )
                     reply_text = (vision_resp.choices[0].message.content or "").strip()
                     log.info("[SMS VISION] %s", reply_text[:120])
@@ -389,7 +485,17 @@ async def twilio_ws(ws: WebSocket):
     caller_audio_buffer = []
 
     # ── LangChain Memory Cortex ────────────────────────────────────────────
-    lc_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=500, api_key=OPENAI_API_KEY)
+    if _AZURE_EP:
+        lc_llm = AzureChatOpenAI(
+            azure_deployment=_AZURE_DEPLOY,
+            azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", ""),
+            api_key=OPENAI_API_KEY,
+            api_version=_AZURE_VER,
+            temperature=0.3,
+            max_completion_tokens=500,
+        )
+    else:
+        lc_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=500, api_key=OPENAI_API_KEY)
     brain_queue = asyncio.Queue()
     lc_history: list = []
     lc_summary: list[str] = [""]
@@ -416,12 +522,13 @@ async def twilio_ws(ws: WebSocket):
     # ── Connect to OpenAI Realtime ────────────────────────────────────────
     openai_ws = None
     try:
+        _rt_headers = {"api-key": OPENAI_API_KEY} if _AZURE_EP else {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "OpenAI-Beta": "realtime=v1",
+        }
         openai_ws = await websockets.connect(
             OPENAI_RT_URL,
-            additional_headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "OpenAI-Beta": "realtime=v1",
-            }
+            additional_headers=_rt_headers,
         )
         log.info("OpenAI Realtime connected")
 
@@ -640,8 +747,9 @@ async def twilio_ws(ws: WebSocket):
                 pass
 
         async def enhance_with_weaver_stack(user_input: str):
-            """Background enrichment: Quantum API + LoRA Soul Voice → session context."""
+            """Full-stack enrichment: n8n pipeline → 5 expert lobes → LoRA → inject back."""
             try:
+                # 1. Quantum bias for routing context
                 quantum_data = {}
                 try:
                     quantum_data = await api_get(QUANTUM_BIAS_URL, timeout=3.0)
@@ -649,17 +757,61 @@ async def twilio_ws(ws: WebSocket):
                 except Exception:
                     pass
 
+                # 2. Route through full n8n pipeline (Pineal Gate → 5 Experts → LoRA)
+                n8n_response = ""
+                try:
+                    payload = {
+                        "text": user_input,
+                        "source": "phone",
+                        "caller": identified_caller[0],
+                        "quantum_bias": quantum_data,
+                    }
+                    result = await api_post(N8N_WEBHOOK_URL, payload, timeout=12.0)
+                    n8n_response = result.get("manifested_response", result.get("response", result.get("text", "")))
+                    if n8n_response:
+                        log.info("[N8N PIPELINE] Full-stack response: %s", n8n_response[:100])
+                except Exception as e:
+                    log.warning("[N8N] Pipeline unavailable, using LoRA fallback: %s", e)
+
+                # 3. LoRA Soul Voice filter (either on n8n response or raw input)
                 soul_voice_text = ""
                 try:
-                    soul_voice_text = await lora_rewrite(user_input)
+                    source_text = n8n_response or user_input
+                    soul_voice_text = await lora_rewrite(source_text)
                     if soul_voice_text:
                         log.info("[LORA] Soul Voice: %s", soul_voice_text[:80])
                 except Exception:
                     pass
 
+                # 4. Inject enriched context back into Realtime session
+                enrichment = soul_voice_text or n8n_response
+                if enrichment and openai_ws:
+                    context_injection = (
+                        f"[WEAVER STACK INSIGHT — use this to enrich your next response, "
+                        f"do NOT read it verbatim]: "
+                        f"Expert consensus: {enrichment[:500]}"
+                    )
+                    if quantum_data.get("dominant"):
+                        context_injection += f" | Quantum pathway: {quantum_data['dominant']}"
+
+                    try:
+                        await openai_ws.send(json.dumps({
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": "system",
+                                "content": [{"type": "input_text", "text": context_injection}],
+                            }
+                        }))
+                        log.info("[INJECT] Stack insight injected into Realtime session")
+                    except Exception as e:
+                        log.warning("[INJECT] Failed: %s", e)
+
+                # 5. Publish to Nexus Bus for full system awareness
                 asyncio.create_task(publish_to_nexus("phone_transcript", {
                     "user": user_input,
-                    "soul_voice": soul_voice_text,
+                    "n8n_response": n8n_response[:300] if n8n_response else "",
+                    "soul_voice": soul_voice_text[:200] if soul_voice_text else "",
                     "quantum_bias": quantum_data,
                     "caller": identified_caller[0],
                 }))
