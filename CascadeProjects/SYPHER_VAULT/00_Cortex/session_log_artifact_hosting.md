@@ -81,3 +81,21 @@ Related: [[pretrain_corpus_shards]]
 - 30 distinct snake_case tools (e.g. check_disk, check_inodes, list_deleted_open_files, du_breakdown, reset_index_block, docker_prune_volumes, set_prometheus_flag).
 - Key trap patterns covered: inode exhaustion (df lies), deleted-but-open fd, wrong mount (data dir vs /), TMPDIR/innodb_tmpdir spill to tiny /tmp, docker volumes vs images, Kafka per-topic retention override, ES latched read_only_allow_delete, k8s imagefs DiskPressure, Prometheus missing retention.size, core-dump crash loop.
 - See [[Pretrain MoE Workflow]] for the broader tool-model training effort.
+
+## 2026-06-16 — DATA LOSS postmortem + pipeline fix + pilot regen
+
+- **Lost:** waves 2–17 (the 4:51–5:23am Jun-15 marathon: Kafka, K8s SRE, container net/DNS, TLS,
+  LBs, CI/CD, Cloud IAM, autoscaling, disk/ENOSPC, systemd, Terraform, ETL/Airflow…) were staged to
+  `/tmp/gen/wave_N.json` and **never run through `merge_traces.py`**. `/tmp` was reclaimed; the dir is
+  gone, no backups, no stash. ~250 validated traces evaporated. Only Wave 1's 36 (+10 seeds) survived
+  in `agentic_traces.jsonl` because that wave was merged. (Confirms obs #2726.)
+- **Root cause:** ephemeral staging + deferred merge. Generation wrote to `/tmp`; the persistent corpus
+  only updated for Wave 1. Anything not merged before the next `/tmp` cleanup is unrecoverable.
+- **Fix (durable):** generate into repo-internal `distill/waves/` and run `merge_traces.py` **immediately**
+  after each wave. Never stage trace output in `/tmp` again. Memory: [[distill-stage-in-repo-not-tmp]].
+- **Surviving work committed** (`266e6f4`): 46-trace corpus + merge/eval/sft pipeline, now version-tracked.
+- **Pilot regen (3 waves, subscription subagents, NOT API):** k8s_sre (14 traces / 22 tools / 8 misleading-
+  success traps), cicd (14 / 27 / 5), disk_enospc (14 / 46 / 12). Independent validation + `merge_traces`
+  gate: **+42 added, 0 dup, 0 invalid → corpus = 88 traces, 88 unique prompts, 190 distinct tools.**
+- **NEXT (pending user):** finish regen of the remaining lost domains (~13 waves) the same way, OR proceed
+  to SFT/eval on the 88-trace corpus. Related: [[Pretrain MoE Workflow]]
