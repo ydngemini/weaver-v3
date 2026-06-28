@@ -99,3 +99,23 @@ Related: [[pretrain_corpus_shards]]
   gate: **+42 added, 0 dup, 0 invalid → corpus = 88 traces, 88 unique prompts, 190 distinct tools.**
 - **NEXT (pending user):** finish regen of the remaining lost domains (~13 waves) the same way, OR proceed
   to SFT/eval on the 88-trace corpus. Related: [[Pretrain MoE Workflow]]
+
+## 2026-06-27 — Full regen via Workflow (13 lost domains restored) + session-limit interrupt
+
+- **Orchestration:** dynamic Workflow `distill-regen-restore` — pipeline generate→verify→repair over 20 domains
+  (13 lost + 7 enrichment), each wave written to repo-internal `distill/waves/` (never /tmp). 33 agents, ~890k
+  subagent tokens.
+- **Restored (13, all merged):** distributed_db, kafka, distributed_systems, conn_pools, schema_migrations,
+  container_net_dns, tls_certs, load_balancers, cloud_iam, autoscaling, systemd, terraform, etl_airflow —
+  14 traces each. Independent format validator: 16/16 wave files VALID, 0 invalid. Manual spot-check confirmed
+  genuine misleading-success traps (e.g. kafka kraft-quorum healthy-snapshot trap; distributed_db in-doubt
+  PREPARED XA branch invisible to processlist; terraform stale-lockfile).
+- **merge_traces gate:** +182 added, 0 dup, 0 invalid → **corpus = 270 traces / 270 unique prompts / 475 tools.**
+- **Session limit hit mid-run (resets 8:20pm ET):** ALL 20 LLM verify stages + 7 enrichment generates failed.
+  So two gaps remain: (1) the 7 enrichment domains — secrets_vault, grpc_streaming, postgres_locks,
+  redis_cluster, oauth_tokens, rate_limiting, prometheus_alerting — were never generated; (2) the LLM
+  semantic-quality audit never ran on the 13 new waves (covered for now by deterministic format validation +
+  manual spot-check, not a full per-trace audit).
+- **TODO after reset:** re-run Workflow for the 7 enrichment waves + a verify-only pass over the 13 new waves
+  (`resumeFromRunId` will replay the 13 cached gens and only run the failed verify/gen stages). Then SFT/eval.
+  Related: [[Pretrain MoE Workflow]], [[distill-stage-in-repo-not-tmp]]
