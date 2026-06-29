@@ -103,3 +103,64 @@ raise `MemoryMax` in weaver.service. 24 GB has the headroom.
 - **A package in requirements fails on ARM** → it's likely a VTV/audio dep; comment it out, headless doesn't need it.
 - **Experts 400 on Gemini** → the code already sends `max_tokens` (not `max_completion_tokens`) for non-Azure backends; if a model name is rejected, set `WEAVER_LLM_MODEL=gemini-1.5-flash`.
 - **Health checks show "not responding" right after boot** → expected; `start_weaver.sh` probes at +12s but the stack needs ~50s. Use `journalctl -u weaver -f`.
+
+---
+
+# Full deployment: + Oracle frontend, public HTTPS, fully-local experts
+
+This extends the headless backend above with (a) the 5 expert lobes running on a
+**local llama.cpp** server (no API quota), (b) the **Oracle command-center frontend +
+backend**, and (c) a **public Caddy TLS** layer. Bare-metal + systemd, no Docker.
+
+**What you get:** `https://<host>` serves the Oracle UI; Weaver's brain runs headless
+behind it. Note the Oracle backend boots in **demo mode** (UI + a mock `/ws` event
+stream) — it tolerates having no database. It does *not* yet consume Weaver's Nexus Bus;
+wiring the real brain→UI bridge is a separate task (see plan Phase 6). Real persistence
+is opt-in later via `ORACLE_DB_*`.
+
+## A. One free public hostname (zero signup)
+Use `<PUBLIC_IP>.sslip.io` — sslip.io resolves it to your IP, and Let's Encrypt will
+issue a real cert for it. (DuckDNS or your own domain also work.)
+
+## B. Upload the Oracle code too (from local, after step 2 above)
+```bash
+rsync -avz --exclude node_modules --exclude venv --exclude .next \
+    "/media/ydn/SYPHER_CORE2/Oracle/" ubuntu@<IP>:~/oracle/
+```
+
+## C. One script does the rest (on the box, after `setup_oracle.sh`)
+```bash
+cd ~/weaver/CascadeProjects/windsurf-project
+cp deploy/env.oracle.example .env          # already defaults to WEAVER_LLM_BACKEND=local
+#   → fill IBM_QUANTUM_TOKEN (optional)
+export ORACLE_HOST=<PUBLIC_IP>.sslip.io
+bash deploy/setup_oracle_extras.sh         # experts GGUF + Oracle backend/venv +
+                                           # frontend build + Caddy + all systemd units
+#   → then edit ~/oracle/backend/.env: ORACLE_SECRET_KEY, ORACLE_ADMIN_ID/PASSPHRASE
+sudo systemctl restart oracle-backend
+```
+This installs + starts four units: `weaver-llm` (experts :8090), `weaver` (`--headless`),
+`oracle-backend` (:8000), and `caddy` (:443).
+
+## D. Open the firewall — BOTH layers (Oracle's #1 gotcha)
+1. Oracle console → VCN → Security List → Ingress `0.0.0.0/0` TCP **80,443**.
+2. On the box: `sudo iptables -I INPUT 5 -p tcp --dport 80 -j ACCEPT && \
+   sudo iptables -I INPUT 5 -p tcp --dport 443 -j ACCEPT` then persist with
+   `iptables-persistent`. The script prints these too.
+
+## E. Verify
+```bash
+journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f   # all green
+curl 127.0.0.1:8090/v1/models                                     # experts server up
+curl 127.0.0.1:8000/health                                        # oracle backend up
+# from your laptop:
+#   https://<PUBLIC_IP>.sslip.io   → Oracle UI loads, valid cert, wss://.../ws connects
+```
+**Security:** `9999`/`8899`/`8090`/`8000` stay localhost-only — only `443`/`22` are public.
+Set `ORACLE_SECRET_KEY`, an admin login, and keep `ORACLE_ENABLE_DEMO_LOGINS=0`.
+
+## Local experts vs Gemini
+The box defaults to local llama.cpp (`weaver-llm.service`). Five expert calls/request on
+4 ARM cores ≈ a few seconds each. If too slow, flip `.env` to
+`WEAVER_LLM_BACKEND=gemini` + `GEMINI_API_KEY=...` and `systemctl restart weaver`
+(you can `systemctl disable --now weaver-llm` to reclaim its RAM).

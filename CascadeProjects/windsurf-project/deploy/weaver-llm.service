@@ -1,0 +1,30 @@
+[Unit]
+Description=Weaver local expert LLM (llama.cpp OpenAI-compatible server on 127.0.0.1:8090)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/weaver/CascadeProjects/windsurf-project
+# Serves the 5 expert lobes when WEAVER_LLM_BACKEND=local + WEAVER_LLM_MODEL=weaver-local.
+# The experts GGUF is fetched by deploy/setup_oracle_extras.sh into models/experts.gguf.
+# Reuses the llama-cpp-python already installed by deploy/setup_oracle.sh (OpenBLAS).
+# Tune --n_threads / --n_ctx / --model to your box and chosen model.
+ExecStart=/home/ubuntu/weaver/CascadeProjects/windsurf-project/venv/bin/python3 -m llama_cpp.server \
+    --model /home/ubuntu/weaver/CascadeProjects/windsurf-project/models/experts.gguf \
+    --model_alias weaver-local \
+    --host 127.0.0.1 --port 8090 \
+    --n_ctx 4096 --n_threads 4
+Restart=on-failure
+RestartSec=5
+# Model load on a cold ARM box can take a bit; don't health-kill early.
+TimeoutStartSec=120
+# A 1B Q4_K_M is ~1.2 GB resident — raise both if you serve a larger experts model.
+MemoryHigh=3G
+MemoryMax=4G
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

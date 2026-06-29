@@ -1,0 +1,36 @@
+# Public TLS reverse proxy for the Oracle command center.
+#
+# ORACLE_HOST must be set in caddy's environment (setup_oracle_extras.sh writes a
+# systemd drop-in that reads /etc/default/caddy). Use a real hostname so Let's
+# Encrypt can issue — e.g. <PUBLIC_IP>.sslip.io (zero-signup) or your own domain.
+#
+# Ports 80 + 443 must be open in BOTH layers:
+#   1) Oracle Cloud VCN Security List (ingress 0.0.0.0/0 tcp 80,443)
+#   2) the box's local iptables (Oracle Ubuntu ships default REJECT)
+#
+# NEVER reverse-proxy Weaver's internal ports (9999 bus, 8899 LoRA, 8090 experts)
+# or the Oracle backend (8000) to the public — only the routes below are exposed.
+
+{$ORACLE_HOST} {
+	encode zstd gzip
+
+	# Oracle backend: REST routers + the /ws WebSocket. reverse_proxy performs the
+	# WebSocket upgrade automatically. VITE_API_BASE=https://$ORACLE_HOST (root) so
+	# the SPA's `${API_BASE}/auth/login` etc. land here; VITE_WS_URL=wss://.../ws.
+	@api path /api/* /auth/* /billing/* /health /ws /ws/*
+	reverse_proxy @api 127.0.0.1:8000
+
+	# OPTIONAL — expose the Weaver health dashboard behind basic-auth. Generate the
+	# hash with `caddy hash-password`. Leave commented unless you want it public.
+	# handle_path /weaver-health/* {
+	# 	basicauth { ydn <BCRYPT_HASH> }
+	# 	reverse_proxy 127.0.0.1:9996
+	# }
+
+	# Everything else: the built Vite SPA, with client-side routing fallback.
+	handle {
+		root * /var/www/oracle
+		try_files {path} /index.html
+		file_server
+	}
+}

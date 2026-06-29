@@ -1,7 +1,8 @@
 [Unit]
 Description=Weaver v4 headless full stack (Nexus Bus, Quantum Soul, Pineal Gate, Experts, Soul Voice)
-After=network-online.target
-Wants=network-online.target
+# Experts run on the local llama.cpp server (weaver-llm.service); start it first.
+After=network-online.target weaver-llm.service
+Wants=network-online.target weaver-llm.service
 
 [Service]
 Type=simple

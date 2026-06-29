@@ -1,0 +1,23 @@
+[Unit]
+Description=Oracle command-center backend (FastAPI/uvicorn on 127.0.0.1:8000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/oracle/backend
+# '-' makes the env file optional; the backend's lifespan tolerates a DB-less boot
+# (runs in demo mode — UI + mock /ws stream — until ORACLE_DB_* are provided).
+EnvironmentFile=-/home/ubuntu/oracle/backend/.env
+ExecStart=/home/ubuntu/oracle/backend/venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=60
+MemoryHigh=1G
+MemoryMax=1500M
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
