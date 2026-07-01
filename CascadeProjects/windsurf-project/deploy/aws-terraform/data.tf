@@ -4,10 +4,24 @@ data "aws_vpc" "default" {
   default = true
 }
 
+# Only consider AZs that actually offer the chosen instance type — e.g. us-east-1e
+# has no Graviton, and a blind subnets[0] pick can land there and fail RunInstances.
+data "aws_ec2_instance_type_offerings" "supported" {
+  filter {
+    name   = "instance-type"
+    values = [var.instance_type]
+  }
+  location_type = "availability-zone"
+}
+
 data "aws_subnets" "default" {
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.default.id]
+  }
+  filter {
+    name   = "availability-zone"
+    values = data.aws_ec2_instance_type_offerings.supported.locations
   }
 }
 
