@@ -35,7 +35,10 @@ if ls "$MERGED_DIR"/*.safetensors >/dev/null 2>&1 || [ -f "$MERGED_DIR/pytorch_m
     echo "   (already merged — skipping)"
 else
     [ -d "$MERGED_DIR" ] && rm -rf "$MERGED_DIR"   # clear any config-only stub
-    venv/bin/python3 merge_lora.py --output "$MERGED_DIR"
+    # Merge onto the fp16 base (deploy/merge_for_gguf.py) — merging into the bnb-4bit
+    # base fails to save_pretrained under transformers >=5. Override base with
+    # WEAVER_MERGE_BASE if needed.
+    venv/bin/python3 deploy/merge_for_gguf.py --output "$MERGED_DIR"
 fi
 
 echo "▶ 2/3  Convert HF → f16 GGUF"
@@ -54,7 +57,9 @@ if [ -z "$QUANT_BIN" ]; then
     cmake --build "$LLAMA_CPP/build" --target llama-quantize -j"$(nproc)"
     QUANT_BIN="$LLAMA_CPP/build/bin/llama-quantize"
 fi
-"$QUANT_BIN" "$F16_GGUF" "$OUT_GGUF" Q4_K_M
+# The build's binaries lack an $ORIGIN rpath — point the loader at their own dir.
+LD_LIBRARY_PATH="$(dirname "$QUANT_BIN")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$QUANT_BIN" "$F16_GGUF" "$OUT_GGUF" Q4_K_M
 
 rm -f "$F16_GGUF"
 echo ""
