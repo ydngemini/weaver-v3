@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored — never commit it.
+region         = "us-east-1"
+instance_type  = "t4g.large" # 2 vCPU / 8 GB — fits fully-local experts. t4g.medium (4 GB) if Gemini-backed.
+root_volume_gb = 50
+
+# REQUIRED. Your public IP as a /32 — find it with: curl -s ifconfig.me
+# Never use 0.0.0.0/0 here (that exposes SSH to the whole internet).
+ssh_ingress_cidr = "203.0.113.4/32"
+
+public_key_path = "~/.ssh/id_ed25519.pub"
+project_name    = "weaver"

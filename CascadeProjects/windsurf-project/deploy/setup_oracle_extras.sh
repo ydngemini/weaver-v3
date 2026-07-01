@@ -8,12 +8,14 @@
 #   ORACLE_HOST          public hostname for TLS, e.g. <PUBLIC_IP>.sslip.io
 # Optional env:
 #   EXPERTS_GGUF_URL     override the experts model download URL
+#   CLOUD                aws|oracle (default oracle) — tunes the final firewall guidance
 set -euo pipefail
 
 WIN="$HOME/weaver/CascadeProjects/windsurf-project"
 ORA="$HOME/oracle"
 : "${ORACLE_HOST:?set ORACLE_HOST=<PUBLIC_IP>.sslip.io (or your domain) first}"
 EXPERTS_GGUF_URL="${EXPERTS_GGUF_URL:-https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf}"
+CLOUD="${CLOUD:-oracle}"
 
 echo "▶ 1/6  Experts GGUF for the local expert LLM (:8090)"
 mkdir -p "$WIN/models"
@@ -70,6 +72,18 @@ echo "   …giving the experts server a few seconds to load before Weaver starts
 sleep 6
 sudo systemctl enable --now weaver
 
+if [ "$CLOUD" = "aws" ]; then
+echo "▶ 6/6  Firewall (AWS — Security Group only)"
+cat <<EOF
+
+✅ Services installed and starting.
+Firewall: your Terraform Security Group already allows 80 + 443 (0.0.0.0/0) and 22 (your IP).
+AWS Ubuntu AMIs ship no default iptables REJECT — there is nothing to open on this box.
+
+Then:  https://$ORACLE_HOST
+Logs:  journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f
+EOF
+else
 echo "▶ 6/6  Firewall (the Oracle #1 gotcha — two layers)"
 cat <<EOF
 
@@ -84,3 +98,4 @@ cat <<EOF
 Then:  https://$ORACLE_HOST
 Logs:  journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f
 EOF
+fi
