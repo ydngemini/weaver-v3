@@ -17,8 +17,13 @@
 	# Oracle backend: REST routers + the /ws WebSocket. reverse_proxy performs the
 	# WebSocket upgrade automatically. VITE_API_BASE=https://$ORACLE_HOST (root) so
 	# the SPA's `${API_BASE}/auth/login` etc. land here; VITE_WS_URL=wss://.../ws.
+	# MUST be a handle block: a bare `reverse_proxy @api` sorts AFTER the SPA's
+	# catch-all `handle` in Caddy's directive order, so the SPA would swallow /health
+	# and /ws. handle blocks are mutually exclusive, evaluated in written order.
 	@api path /api/* /auth/* /billing/* /health /ws /ws/*
-	reverse_proxy @api 127.0.0.1:8000
+	handle @api {
+		reverse_proxy 127.0.0.1:8000
+	}
 
 	# OPTIONAL — expose the Weaver health dashboard behind basic-auth. Generate the
 	# hash with `caddy hash-password`. Leave commented unless you want it public.

@@ -34,8 +34,10 @@ fi
 
 echo "▶ Inference deps: OpenAI client + llama-cpp-python (built with OpenBLAS)"
 venv/bin/pip install --upgrade "openai>=1.40" python-dotenv
+# [server] extra is REQUIRED — weaver-llm.service runs `python -m llama_cpp.server`,
+# which imports uvicorn/fastapi/sse-starlette (crash-loops without them).
 CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS" \
-    venv/bin/pip install --upgrade llama-cpp-python
+    venv/bin/pip install --upgrade "llama-cpp-python[server]"
 
 echo "▶ Sanity: GGUF present?"
 GGUF="$PROJ/weaver_merged_1B_Q4_K_M.gguf"
