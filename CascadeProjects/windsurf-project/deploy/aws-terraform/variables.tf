@@ -16,13 +16,13 @@ variable "root_volume_gb" {
   default     = 50
 }
 
-variable "ssh_ingress_cidr" {
-  description = "CIDR allowed to reach SSH (port 22). Set to YOUR_IP/32 (curl ifconfig.me). NEVER 0.0.0.0/0."
-  type        = string
+variable "ssh_ingress_cidrs" {
+  description = "CIDRs allowed to reach SSH (port 22). Prefer YOUR_IP/32; a rotating-IP ISP may need your provider's /16(s). NEVER 0.0.0.0/0."
+  type        = list(string)
 
   validation {
-    condition     = can(cidrhost(var.ssh_ingress_cidr, 0))
-    error_message = "ssh_ingress_cidr must be a valid CIDR, e.g. 203.0.113.4/32."
+    condition     = length(var.ssh_ingress_cidrs) > 0 && alltrue([for c in var.ssh_ingress_cidrs : can(cidrhost(c, 0))])
+    error_message = "ssh_ingress_cidrs must be a non-empty list of valid CIDRs, e.g. [\"203.0.113.4/32\"]."
   }
 }
 

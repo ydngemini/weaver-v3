@@ -319,9 +319,18 @@ def build_experts(hub: AkashicHub,
         Dict mapping dimension name → SLMExpertLobe instance.
     """
     if api_key is None:
-        api_key = os.environ.get("WEAVER_MEM_KEY", "")
+        # Each backend uses its own credential; only the paid azure/openai path
+        # needs WEAVER_MEM_KEY. Local (llama.cpp) and Gemini run free / free-tier,
+        # so the full 5-expert MoE works with no paid key on the cloud box.
+        if LLM_BACKEND == "local":
+            api_key = os.environ.get("WEAVER_LOCAL_LLM_KEY", "local")
+        elif LLM_BACKEND == "gemini":
+            api_key = os.environ.get("GEMINI_API_KEY", "")
+        else:
+            api_key = os.environ.get("WEAVER_MEM_KEY", "")
     if not api_key:
-        raise RuntimeError("SLM experts require WEAVER_MEM_KEY in .env")
+        _need = {"local": "WEAVER_LOCAL_LLM_KEY", "gemini": "GEMINI_API_KEY"}.get(LLM_BACKEND, "WEAVER_MEM_KEY")
+        raise RuntimeError(f"SLM experts backend '{LLM_BACKEND}' needs {_need} in .env")
 
     experts = {}
     for dim in EXPERT_PROMPTS:

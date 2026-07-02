@@ -23,11 +23,11 @@ resource "aws_security_group" "this" {
   tags        = local.tags
 
   ingress {
-    description = "SSH - locked to operator IP"
+    description = "SSH - locked to operator network(s)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.ssh_ingress_cidr]
+    cidr_blocks = var.ssh_ingress_cidrs
   }
 
   ingress {

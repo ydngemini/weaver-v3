@@ -32,6 +32,13 @@ if [ -f requirements.txt ]; then
         echo "   ⚠ some optional deps failed — that's OK for headless; check log"
 fi
 
+# Core brain runtime deps installed EXPLICITLY — a single `pip install -r` aborts on
+# the first unbuildable optional package, silently skipping everything after it, which
+# left Nexus Bus / MoE router / Obsidian bridge dark on the first cloud run. These are
+# pure-Python (ARM wheels) and non-negotiable for the headless brain.
+echo "▶ Core brain runtime deps (explicit — survive a partial requirements failure)"
+venv/bin/pip install --upgrade websockets scikit-learn aiohttp watchdog httpx numpy
+
 echo "▶ Inference deps: OpenAI client + llama-cpp-python (built with OpenBLAS)"
 venv/bin/pip install --upgrade "openai>=1.40" python-dotenv
 # [server] extra is REQUIRED — weaver-llm.service runs `python -m llama_cpp.server`,

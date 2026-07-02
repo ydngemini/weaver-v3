@@ -279,30 +279,45 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     _dream_state_fn = None
 
     if akashic_hub is not None:
-        import httpx as _pulse_httpx
-        from langchain_openai import ChatOpenAI as _PulseLLM, AzureChatOpenAI as _AzurePulseLLM
-        from langchain_core.messages import HumanMessage as _PHMsg, SystemMessage as _PSMsg
-
-        _az_key = os.environ.get("AZURE_OPENAI_KEY", "")
-        _az_ep = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
-        _az_dep = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
-        _az_ver = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-        if _az_key and _az_ep:
-            _pulse_llm = _AzurePulseLLM(
-                azure_deployment=_az_dep,
-                azure_endpoint=_az_ep,
-                api_key=_az_key,
-                api_version=_az_ver,
-                temperature=0.7,
-                max_completion_tokens=300,
-            )
-        else:
-            _pulse_llm = _PulseLLM(
-                model="gpt-4o-mini", temperature=0.7, max_tokens=300,
-                api_key=os.environ.get("WEAVER_VOICE_KEY", os.environ.get("OPENAI_API_KEY", "")),
-            )
+        # Proactive Pulse + Dream need a langchain LLM backend (OpenAI/Azure key).
+        # Guard like every other optional lobe: degrade cleanly when the lib or the
+        # key is absent (e.g. the cloud-free Gemini-only deployment) instead of
+        # crashing the whole process on an un-guarded import.
+        _pulse_ready = False
+        _pulse_llm = None
+        _pulse_httpx = None
         _pulse_hub = akashic_hub
         _vault_dir = os.path.join(PROJ, "Nexus_Vault")
+        try:
+            import httpx as _pulse_httpx
+            from langchain_openai import ChatOpenAI as _PulseLLM, AzureChatOpenAI as _AzurePulseLLM
+            from langchain_core.messages import HumanMessage as _PHMsg, SystemMessage as _PSMsg
+
+            _az_key = os.environ.get("AZURE_OPENAI_KEY", "")
+            _az_ep = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+            _az_dep = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
+            _az_ver = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+            _oa_key = os.environ.get("WEAVER_VOICE_KEY", os.environ.get("OPENAI_API_KEY", ""))
+            if _az_key and _az_ep:
+                _pulse_llm = _AzurePulseLLM(
+                    azure_deployment=_az_dep,
+                    azure_endpoint=_az_ep,
+                    api_key=_az_key,
+                    api_version=_az_ver,
+                    temperature=0.7,
+                    max_completion_tokens=300,
+                )
+                _pulse_ready = True
+            elif _oa_key:
+                _pulse_llm = _PulseLLM(
+                    model="gpt-4o-mini", temperature=0.7, max_tokens=300,
+                    api_key=_oa_key,
+                )
+                _pulse_ready = True
+            else:
+                print("  ⚠️  Proactive Pulse / Dream disabled — no OpenAI/Azure key (cloud-free mode)", flush=True)
+        except ImportError as _pulse_e:
+            print(f"  ⚠️  Proactive Pulse / Dream disabled — {_pulse_e}", flush=True)
 
         async def _proactive_pulse():
             """Monitor quantum state + Akashic resonance. Call Nate on high-interference events."""
@@ -378,7 +393,8 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                 except Exception as e:
                     print(f"[PULSE] Error: {e}", flush=True)
 
-        _proactive_pulse_fn = _proactive_pulse
+        if _pulse_ready:
+            _proactive_pulse_fn = _proactive_pulse
 
         async def _dream_state():
             """Full-stack dreaming: triggers after 15 min of inactivity, routes through all experts."""
@@ -520,7 +536,8 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                 except Exception as e:
                     print(f"[DREAM] Error: {e}", flush=True)
 
-        _dream_state_fn = _dream_state
+        if _pulse_ready:
+            _dream_state_fn = _dream_state
 
     if run_vtv is None and not headless:
         print("[WEAVER] ❌ vtv_basic failed to load — cannot continue.", flush=True)

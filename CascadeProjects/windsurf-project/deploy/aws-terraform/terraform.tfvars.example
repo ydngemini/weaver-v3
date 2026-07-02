@@ -3,9 +3,9 @@ region         = "us-east-1"
 instance_type  = "t4g.large" # 2 vCPU / 8 GB — fits fully-local experts. t4g.medium (4 GB) if Gemini-backed.
 root_volume_gb = 50
 
-# REQUIRED. Your public IP as a /32 — find it with: curl -s ifconfig.me
-# Never use 0.0.0.0/0 here (that exposes SSH to the whole internet).
-ssh_ingress_cidr = "203.0.113.4/32"
+# REQUIRED. List of CIDRs allowed to SSH. Your public IP as a /32 — find it with: curl -s ifconfig.me
+# On a rotating-IP ISP you can list your provider's /16(s). Never use 0.0.0.0/0 (exposes SSH to the internet).
+ssh_ingress_cidrs = ["203.0.113.4/32"]
 
 public_key_path = "~/.ssh/id_ed25519.pub"
 project_name    = "weaver"
