@@ -33,7 +33,14 @@ python3 -m venv "$ORA/backend/venv"
     echo "   ⚠ created $ORA/backend/.env from template — set ORACLE_SECRET_KEY + admin creds before going public"; }
 
 echo "▶ 3/6  Build the Oracle frontend (prod env baked in) → /var/www/oracle"
-sudo apt-get install -y nodejs npm
+# Vite requires Node >=20; Ubuntu 24.04's apt nodejs is 18. Use NodeSource if too old.
+if ! command -v node >/dev/null 2>&1 || \
+   [ "$(node -p 'parseInt(process.versions.node)')" -lt 20 ]; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo apt-get install -y nodejs        # NodeSource nodejs bundles npm
+else
+    sudo apt-get install -y npm || true   # apt node is fine — just ensure npm
+fi
 cd "$ORA/oracle-app"
 npm ci || npm install
 VITE_WS_URL="wss://$ORACLE_HOST/ws" \
