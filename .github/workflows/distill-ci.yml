@@ -1,0 +1,64 @@
+name: distill-ci
+
+# Gate for the MoE distillation SFT/eval pipeline. Runs only when the
+# pretrain_moe tree changes, so unrelated commits get fast green.
+on:
+  push:
+    paths:
+      - "CascadeProjects/windsurf-project/pretrain_moe/**"
+      - ".github/workflows/distill-ci.yml"
+  pull_request:
+    paths:
+      - "CascadeProjects/windsurf-project/pretrain_moe/**"
+      - ".github/workflows/distill-ci.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: distill-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: CascadeProjects/windsurf-project/pretrain_moe/distill
+
+jobs:
+  # Fast lane: pure-stdlib scoring + data integrity. No torch, no GPU — seconds.
+  scoring-smoke:
+    name: scoring + data (no torch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tool-call scoring smoke (parse / score / holdout)
+        run: python eval_toolcall.py --smoke
+      - name: Validate trace corpus + wave batches
+        run: python validate_traces.py
+      - name: Corpus stats (sanity, non-gating)
+        run: python merge_traces.py --stats
+
+  # Trainer lane: needs torch to exercise masking + a few real train steps on a
+  # tiny random-init MoEGPT. CPU wheel only — the smoke never touches CUDA.
+  trainer-smoke:
+    name: SFT trainer smoke (torch CPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache pip (torch CPU wheel)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-torch-2.5.1-cpu-py312-${{ runner.os }}
+      - name: Install torch (CPU)
+        # CI-only pin; align with the training env's torch if it diverges.
+        run: pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+      - name: Masking + train-step smoke (random init, CPU)
+        run: python sft_train.py --smoke
