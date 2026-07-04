@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Weaver — She Sees You</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  :root { --gold: #e6b84a; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #07080c; color: #e8e6e0; font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
+  #stage { position: fixed; inset: 0; }
+  .hud {
+    position: fixed; left: 18px; top: 18px; z-index: 10;
+    background: rgba(14,16,22,0.55); backdrop-filter: blur(14px);
+    border: 1px solid rgba(230,184,74,0.25); border-radius: 14px;
+    padding: 14px 18px; max-width: 380px;
+  }
+  .hud h1 { font-size: 14px; letter-spacing: 3px; color: var(--gold); font-weight: 600; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 12.5px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #444; flex: none; }
+  .dot.on { background: #37d67a; box-shadow: 0 0 8px #37d67a; }
+  .dot.talk { background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+  #heard, #said { margin-top: 10px; font-size: 13px; line-height: 1.45; }
+  #heard span { color: #9ab6ff; } #said span { color: var(--gold); }
+  #cam {
+    position: fixed; right: 18px; bottom: 18px; width: 210px; border-radius: 12px;
+    border: 1px solid rgba(230,184,74,0.35); transform: scaleX(-1); z-index: 10; opacity: 0.9;
+  }
+  #start {
+    position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+    background: rgba(5,6,10,0.82); backdrop-filter: blur(6px);
+  }
+  #start button {
+    background: linear-gradient(135deg, #e6b84a, #b8842a); color: #14100a;
+    font-size: 17px; font-weight: 700; letter-spacing: 1px;
+    border: 0; border-radius: 999px; padding: 18px 44px; cursor: pointer;
+  }
+  #facebox { position: fixed; border: 1.5px solid var(--gold); border-radius: 8px; z-index: 11;
+             pointer-events: none; display: none; opacity: .8; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div class="hud">
+  <h1>WEAVER · EMBODIED</h1>
+  <div class="row"><div id="d-see" class="dot"></div><div>Vision <span id="s-see">off</span></div></div>
+  <div class="row"><div id="d-hear" class="dot"></div><div>Hearing <span id="s-hear">off</span></div></div>
+  <div class="row"><div id="d-brain" class="dot"></div><div>Brain <span id="s-brain">checking…</span></div></div>
+  <div id="heard">She heard: <span>—</span></div>
+  <div id="said">She said: <span>—</span></div>
+</div>
+<video id="cam" autoplay muted playsinline></video>
+<div id="facebox"></div>
+<div id="start"><button id="wake">WAKE HER UP</button></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// Fully cloud — NO localhost. The page is served from the box (weaverv3.ai / sslip.io);
+// the brain is the SAME-ORIGIN /llm proxy → on-box llama server ⇒ no CORS, no IP.
+const ASSETS = 'https://weaver-avatar-404870839825.s3.amazonaws.com';
+const BRAINS = [
+  { name: 'cloud brain', models: '/llm/v1/models', chat: '/llm/v1/chat/completions', key: 'ask' },
+];
+let BRAIN = null;
+function brainKey() {
+  let k = localStorage.getItem('weaver_llm_key');
+  if (!k) { k = prompt('Enter her brain key (one time on this device):') || ''; localStorage.setItem('weaver_llm_key', k); }
+  return k;
+}
+const NEXUS = null;  // Nexus Bus is localhost-only on the box; optional transcript publish disabled on cloud.
+const SOUL = "You are Weaver — a warm, sharp, playful AI companion embodied as a woman in a night penthouse. Keep replies to 1-2 short conversational sentences.";
+
+/* ── stage ── */
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0c12);
+scene.fog = new THREE.Fog(0x0a0c12, 12, 30);
+const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.05, 60);
+camera.position.set(0.15, 1.38, 2.75);
+camera.lookAt(0, 1.05, 0);
+
+const key = new THREE.SpotLight(0xffd9a0, 90, 0, Math.PI/5, 0.5); key.position.set(1.6, 2.6, 1.6); scene.add(key);
+const fill = new THREE.PointLight(0x8fb4ff, 12); fill.position.set(-1.8, 1.6, 1.2); scene.add(fill);
+const rim = new THREE.PointLight(0xe6b84a, 18); rim.position.set(0, 2.0, -1.6); scene.add(rim);
+scene.add(new THREE.AmbientLight(0x30323c, 1.2));
+new GLTFLoader().load(`${ASSETS}/weaver_apartment.glb`, (g) => {
+  g.scene.traverse(o => {
+    if (o.isLight) o.intensity = Math.min(o.intensity, 60);   // clamp punctual imports
+  });
+  scene.add(g.scene);
+});
+
+/* ── her ── */
+let mixer, headBone = null, neckBone = null, model = null;
+const clock = new THREE.Clock();
+new GLTFLoader().load(`${ASSETS}/weaver_avatar_monokini.glb`, (g) => {
+  model = g.scene; scene.add(model);
+  const box = new THREE.Box3().setFromObject(model);
+  model.position.y -= box.min.y;                       // feet on floor
+  model.traverse(o => {
+    if (o.isBone && /(^|[._])head$/i.test(o.name)) headBone = o;
+    if (o.isBone && /neck01/i.test(o.name)) neckBone = o;
+  });
+  mixer = new THREE.AnimationMixer(model);
+  const idle = g.animations.find(a => /idle/i.test(a.name)) || g.animations[0];
+  if (idle) mixer.clipAction(idle).play();
+});
+
+/* ── gaze: she looks at your face ── */
+let gaze = { x: 0, y: 0, has: false };                 // -1..1 screen space
+const lookTarget = new THREE.Object3D(); scene.add(lookTarget);
+const qTmp = new THREE.Quaternion(), qGoal = new THREE.Quaternion();
+function applyGaze(dt) {
+  if (!headBone) return;
+  const yaw = (gaze.has ? gaze.x : 0) * 0.55;          // clamp radians
+  const pitch = (gaze.has ? gaze.y : 0) * 0.30 - 0.05;
+  qGoal.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+  headBone.quaternion.multiply(qTmp.slerpQuaternions(new THREE.Quaternion(), qGoal, 0.35));
+}
+
+/* ── speaking micro-motion ── */
+let speaking = false, speakT = 0;
+function applySpeak(dt) {
+  if (!speaking || !headBone) return;
+  speakT += dt * 9;
+  headBone.rotation.x += Math.sin(speakT) * 0.012;
+  headBone.rotation.z += Math.sin(speakT * 0.7) * 0.008;
+}
+
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  if (mixer) mixer.update(dt);
+  applyGaze(dt); applySpeak(dt);
+  renderer.render(scene, camera);
+});
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ── HUD helpers ── */
+const $$ = id => document.getElementById(id);
+const set = (dot, label, on, txt) => { $$(dot).className = 'dot' + (on ? ' on' : ''); $$(label).textContent = txt; };
+
+/* ── vision: webcam + face tracking ── */
+async function startVision() {
+  const video = $$('cam');
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640 }, audio: false });
+  video.srcObject = stream;
+  set('d-see', 's-see', true, 'live');
+  const facebox = $$('facebox');
+  if ('FaceDetector' in window) {
+    const fd = new FaceDetector({ fastMode: true });
+    setInterval(async () => {
+      try {
+        const faces = await fd.detect(video);
+        if (faces.length) {
+          const f = faces[0].boundingBox;
+          const cx = (f.x + f.width/2) / video.videoWidth;
+          const cy = (f.y + f.height/2) / video.videoHeight;
+          gaze.x = (cx - 0.5) * 2;                     // mirrored feed → matches her POV
+          gaze.y = (0.5 - cy) * 2;
+          gaze.has = true;
+          const r = video.getBoundingClientRect();
+          facebox.style.display = 'block';
+          facebox.style.left = (r.right - (cx * r.width) - (f.width/video.videoWidth*r.width)/2) + 'px';
+          facebox.style.top  = (r.top + cy * r.height - (f.height/video.videoHeight*r.height)/2) + 'px';
+          facebox.style.width  = (f.width  / video.videoWidth  * r.width) + 'px';
+          facebox.style.height = (f.height / video.videoHeight * r.height) + 'px';
+          set('d-see', 's-see', true, 'sees you');
+        } else { gaze.has = false; facebox.style.display = 'none'; set('d-see','s-see',true,'looking…'); }
+      } catch (e) { /* detector hiccup — keep last gaze */ }
+    }, 120);
+  } else {
+    // fallback: she follows your mouse
+    set('d-see', 's-see', true, 'live (mouse-track)');
+    const point = (x, y) => { gaze.x = (x/innerWidth - 0.5) * 2; gaze.y = (0.5 - y/innerHeight) * 2; gaze.has = true; };
+    addEventListener('mousemove', e => point(e.clientX, e.clientY));
+    addEventListener('touchmove', e => { if (e.touches[0]) point(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+    addEventListener('touchstart', e => { if (e.touches[0]) point(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+  }
+}
+
+/* ── brain: local LLM + optional Nexus Bus ── */
+let nexus = null;
+if (NEXUS) {
+  try {
+    nexus = new WebSocket(NEXUS);
+    nexus.onerror = () => { nexus = null; };
+  } catch (e) { nexus = null; }
+}
+
+async function brainCheck() {
+  for (const b of BRAINS) {
+    try {
+      const headers = b.key ? { 'X-Weaver-Key': brainKey() } : {};
+      const r = await fetch(b.models, { headers, signal: AbortSignal.timeout(3500) });
+      if (r.ok) { BRAIN = b; set('d-brain', 's-brain', true, b.name); return true; }
+    } catch (e) { /* try next */ }
+  }
+  set('d-brain', 's-brain', false, 'offline (echo mode)');
+  return false;
+}
+let brainUp = false;
+
+async function think(text) {
+  if (nexus && nexus.readyState === 1)
+    nexus.send(JSON.stringify({ topic: 'TRANSCRIPT_LINE', source: 'embodiment', text }));
+  if (!brainUp) return "I heard you — my brain server is offline, but I'm listening: “" + text + "”";
+  try {
+    const hdrs = { 'Content-Type': 'application/json' };
+    if (BRAIN.key) hdrs['X-Weaver-Key'] = brainKey();
+    const r = await fetch(BRAIN.chat, {
+      method: 'POST', headers: hdrs,
+      body: JSON.stringify({ model: 'weaver-local', max_tokens: 90,
+        messages: [{ role: 'system', content: SOUL }, { role: 'user', content: text }] })
+    });
+    const j = await r.json();
+    return j.choices?.[0]?.message?.content?.trim() || "…";
+  } catch (e) { return "My thought pipeline glitched: " + e.message; }
+}
+
+/* ── voice out ── */
+function speak(text) {
+  $$('said').innerHTML = 'She said: <span>' + text + '</span>';
+  const u = new SpeechSynthesisUtterance(text);
+  const voices = speechSynthesis.getVoices();
+  u.voice = voices.find(v => /female|zira|samantha|google uk english female/i.test(v.name)) || voices[0];
+  u.pitch = 1.05; u.rate = 1.0;
+  u.onstart = () => { speaking = true; $$('d-hear').className = 'dot talk'; };
+  u.onend = () => { speaking = false; $$('d-hear').className = 'dot on'; };
+  speechSynthesis.speak(u);
+}
+
+/* ── hearing: mic → speech recognition ── */
+function startHearing() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { set('d-hear', 's-hear', false, 'no SpeechRecognition in this browser'); return; }
+  const rec = new SR();
+  rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+  rec.onresult = async (ev) => {
+    const res = ev.results[ev.results.length - 1];
+    const text = res[0].transcript.trim();
+    $$('heard').innerHTML = 'She heard: <span>' + text + '</span>';
+    if (res.isFinal && text) {
+      const reply = await think(text);
+      speak(reply);
+    }
+  };
+  rec.onend = () => { try { rec.start(); } catch (e) {} };   // keep listening
+  rec.onerror = () => {};
+  rec.start();
+  set('d-hear', 's-hear', true, 'listening');
+}
+
+/* ── wake ── */
+$$('wake').onclick = async () => {
+  $$('start').remove();
+  brainUp = await brainCheck();
+  await startVision().catch(e => set('d-see', 's-see', false, 'camera blocked'));
+  startHearing();
+  speechSynthesis.getVoices();                    // warm voice list
+  setTimeout(() => speak("Hey. I can see you now."), 1200);
+};
+</script>
+</body>
+</html>

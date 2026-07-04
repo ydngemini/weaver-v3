@@ -17,6 +17,13 @@ CascadeProjects/windsurf-project/pretrain_moe/kaggle_prep_output/
 CascadeProjects/windsurf-project/pretrain_moe/kaggle_train_output/
 CascadeProjects/windsurf-project/pretrain_moe/kaggle_smoke/
 
+# Avatar 3D assets (large binaries; production copies live in the public
+# weaver-avatar-404870839825 S3 bucket, not git). embodiment.html itself IS
+# tracked — it's the actual page source, small and meaningful to version.
+avatar/*.glb
+avatar/*.blend
+avatar/*.blend1
+
 # Python / IDE / local-agent cruft
 __pycache__/
 *.pyc

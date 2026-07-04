@@ -1,41 +1,60 @@
-# Public TLS reverse proxy for the Oracle command center.
+# Public TLS reverse proxy for the Weaver full stack (3 origins, 1 box).
 #
-# ORACLE_HOST must be set in caddy's environment (setup_oracle_extras.sh writes a
-# systemd drop-in that reads /etc/default/caddy). Use a real hostname so Let's
-# Encrypt can issue — e.g. <PUBLIC_IP>.sslip.io (zero-signup) or your own domain.
+#   weaverv3.com          the embodied avatar page (avatar/embodiment.html) at the root,
+#                         plus a gated /llm/* proxy to the on-box llama.cpp server.
+#   dash.weaverv3.com     weaver_dashboard.py (127.0.0.1:9990) — full read/write control
+#                         plane, can trigger real Twilio calls via /api/call. MUST stay
+#                         behind basic_auth.
+#   status.weaverv3.com   health_dashboard.py (127.0.0.1:9996) — read-only traffic-light
+#                         status. Also behind basic_auth for consistency.
 #
-# Ports 80 + 443 must be open in BOTH layers:
-#   1) Oracle Cloud VCN Security List (ingress 0.0.0.0/0 tcp 80,443)
-#   2) the box's local iptables (Oracle Ubuntu ships default REJECT)
+# weaver_dashboard.py and health_dashboard.py both use root-relative fetch paths
+# internally (fetch('/api/state') etc.) — they assume they own the whole origin, so
+# each gets its OWN subdomain rather than a Caddy subpath. A subpath (e.g. /dash/*)
+# would break their client JS: it would fetch the sibling API at the domain root
+# instead of under the subpath.
 #
-# NEVER reverse-proxy Weaver's internal ports (9999 bus, 8899 LoRA, 8090 experts)
-# or the Oracle backend (8000) to the public — only the routes below are exposed.
+# WEAVER_LLM_KEY and WEAVER_DASH_HASH are set via the systemd EnvironmentFile
+# (/etc/default/caddy, written by setup_oracle_extras.sh alongside ORACLE_HOST).
+# Regenerate the basic-auth hash with `caddy hash-password`.
+#
+# llama.cpp's OpenAI-compatible server (port 8090) ships with ZERO auth unless you
+# pass --api_key — the @denied header-matcher below is the ONLY thing standing
+# between this box's free LLM inference and the public internet. Do not remove it.
+#
+# Oracle previously lived at the domain root here — it's been moved off entirely
+# (it's "neoh", branded and hosted separately at neoh.app; this box's copy was a
+# leftover dev instance, DB never wired up). oracle-backend.service may still be
+# running unrouted; stop it if you don't need it anymore.
+#
+# Ports 80 + 443 must be open in the Security Group (already done by Terraform) —
+# nothing else to open, AWS Ubuntu AMIs ship with no default iptables REJECT.
 
-{$ORACLE_HOST} {
+weaverv3.com {
 	encode zstd gzip
 
-	# Oracle backend: REST routers + the /ws WebSocket. reverse_proxy performs the
-	# WebSocket upgrade automatically. VITE_API_BASE=https://$ORACLE_HOST (root) so
-	# the SPA's `${API_BASE}/auth/login` etc. land here; VITE_WS_URL=wss://.../ws.
-	# MUST be a handle block: a bare `reverse_proxy @api` sorts AFTER the SPA's
-	# catch-all `handle` in Caddy's directive order, so the SPA would swallow /health
-	# and /ws. handle blocks are mutually exclusive, evaluated in written order.
-	@api path /api/* /auth/* /billing/* /health /ws /ws/*
-	handle @api {
-		reverse_proxy 127.0.0.1:8000
+	handle_path /llm/* {
+		@denied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		respond @denied 403
+		reverse_proxy 127.0.0.1:8090
 	}
 
-	# OPTIONAL — expose the Weaver health dashboard behind basic-auth. Generate the
-	# hash with `caddy hash-password`. Leave commented unless you want it public.
-	# handle_path /weaver-health/* {
-	# 	basicauth { ydn <BCRYPT_HASH> }
-	# 	reverse_proxy 127.0.0.1:9996
-	# }
-
-	# Everything else: the built Vite SPA, with client-side routing fallback.
 	handle {
-		root * /var/www/oracle
-		try_files {path} /index.html
+		root * /var/www/weaver
 		file_server
 	}
+}
+
+dash.weaverv3.com {
+	basicauth {
+		weaver {$WEAVER_DASH_HASH}
+	}
+	reverse_proxy 127.0.0.1:9990
+}
+
+status.weaverv3.com {
+	basicauth {
+		weaver {$WEAVER_DASH_HASH}
+	}
+	reverse_proxy 127.0.0.1:9996
 }
