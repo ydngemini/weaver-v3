@@ -119,6 +119,48 @@ an admin login, and keep `ORACLE_ENABLE_DEMO_LOGINS=0`.
 
 ---
 
+## Optional: put it on your own domain (e.g. weaverv3.com)
+
+The stack is **domain-agnostic** — the `Caddyfile` serves `{$ORACLE_HOST}` and
+`setup_oracle_extras.sh` bakes that host into the Vite build **and** Caddy's env
+(`/etc/default/caddy`). A custom domain is therefore **just DNS + a re-run, no
+code change**. The Elastic IP (`terraform output -raw public_ip`) is stable, so
+the DNS record never churns.
+
+1. **Register the domain** — this is a purchase, done at a registrar (it cannot be
+   scripted from here). Cloudflare Registrar is at-cost (~$10/yr, free DNS);
+   Route53 is ~$13/yr + $0.50/mo per hosted zone and needs the `route53domains`
+   IAM policy attached to your user.
+
+2. **Point the apex at the box.** At your DNS host create:
+
+   | Type | Name | Value |
+   |---|---|---|
+   | A | `@` (the apex, e.g. `weaverv3.com`) | `<Elastic IP>` |
+
+   Then verify from your laptop **before** step 3 — ACME will fail until it
+   resolves (the Security Group already opens 80/443):
+   ```bash
+   dig +short weaverv3.com        # must print the Elastic IP
+   ```
+   (`www` is optional and needs its own redirect block — Caddy's `{$ORACLE_HOST}`
+   is a single canonical host, and the Vite build bakes exactly one API base.)
+
+3. **Flip the box to the new host** — rebakes the SPA + rewrites Caddy's env
+   (idempotent; safe to re-run):
+   ```bash
+   ssh "$BOX"
+   cd ~/weaver/CascadeProjects/windsurf-project
+   ORACLE_HOST=weaverv3.com CLOUD=aws bash deploy/setup_oracle_extras.sh
+   sudo systemctl reload caddy    # Caddy auto-issues the Let's Encrypt cert for the new host
+   ```
+
+4. **Verify:** `https://weaverv3.com` loads the Oracle UI with a valid cert and
+   `wss://weaverv3.com/ws` connects. The old `<EIP>.sslip.io` stops being the
+   canonical host — bookmark the domain.
+
+---
+
 ## What differs from the Oracle deploy
 
 | | Oracle Cloud | AWS |
