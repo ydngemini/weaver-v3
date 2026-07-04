@@ -84,6 +84,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 stage.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0c12);
@@ -96,6 +97,84 @@ const key = new THREE.SpotLight(0xffd9a0, 90, 0, Math.PI/5, 0.5); key.position.s
 const fill = new THREE.PointLight(0x8fb4ff, 12); fill.position.set(-1.8, 1.6, 1.2); scene.add(fill);
 const rim = new THREE.PointLight(0xe6b84a, 18); rim.position.set(0, 2.0, -1.6); scene.add(rim);
 scene.add(new THREE.AmbientLight(0x30323c, 1.2));
+
+const penthouseAnimators = [];
+function buildPenthouseAtmosphere() {
+  const group = new THREE.Group();
+  group.name = 'runtime_penthouse_atmosphere';
+  scene.add(group);
+
+  const goldGlow = new THREE.MeshBasicMaterial({ color: 0xe6b84a, transparent: true, opacity: 0.58 });
+  const warmGlow = new THREE.MeshBasicMaterial({ color: 0xffc879, transparent: true, opacity: 0.42 });
+  const coolGlow = new THREE.MeshBasicMaterial({ color: 0x79a8ff, transparent: true, opacity: 0.36 });
+  const glass = new THREE.MeshPhysicalMaterial({
+    color: 0xb8d7ff, roughness: 0.05, metalness: 0.0, transmission: 0.65,
+    transparent: true, opacity: 0.18, depthWrite: false
+  });
+  const floorSheen = new THREE.MeshBasicMaterial({
+    color: 0xf0d28a, transparent: true, opacity: 0.075, depthWrite: false
+  });
+
+  const box = (name, size, pos, material) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[2], size[1]), material);
+    mesh.name = name;
+    mesh.position.set(pos[0], pos[2], pos[1]);
+    group.add(mesh);
+    return mesh;
+  };
+
+  box('ceiling_cove_front', [7.4, 0.028, 0.028], [0, -2.62, 2.82], warmGlow);
+  box('ceiling_cove_lounge', [5.2, 0.028, 0.028], [-0.2, 2.22, 2.82], warmGlow);
+  box('window_gold_sill', [8.2, 0.035, 0.035], [0, -3.42, 0.94], goldGlow);
+  box('balcony_glass', [7.8, 0.035, 0.82], [0, -3.28, 0.54], glass);
+  box('left_gallery_wash', [0.026, 2.2, 0.035], [-4.36, -0.38, 2.56], coolGlow);
+  box('bar_shelf_wash', [0.032, 1.8, 0.035], [4.23, 1.85, 2.34], warmGlow);
+
+  const sheen = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 5.8), floorSheen);
+  sheen.name = 'marble_floor_sheen';
+  sheen.rotation.x = -Math.PI / 2;
+  sheen.position.set(0, 0.018, 0.05);
+  group.add(sheen);
+
+  const haloMat = new THREE.MeshBasicMaterial({ color: 0xe6b84a, transparent: true, opacity: 0.20, depthWrite: false });
+  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.006, 8, 96), haloMat);
+  halo.name = 'presence_floor_halo';
+  halo.rotation.x = Math.PI / 2;
+  halo.position.set(0, 0.035, 0.05);
+  group.add(halo);
+
+  const skylineWindows = [];
+  const colors = [0xffd58a, 0x9fc4ff, 0xffffff, 0xffa866];
+  for (let i = 0; i < 92; i++) {
+    const x = -8.7 + ((i * 1.73) % 17.4);
+    const height = 0.88 + ((i * 0.61) % 4.4);
+    const depth = -5.05 - ((i * 7) % 4) * 0.08;
+    const w = 0.035 + ((i * 13) % 7) * 0.005;
+    const h = 0.045 + ((i * 17) % 9) * 0.006;
+    const mat = new THREE.MeshBasicMaterial({
+      color: colors[i % colors.length], transparent: true,
+      opacity: 0.18 + ((i * 19) % 17) / 70
+    });
+    const win = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.012), mat);
+    win.name = 'distant_city_window';
+    win.position.set(x, height, depth);
+    group.add(win);
+    skylineWindows.push(win);
+  }
+
+  penthouseAnimators.push((t) => {
+    halo.rotation.z = t * 0.08;
+    halo.material.opacity = 0.13 + Math.sin(t * 1.4) * 0.035;
+    warmGlow.opacity = 0.38 + Math.sin(t * 0.45) * 0.04;
+    for (let i = 0; i < skylineWindows.length; i++) {
+      const win = skylineWindows[i];
+      win.material.opacity = 0.16 + Math.abs(Math.sin(t * (0.24 + (i % 7) * 0.035) + i)) * 0.28;
+    }
+  });
+}
+
+buildPenthouseAtmosphere();
+
 new GLTFLoader().load(`${ASSETS}/weaver_apartment.glb`, (g) => {
   g.scene.traverse(o => {
     if (o.isLight) o.intensity = Math.min(o.intensity, 60);   // clamp punctual imports
@@ -106,14 +185,110 @@ new GLTFLoader().load(`${ASSETS}/weaver_apartment.glb`, (g) => {
 /* ── her ── */
 let mixer, headBone = null, neckBone = null, model = null;
 const clock = new THREE.Clock();
+const rig = {};
+const restQuats = new Map();
+const motion = { t: 0, talk: 0, attention: 0 };
+const rigPatterns = {
+  head: [/^head$/i, /(^|[._-])head$/i],
+  neck: [/neck01/i, /(^|[._-])neck/i],
+  spine1: [/spine01/i],
+  spine2: [/spine02/i],
+  spine3: [/spine03/i],
+  clavicleL: [/clavicle[_-]?L/i, /clavicle.*left/i],
+  clavicleR: [/clavicle[_-]?R/i, /clavicle.*right/i],
+  upperarmL: [/upperarm01[_-]?L/i, /upper.*arm.*left/i],
+  upperarmR: [/upperarm01[_-]?R/i, /upper.*arm.*right/i],
+  lowerarmL: [/lowerarm01[_-]?L/i, /forearm.*left/i],
+  lowerarmR: [/lowerarm01[_-]?R/i, /forearm.*right/i],
+  wristL: [/wrist[_-]?L/i, /hand.*left/i],
+  wristR: [/wrist[_-]?R/i, /hand.*right/i]
+};
+const eulerTmp = new THREE.Euler();
+const quatTmp = new THREE.Quaternion();
+
+function captureRig(root) {
+  const bones = [];
+  root.traverse(o => {
+    if (o.isBone) {
+      bones.push(o);
+      restQuats.set(o, o.quaternion.clone());
+    }
+  });
+  for (const [slot, patterns] of Object.entries(rigPatterns)) {
+    rig[slot] = bones.find(bone => patterns.some(rx => rx.test(bone.name))) || null;
+  }
+  headBone = rig.head;
+  neckBone = rig.neck;
+}
+
+function setRigOffset(slot, x = 0, y = 0, z = 0, order = 'XYZ') {
+  const bone = rig[slot];
+  const rest = bone && restQuats.get(bone);
+  if (!bone || !rest) return;
+  eulerTmp.set(x, y, z, order);
+  quatTmp.setFromEuler(eulerTmp);
+  bone.quaternion.copy(rest).multiply(quatTmp);
+}
+
+function applyHumanMotion(dt) {
+  if (!model) return;
+  motion.t += dt;
+  const t = motion.t;
+  const lerp = Math.min(1, dt * 5.5);
+  motion.talk += ((speaking ? 1 : 0) - motion.talk) * lerp;
+  motion.attention += ((gaze.has ? 1 : 0) - motion.attention) * Math.min(1, dt * 3.0);
+
+  const breathe = Math.sin(t * 1.36);
+  const breathe2 = Math.sin(t * 2.72 + 0.8);
+  const sway = Math.sin(t * 0.58);
+  const settle = motion.attention;
+  const talk = motion.talk;
+  const speechBeat = Math.sin(t * 12.0) * talk;
+  const gesture = Math.sin(t * 4.3) * talk;
+  const gazeX = THREE.MathUtils.clamp(gaze.has ? gaze.x : Math.sin(t * 0.21) * 0.35, -1, 1);
+  const gazeY = THREE.MathUtils.clamp(gaze.has ? gaze.y : Math.sin(t * 0.17 + 1.6) * 0.22, -1, 1);
+
+  setRigOffset('spine1',
+    -0.010 * breathe + 0.018 * settle,
+    0.004 * sway,
+    0.010 * sway + gazeX * 0.012 * settle);
+  setRigOffset('spine2',
+    -0.020 * breathe + 0.012 * breathe2 + 0.014 * talk,
+    gazeX * 0.018 * settle,
+    0.014 * sway);
+  setRigOffset('spine3',
+    -0.014 * breathe + 0.010 * talk,
+    gazeX * 0.026 * settle,
+    0.010 * Math.sin(t * 0.72 + 0.5));
+  setRigOffset('neck',
+    -0.025 + gazeY * 0.12 + speechBeat * 0.010,
+    gazeX * 0.22,
+    -gazeX * 0.018,
+    'YXZ');
+  setRigOffset('head',
+    -0.018 + gazeY * 0.18 + Math.sin(t * 0.9) * 0.010 + speechBeat * 0.014,
+    gazeX * 0.34 + Math.sin(t * 0.32) * 0.025,
+    -gazeX * 0.035 + gesture * 0.010,
+    'YXZ');
+
+  setRigOffset('clavicleL', -0.010 * breathe - talk * 0.025, 0.006 * sway, 0.018 * gesture);
+  setRigOffset('clavicleR', -0.010 * breathe - talk * 0.025, -0.006 * sway, -0.018 * gesture);
+  setRigOffset('upperarmL', 0.010 * breathe, 0.005 * sway, 0.024 * gesture + 0.014 * talk);
+  setRigOffset('upperarmR', 0.010 * breathe, -0.005 * sway, -0.024 * gesture - 0.014 * talk);
+  setRigOffset('lowerarmL', 0.012 * Math.sin(t * 1.1 + 0.4) + 0.020 * talk, 0, 0.012 * gesture);
+  setRigOffset('lowerarmR', 0.012 * Math.sin(t * 1.1 + 1.2) + 0.020 * talk, 0, -0.012 * gesture);
+  setRigOffset('wristL', 0.008 * Math.sin(t * 1.8), 0.012 * gesture, 0);
+  setRigOffset('wristR', 0.008 * Math.sin(t * 1.7 + 0.8), -0.012 * gesture, 0);
+
+  model.position.x = Math.sin(t * 0.42) * 0.012 + gazeX * 0.010 * settle;
+  model.position.z = Math.sin(t * 0.31 + 0.6) * 0.010 - talk * 0.012;
+}
+
 new GLTFLoader().load(`${ASSETS}/weaver_avatar_monokini.glb`, (g) => {
   model = g.scene; scene.add(model);
   const box = new THREE.Box3().setFromObject(model);
   model.position.y -= box.min.y;                       // feet on floor
-  model.traverse(o => {
-    if (o.isBone && /(^|[._])head$/i.test(o.name)) headBone = o;
-    if (o.isBone && /neck01/i.test(o.name)) neckBone = o;
-  });
+  captureRig(model);
   mixer = new THREE.AnimationMixer(model);
   const idle = g.animations.find(a => /idle/i.test(a.name)) || g.animations[0];
   if (idle) mixer.clipAction(idle).play();
@@ -121,29 +296,15 @@ new GLTFLoader().load(`${ASSETS}/weaver_avatar_monokini.glb`, (g) => {
 
 /* ── gaze: she looks at your face ── */
 let gaze = { x: 0, y: 0, has: false };                 // -1..1 screen space
-const lookTarget = new THREE.Object3D(); scene.add(lookTarget);
-const qTmp = new THREE.Quaternion(), qGoal = new THREE.Quaternion();
-function applyGaze(dt) {
-  if (!headBone) return;
-  const yaw = (gaze.has ? gaze.x : 0) * 0.55;          // clamp radians
-  const pitch = (gaze.has ? gaze.y : 0) * 0.30 - 0.05;
-  qGoal.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
-  headBone.quaternion.multiply(qTmp.slerpQuaternions(new THREE.Quaternion(), qGoal, 0.35));
-}
 
 /* ── speaking micro-motion ── */
-let speaking = false, speakT = 0;
-function applySpeak(dt) {
-  if (!speaking || !headBone) return;
-  speakT += dt * 9;
-  headBone.rotation.x += Math.sin(speakT) * 0.012;
-  headBone.rotation.z += Math.sin(speakT * 0.7) * 0.008;
-}
+let speaking = false;
 
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   if (mixer) mixer.update(dt);
-  applyGaze(dt); applySpeak(dt);
+  applyHumanMotion(dt);
+  for (const animate of penthouseAnimators) animate(clock.elapsedTime);
   renderer.render(scene, camera);
 });
 addEventListener('resize', () => {
@@ -234,14 +395,28 @@ async function think(text) {
 }
 
 /* ── voice out ── */
-function speak(text) {
+function pickVoice() {
+  const voices = speechSynthesis.getVoices();
+  return voices.find(v => /female|zira|samantha|google uk english female/i.test(v.name)) || voices[0] || null;
+}
+function speak(text, retried) {
   $$('said').innerHTML = 'She said: <span>' + text + '</span>';
   const u = new SpeechSynthesisUtterance(text);
-  const voices = speechSynthesis.getVoices();
-  u.voice = voices.find(v => /female|zira|samantha|google uk english female/i.test(v.name)) || voices[0];
+  const voice = pickVoice();
+  if (voice) u.voice = voice;
   u.pitch = 1.05; u.rate = 1.0;
   u.onstart = () => { speaking = true; $$('d-hear').className = 'dot talk'; };
   u.onend = () => { speaking = false; $$('d-hear').className = 'dot on'; };
+  u.onerror = (e) => {
+    speaking = false; $$('d-hear').className = 'dot on';
+    console.warn('speechSynthesis error:', e.error);
+    // Chrome returns an empty voice list until the async voiceschanged event
+    // fires — the very first speak() call (the wake greeting) can race it.
+    // One retry a beat later covers that; a second failure is a real block
+    // (muted system, no TTS engine, blocked permission).
+    if (!retried) setTimeout(() => speak(text, true), 400);
+    else $$('said').innerHTML = 'She said: <span>' + text + '</span> (audio blocked — check browser/system sound)';
+  };
   speechSynthesis.speak(u);
 }
 
