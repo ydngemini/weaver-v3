@@ -394,13 +394,33 @@ async function think(text) {
   } catch (e) { return "My thought pipeline glitched: " + e.message; }
 }
 
-/* ── voice out ── */
+/* ── voice out: her cloned voice from /tts, browser TTS as fallback ── */
+async function cloneSpeak(text) {
+  const r = await fetch('/tts/synth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Weaver-Key': brainKey() },
+    body: JSON.stringify({ text }),
+    signal: AbortSignal.timeout(25000)
+  });
+  if (!r.ok) throw new Error('tts ' + r.status);
+  const url = URL.createObjectURL(await r.blob());
+  await new Promise((res, rej) => {
+    const a = new Audio(url);
+    a.onplay = () => { speaking = true; $$('d-hear').className = 'dot talk'; };
+    a.onended = () => { speaking = false; $$('d-hear').className = 'dot on'; URL.revokeObjectURL(url); res(); };
+    a.onerror = () => { speaking = false; URL.revokeObjectURL(url); rej(new Error('audio playback failed')); };
+    a.play().catch(rej);
+  });
+}
+function speak(text) {
+  $$('said').innerHTML = 'She said: <span>' + text + '</span>';
+  cloneSpeak(text).catch(e => { console.warn('cloned voice unavailable:', e.message); browserSpeak(text); });
+}
 function pickVoice() {
   const voices = speechSynthesis.getVoices();
   return voices.find(v => /female|zira|samantha|google uk english female/i.test(v.name)) || voices[0] || null;
 }
-function speak(text, retried) {
-  $$('said').innerHTML = 'She said: <span>' + text + '</span>';
+function browserSpeak(text, retried) {
   const u = new SpeechSynthesisUtterance(text);
   const voice = pickVoice();
   if (voice) u.voice = voice;
@@ -414,7 +434,7 @@ function speak(text, retried) {
     // fires — the very first speak() call (the wake greeting) can race it.
     // One retry a beat later covers that; a second failure is a real block
     // (muted system, no TTS engine, blocked permission).
-    if (!retried) setTimeout(() => speak(text, true), 400);
+    if (!retried) setTimeout(() => browserSpeak(text, true), 400);
     else $$('said').innerHTML = 'She said: <span>' + text + '</span> (audio blocked — check browser/system sound)';
   };
   speechSynthesis.speak(u);

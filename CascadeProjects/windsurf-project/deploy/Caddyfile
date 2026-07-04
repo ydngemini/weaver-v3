@@ -39,6 +39,13 @@ weaverv3.com {
 		reverse_proxy 127.0.0.1:8090
 	}
 
+	# her cloned voice (weaver-tts / OpenVoice v2, deploy/tts/) — same key gate
+	handle_path /tts/* {
+		@tdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		respond @tdenied 403
+		reverse_proxy 127.0.0.1:8092
+	}
+
 	handle {
 		root * /var/www/weaver
 		file_server

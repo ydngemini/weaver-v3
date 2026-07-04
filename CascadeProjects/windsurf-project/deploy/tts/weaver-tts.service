@@ -1,0 +1,17 @@
+[Unit]
+Description=Weaver cloned-voice TTS (OpenVoice v2, 127.0.0.1:8092)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tts
+ExecStart=/home/ubuntu/tts/venv/bin/python /home/ubuntu/tts/tts_server.py
+Restart=on-failure
+RestartSec=10
+# 2-vCPU box shared with the LLM — keep this service polite
+CPUWeight=60
+MemoryHigh=2200M
+MemoryMax=2800M
+
+[Install]
+WantedBy=multi-user.target
