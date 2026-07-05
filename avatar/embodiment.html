@@ -92,6 +92,9 @@ scene.fog = new THREE.Fog(0x0a0c12, 12, 30);
 const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.05, 60);
 camera.position.set(0.15, 1.38, 2.75);
 camera.lookAt(0, 1.05, 0);
+const cameraLook = new THREE.Vector3(0, 1.05, 0);
+const cameraDesired = new THREE.Vector3();
+const cameraTarget = new THREE.Vector3();
 
 const key = new THREE.SpotLight(0xffd9a0, 90, 0, Math.PI/5, 0.5); key.position.set(1.6, 2.6, 1.6); scene.add(key);
 const fill = new THREE.PointLight(0x8fb4ff, 12); fill.position.set(-1.8, 1.6, 1.2); scene.add(fill);
@@ -187,8 +190,21 @@ let mixer, headBone = null, neckBone = null, model = null;
 const clock = new THREE.Clock();
 const rig = {};
 const restQuats = new Map();
-const motion = { t: 0, talk: 0, attention: 0 };
+const motion = { t: 0, talk: 0, attention: 0, baseReady: false, baseX: 0, baseY: 0, baseZ: 0, baseRotY: 0 };
+globalThis.__weaverPose = () => model ? ({
+  x: model.position.x,
+  y: model.position.y,
+  z: model.position.z,
+  ry: model.rotation.y,
+  cameraX: camera.position.x,
+  cameraY: camera.position.y,
+  cameraZ: camera.position.z,
+  t: motion.t
+}) : null;
 const rigPatterns = {
+  root: [/^root$/i, /(^|[._-])root/i],
+  pelvisL: [/pelvis[_-]?L/i],
+  pelvisR: [/pelvis[_-]?R/i],
   head: [/^head$/i, /(^|[._-])head$/i],
   neck: [/neck01/i, /(^|[._-])neck/i],
   spine1: [/spine01/i],
@@ -201,7 +217,15 @@ const rigPatterns = {
   lowerarmL: [/lowerarm01[_-]?L/i, /forearm.*left/i],
   lowerarmR: [/lowerarm01[_-]?R/i, /forearm.*right/i],
   wristL: [/wrist[_-]?L/i, /hand.*left/i],
-  wristR: [/wrist[_-]?R/i, /hand.*right/i]
+  wristR: [/wrist[_-]?R/i, /hand.*right/i],
+  upperlegL: [/upperleg01[_-]?L/i, /thigh.*left/i],
+  upperlegR: [/upperleg01[_-]?R/i, /thigh.*right/i],
+  lowerlegL: [/lowerleg01[_-]?L/i, /calf.*left/i],
+  lowerlegR: [/lowerleg01[_-]?R/i, /calf.*right/i],
+  footL: [/^foot[_-]?L$/i, /foot.*left/i],
+  footR: [/^foot[_-]?R$/i, /foot.*right/i],
+  toeL: [/^toe[1-5]-1[_-]?L$/i, /toe.*left/i],
+  toeR: [/^toe[1-5]-1[_-]?R$/i, /toe.*right/i]
 };
 const eulerTmp = new THREE.Euler();
 const quatTmp = new THREE.Quaternion();
@@ -245,17 +269,37 @@ function applyHumanMotion(dt) {
   const talk = motion.talk;
   const speechBeat = Math.sin(t * 12.0) * talk;
   const gesture = Math.sin(t * 4.3) * talk;
+  const dance = t * 2.35;
+  const step = Math.sin(dance);
+  const stepAbs = Math.abs(step);
+  const stepL = Math.max(0, step);
+  const stepR = Math.max(0, -step);
+  const weight = Math.sin(dance * 0.5 + 0.3);
+  const travel = Math.sin(t * 0.55);
+  const turn = Math.sin(t * 0.72 + 0.4);
   const gazeX = THREE.MathUtils.clamp(gaze.has ? gaze.x : Math.sin(t * 0.21) * 0.35, -1, 1);
   const gazeY = THREE.MathUtils.clamp(gaze.has ? gaze.y : Math.sin(t * 0.17 + 1.6) * 0.22, -1, 1);
 
+  setRigOffset('root',
+    -0.018 * stepAbs,
+    0.044 * turn,
+    -0.058 * weight);
+  setRigOffset('pelvisL',
+    0.044 * stepR,
+    0.025 * weight,
+    -0.032 * weight);
+  setRigOffset('pelvisR',
+    0.044 * stepL,
+    -0.025 * weight,
+    -0.032 * weight);
   setRigOffset('spine1',
     -0.010 * breathe + 0.018 * settle,
-    0.004 * sway,
-    0.010 * sway + gazeX * 0.012 * settle);
+    0.004 * sway + 0.025 * turn,
+    0.010 * sway + gazeX * 0.012 * settle + 0.044 * weight);
   setRigOffset('spine2',
     -0.020 * breathe + 0.012 * breathe2 + 0.014 * talk,
-    gazeX * 0.018 * settle,
-    0.014 * sway);
+    gazeX * 0.018 * settle + 0.028 * turn,
+    0.014 * sway + 0.030 * weight);
   setRigOffset('spine3',
     -0.014 * breathe + 0.010 * talk,
     gazeX * 0.026 * settle,
@@ -280,14 +324,51 @@ function applyHumanMotion(dt) {
   setRigOffset('wristL', 0.008 * Math.sin(t * 1.8), 0.012 * gesture, 0);
   setRigOffset('wristR', 0.008 * Math.sin(t * 1.7 + 0.8), -0.012 * gesture, 0);
 
-  model.position.x = Math.sin(t * 0.42) * 0.012 + gazeX * 0.010 * settle;
-  model.position.z = Math.sin(t * 0.31 + 0.6) * 0.010 - talk * 0.012;
+  setRigOffset('upperlegL', -0.105 * stepL + 0.035 * stepR, 0.024 * weight, 0.036 * weight);
+  setRigOffset('upperlegR', -0.105 * stepR + 0.035 * stepL, -0.024 * weight, -0.036 * weight);
+  setRigOffset('lowerlegL', 0.125 * stepL + 0.024 * stepAbs, 0, -0.014 * weight);
+  setRigOffset('lowerlegR', 0.125 * stepR + 0.024 * stepAbs, 0, 0.014 * weight);
+  setRigOffset('footL', -0.075 * stepL + 0.024 * stepR, 0, 0.028 * stepL);
+  setRigOffset('footR', -0.075 * stepR + 0.024 * stepL, 0, -0.028 * stepR);
+  setRigOffset('toeL', 0.055 * stepR, 0, 0);
+  setRigOffset('toeR', 0.055 * stepL, 0, 0);
+
+  model.position.x = motion.baseX + Math.sin(t * 0.42) * 0.044 + travel * 0.085 + gazeX * 0.014 * settle;
+  model.position.y = motion.baseY + stepAbs * 0.022 + Math.sin(t * 1.2) * 0.006;
+  model.position.z = motion.baseZ + Math.sin(t * 0.31 + 0.6) * 0.038 - talk * 0.012;
+  model.rotation.y = motion.baseRotY + turn * 0.085 + gazeX * 0.020 * settle;
+}
+
+function applyCameraFollow(dt) {
+  if (!model) return;
+  const smoothPos = 1 - Math.exp(-dt * 3.6);
+  const smoothLook = 1 - Math.exp(-dt * 4.8);
+  const dx = model.position.x - motion.baseX;
+  const dz = model.position.z - motion.baseZ;
+  cameraDesired.set(
+    0.15 + motion.baseX + dx * 0.72,
+    1.38 + (model.position.y - motion.baseY) * 0.30,
+    2.75 + motion.baseZ + dz * 0.58
+  );
+  cameraTarget.set(
+    motion.baseX + dx * 0.82,
+    1.07 + (model.position.y - motion.baseY) * 0.45,
+    motion.baseZ + dz * 0.34
+  );
+  camera.position.lerp(cameraDesired, smoothPos);
+  cameraLook.lerp(cameraTarget, smoothLook);
+  camera.lookAt(cameraLook);
 }
 
 new GLTFLoader().load(`${ASSETS}/weaver_avatar_monokini.glb`, (g) => {
   model = g.scene; scene.add(model);
   const box = new THREE.Box3().setFromObject(model);
   model.position.y -= box.min.y;                       // feet on floor
+  motion.baseX = model.position.x;
+  motion.baseY = model.position.y;
+  motion.baseZ = model.position.z;
+  motion.baseRotY = model.rotation.y;
+  motion.baseReady = true;
   captureRig(model);
   mixer = new THREE.AnimationMixer(model);
   const idle = g.animations.find(a => /idle/i.test(a.name)) || g.animations[0];
@@ -304,6 +385,7 @@ renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   if (mixer) mixer.update(dt);
   applyHumanMotion(dt);
+  applyCameraFollow(dt);
   for (const animate of penthouseAnimators) animate(clock.elapsedTime);
   renderer.render(scene, camera);
 });
@@ -394,17 +476,36 @@ async function think(text) {
   } catch (e) { return "My thought pipeline glitched: " + e.message; }
 }
 
-/* ── voice out: her cloned voice from /tts, browser TTS as fallback ── */
-async function cloneSpeak(text) {
+/* ── voice out: her cloned voice from /tts, STREAMED sentence-by-sentence,
+   browser TTS as fallback. Synthesis is CPU-bound on the box (~2.9x realtime),
+   so we split the reply and start playing the first sentence as soon as it's
+   ready — time-to-first-word ≈ one short sentence (~6s) instead of the whole
+   reply — and prefetch the next sentence on the box while the current one
+   plays in the browser, overlapping compute with playback. ── */
+function splitSentences(text) {
+  const raw = text.match(/[^.!?…]+[.!?…]+["')\]]*\s*|[^.!?…]+$/g) || [text];
+  const out = [];
+  for (let s of raw) {
+    s = s.trim();
+    if (!s) continue;
+    // glue tiny fragments ("Yes.", "Oh!") to the previous chunk — not worth a round-trip
+    if (out.length && (s.length < 14 || out[out.length - 1].length < 14)) out[out.length - 1] += ' ' + s;
+    else out.push(s);
+  }
+  return out.length ? out : [text];
+}
+async function fetchCloneUrl(text) {
   const r = await fetch('/tts/synth', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Weaver-Key': brainKey() },
     body: JSON.stringify({ text }),
-    signal: AbortSignal.timeout(25000)
+    signal: AbortSignal.timeout(60000)
   });
   if (!r.ok) throw new Error('tts ' + r.status);
-  const url = URL.createObjectURL(await r.blob());
-  await new Promise((res, rej) => {
+  return URL.createObjectURL(await r.blob());
+}
+function playUrl(url) {
+  return new Promise((res, rej) => {
     const a = new Audio(url);
     a.onplay = () => { speaking = true; $$('d-hear').className = 'dot talk'; };
     a.onended = () => { speaking = false; $$('d-hear').className = 'dot on'; URL.revokeObjectURL(url); res(); };
@@ -412,9 +513,22 @@ async function cloneSpeak(text) {
     a.play().catch(rej);
   });
 }
-function speak(text) {
+async function speak(text) {
   $$('said').innerHTML = 'She said: <span>' + text + '</span>';
-  cloneSpeak(text).catch(e => { console.warn('cloned voice unavailable:', e.message); browserSpeak(text); });
+  const parts = splitSentences(text);
+  let nextUrl = fetchCloneUrl(parts[0]);          // first synth starts now
+  for (let i = 0; i < parts.length; i++) {
+    let url;
+    try {
+      url = await nextUrl;
+    } catch (e) {                                 // clone unavailable — finish in the browser voice
+      console.warn('cloned voice unavailable:', e.message);
+      browserSpeak(parts.slice(i).join(' '));
+      return;
+    }
+    nextUrl = (i + 1 < parts.length) ? fetchCloneUrl(parts[i + 1]) : null;  // prefetch during playback
+    try { await playUrl(url); } catch (e) { console.warn('playback failed:', e.message); }
+  }
 }
 function pickVoice() {
   const voices = speechSynthesis.getVoices();
