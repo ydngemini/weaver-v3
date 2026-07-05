@@ -1,0 +1,4 @@
+# torch + CUDA come from the pytorch/pytorch base image — do NOT reinstall torch
+# here or you'll clobber the CUDA build with a CPU wheel.
+tokenizers>=0.15
+numpy<2
