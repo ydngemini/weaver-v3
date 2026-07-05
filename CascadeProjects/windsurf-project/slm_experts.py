@@ -84,16 +84,43 @@ EXPERT_PROMPTS: Dict[str, str] = {
 }
 
 # Model config — backend selected by WEAVER_LLM_BACKEND:
-#   "azure" (default, paid)  |  "gemini" (free tier)  |  "local" (llama.cpp, $0)
+#   "bedrock" (AWS, uses AWS creds) | "local" (llama.cpp, $0) |
+#   "gemini" (free tier) | "azure" (default, paid)
 LLM_BACKEND = os.environ.get("WEAVER_LLM_BACKEND", "azure").lower()
 if LLM_BACKEND == "gemini":
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "gemini-2.0-flash")
 elif LLM_BACKEND == "local":
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "local-model")
+elif LLM_BACKEND == "bedrock":
+    SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "us.amazon.nova-lite-v1:0")
 else:
     SLM_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
 SLM_TEMPERATURE = 0.4
 SLM_MAX_TOKENS = 120
+
+# ── AWS Bedrock backend (WEAVER_LLM_BACKEND=bedrock) ─────────────────────────
+# Runs the experts on Amazon Bedrock (e.g. Nova Lite/Micro, Claude Haiku) using
+# AWS credentials — fully on-AWS, no third-party API key. boto3's Converse API
+# auto-uses whatever AWS credential is present: an EC2 instance role (SigV4), a
+# Bedrock API key via AWS_BEARER_TOKEN_BEDROCK, or standard env keys.
+_bedrock_client = None
+def _get_bedrock():
+    global _bedrock_client
+    if _bedrock_client is None:
+        import boto3
+        _bedrock_client = boto3.client(
+            "bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    return _bedrock_client
+async def _bedrock_reply(system_prompt, user_msg, model, temperature, max_tokens):
+    def _call():
+        r = _get_bedrock().converse(
+            modelId=model,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_msg}]}],
+            inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+        )
+        return r["output"]["message"]["content"][0]["text"]
+    return await asyncio.to_thread(_call)
 
 # Shared vectorizer for encoding text → 256-d vectors
 _vectorizer = HashingVectorizer(n_features=256, alternate_sign=False, norm="l2")
@@ -191,22 +218,27 @@ class SLMExpertLobe(ExpertLobe):
             max_retries = 3
             for attempt in range(max_retries + 1):
                 try:
-                    client = self._get_client()
-                    # Azure's newer API uses max_completion_tokens; the OpenAI-compat
-                    # endpoints (Gemini, llama.cpp) use the classic max_tokens.
-                    _tok_kw = ({"max_tokens": self.max_tokens}
-                               if LLM_BACKEND in ("gemini", "local")
-                               else {"max_completion_tokens": self.max_tokens})
-                    resp = await client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": self.system_prompt},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        temperature=self.temperature,
-                        **_tok_kw,
-                    )
-                    text = resp.choices[0].message.content.strip()
+                    if LLM_BACKEND == "bedrock":
+                        text = (await _bedrock_reply(
+                            self.system_prompt, user_msg, self.model,
+                            self.temperature, self.max_tokens)).strip()
+                    else:
+                        client = self._get_client()
+                        # Azure's newer API uses max_completion_tokens; the OpenAI-compat
+                        # endpoints (Gemini, llama.cpp) use the classic max_tokens.
+                        _tok_kw = ({"max_tokens": self.max_tokens}
+                                   if LLM_BACKEND in ("gemini", "local")
+                                   else {"max_completion_tokens": self.max_tokens})
+                        resp = await client.chat.completions.create(
+                            model=self.model,
+                            messages=[
+                                {"role": "system", "content": self.system_prompt},
+                                {"role": "user", "content": user_msg},
+                            ],
+                            temperature=self.temperature,
+                            **_tok_kw,
+                        )
+                        text = resp.choices[0].message.content.strip()
                     self._consecutive_failures = 0  # reset on success
                     break
                 except Exception as e:
