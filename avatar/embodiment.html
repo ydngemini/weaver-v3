@@ -85,24 +85,100 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.86;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 stage.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0c12);
 scene.fog = new THREE.Fog(0x0a0c12, 12, 30);
 const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.05, 60);
-camera.position.set(0.15, 1.38, 2.75);
-camera.lookAt(0, 1.05, 0);
-const cameraLook = new THREE.Vector3(0, 1.05, 0);
-const cameraDesired = new THREE.Vector3();
-const cameraTarget = new THREE.Vector3();
+const FIXED_CAMERA_POSITION = new THREE.Vector3(0.15, 1.38, 2.75);
+const FIXED_CAMERA_TARGET = new THREE.Vector3(0, 1.05, 0);
+function enforceCameraTopology() {
+  camera.position.copy(FIXED_CAMERA_POSITION);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(FIXED_CAMERA_TARGET);
+  camera.updateMatrixWorld();
+}
+enforceCameraTopology();
 
-const key = new THREE.SpotLight(0xffd9a0, 90, 0, Math.PI/5, 0.5); key.position.set(1.6, 2.6, 1.6); scene.add(key);
-const fill = new THREE.PointLight(0x8fb4ff, 12); fill.position.set(-1.8, 1.6, 1.2); scene.add(fill);
-const rim = new THREE.PointLight(0xe6b84a, 18); rim.position.set(0, 2.0, -1.6); scene.add(rim);
+const PUNCTUAL_LIGHT_LIMITS = {
+  spotIntensity: 34,
+  pointIntensity: 9.5,
+  spotDistance: 4.4,
+  pointDistance: 3.2
+};
+function configurePunctualLight(light, options = {}) {
+  if (!light || (!light.isSpotLight && !light.isPointLight)) return;
+  const isSpot = light.isSpotLight;
+  const maxIntensity = options.maxIntensity ?? (isSpot ? PUNCTUAL_LIGHT_LIMITS.spotIntensity : PUNCTUAL_LIGHT_LIMITS.pointIntensity);
+  light.intensity = Math.min(options.intensity ?? light.intensity, maxIntensity);
+  light.distance = options.distance ?? (light.distance > 0 ? Math.min(light.distance, isSpot ? PUNCTUAL_LIGHT_LIMITS.spotDistance : PUNCTUAL_LIGHT_LIMITS.pointDistance) : (isSpot ? PUNCTUAL_LIGHT_LIMITS.spotDistance : PUNCTUAL_LIGHT_LIMITS.pointDistance));
+  light.decay = options.decay ?? 2;
+  light.castShadow = true;
+  if (light.shadow) {
+    const mapSize = options.shadowMapSize ?? (isSpot ? 1024 : 512);
+    light.shadow.mapSize.set(mapSize, mapSize);
+    light.shadow.bias = options.shadowBias ?? -0.00012;
+    light.shadow.normalBias = options.shadowNormalBias ?? 0.018;
+    light.shadow.radius = options.shadowRadius ?? (isSpot ? 4 : 3);
+  }
+  if (isSpot) {
+    light.angle = Math.min(options.angle ?? light.angle, Math.PI / 8);
+    light.penumbra = Math.max(options.penumbra ?? light.penumbra, 0.72);
+    if (!light.target.parent) scene.add(light.target);
+  }
+}
+function materialIsTransparent(material) {
+  const mats = Array.isArray(material) ? material : [material];
+  return mats.some(mat => mat && (mat.transparent || mat.opacity < 0.55));
+}
+function configureShadowMesh(object) {
+  if (!object.isMesh) return;
+  object.castShadow = !materialIsTransparent(object.material);
+  object.receiveShadow = true;
+}
+
+const key = new THREE.SpotLight(0xffd9a0, 32, 4.2, Math.PI / 9, 0.78, 2);
+key.position.set(1.25, 2.24, 1.45);
+key.target.position.set(0, 1.08, 0.05);
+scene.add(key, key.target);
+configurePunctualLight(key, { intensity: 32, distance: 4.2, angle: Math.PI / 9, penumbra: 0.78, shadowMapSize: 1024 });
+const fill = new THREE.PointLight(0x8fb4ff, 5.4, 3.0, 2);
+fill.position.set(-1.35, 1.55, 1.05);
+scene.add(fill);
+configurePunctualLight(fill, { intensity: 5.4, distance: 3.0, shadowMapSize: 512 });
+const rim = new THREE.PointLight(0xe6b84a, 7.8, 2.8, 2);
+rim.position.set(0.1, 1.75, -1.25);
+scene.add(rim);
+configurePunctualLight(rim, { intensity: 7.8, distance: 2.8, shadowMapSize: 512 });
 scene.add(new THREE.AmbientLight(0x30323c, 1.2));
 
 const penthouseAnimators = [];
+function seeded01(seed) {
+  return THREE.MathUtils.euclideanModulo(Math.sin(seed * 12.9898) * 43758.5453, 1);
+}
+function shimmerProfile(index) {
+  const a = seeded01(index + 1.7);
+  const b = seeded01(index + 17.3);
+  const c = seeded01(index + 43.9);
+  const d = seeded01(index + 91.1);
+  return {
+    base: 0.018 + a * 0.16,
+    glimmer: 0.025 + b * 0.22,
+    twinkle: 0.015 + c * 0.12,
+    spike: 0.42 + d * 0.42,
+    speedA: 0.16 + seeded01(index + 7.5) * 0.42,
+    speedB: 0.95 + seeded01(index + 12.2) * 1.85,
+    spikeRate: 0.28 + seeded01(index + 29.8) * 0.76,
+    phaseA: seeded01(index + 63.4) * Math.PI * 2,
+    phaseB: seeded01(index + 74.6) * Math.PI * 2,
+    spikePhase: seeded01(index + 105.5) * Math.PI * 2,
+    spikeSharpness: 18 + Math.floor(seeded01(index + 118.9) * 12)
+  };
+}
 function buildPenthouseAtmosphere() {
   const group = new THREE.Group();
   group.name = 'runtime_penthouse_atmosphere';
@@ -150,6 +226,7 @@ function buildPenthouseAtmosphere() {
   const skylineWindows = [];
   const colors = [0xffd58a, 0x9fc4ff, 0xffffff, 0xffa866];
   for (let i = 0; i < 92; i++) {
+    const shimmer = shimmerProfile(i);
     const x = -8.7 + ((i * 1.73) % 17.4);
     const height = 0.88 + ((i * 0.61) % 4.4);
     const depth = -5.05 - ((i * 7) % 4) * 0.08;
@@ -157,11 +234,12 @@ function buildPenthouseAtmosphere() {
     const h = 0.045 + ((i * 17) % 9) * 0.006;
     const mat = new THREE.MeshBasicMaterial({
       color: colors[i % colors.length], transparent: true,
-      opacity: 0.18 + ((i * 19) % 17) / 70
+      opacity: shimmer.base, depthWrite: false, toneMapped: false
     });
     const win = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.012), mat);
     win.name = 'distant_city_window';
     win.position.set(x, height, depth);
+    win.userData.shimmer = shimmer;
     group.add(win);
     skylineWindows.push(win);
   }
@@ -172,7 +250,15 @@ function buildPenthouseAtmosphere() {
     warmGlow.opacity = 0.38 + Math.sin(t * 0.45) * 0.04;
     for (let i = 0; i < skylineWindows.length; i++) {
       const win = skylineWindows[i];
-      win.material.opacity = 0.16 + Math.abs(Math.sin(t * (0.24 + (i % 7) * 0.035) + i)) * 0.28;
+      const shimmer = win.userData.shimmer;
+      const slow = (Math.sin(t * shimmer.speedA + shimmer.phaseA) + 1) * 0.5;
+      const fast = (Math.sin(t * shimmer.speedB + shimmer.phaseB) + 1) * 0.5;
+      const spike = Math.pow(Math.max(0, Math.sin(t * shimmer.spikeRate + shimmer.spikePhase)), shimmer.spikeSharpness);
+      win.material.opacity = THREE.MathUtils.clamp(
+        shimmer.base + slow * shimmer.glimmer + fast * shimmer.twinkle + spike * shimmer.spike,
+        0.018,
+        0.94
+      );
     }
   });
 }
@@ -181,7 +267,8 @@ buildPenthouseAtmosphere();
 
 new GLTFLoader().load(`${ASSETS}/weaver_apartment.glb`, (g) => {
   g.scene.traverse(o => {
-    if (o.isLight) o.intensity = Math.min(o.intensity, 60);   // clamp punctual imports
+    configurePunctualLight(o);
+    configureShadowMesh(o);
   });
   scene.add(g.scene);
 });
@@ -202,6 +289,46 @@ globalThis.__weaverPose = () => model ? ({
   cameraZ: camera.position.z,
   t: motion.t
 }) : null;
+globalThis.__weaverSceneAudit = () => {
+  const punctual = [];
+  const cityOpacity = [];
+  scene.traverse(o => {
+    if (o.isSpotLight || o.isPointLight) {
+      punctual.push({
+        name: o.name || o.type,
+        type: o.type,
+        intensity: o.intensity,
+        distance: o.distance,
+        decay: o.decay,
+        angle: o.isSpotLight ? o.angle : null,
+        penumbra: o.isSpotLight ? o.penumbra : null,
+        castShadow: o.castShadow,
+        shadowMap: o.shadow ? [o.shadow.mapSize.x, o.shadow.mapSize.y] : null
+      });
+    }
+    if (o.name === 'distant_city_window' && o.material) cityOpacity.push(o.material.opacity);
+  });
+  return {
+    camera: {
+      position: camera.position.toArray(),
+      target: FIXED_CAMERA_TARGET.toArray(),
+      up: camera.up.toArray(),
+      roll: camera.rotation.z
+    },
+    shadows: {
+      enabled: renderer.shadowMap.enabled,
+      type: renderer.shadowMap.type
+    },
+    toneMappingExposure: renderer.toneMappingExposure,
+    punctual,
+    city: {
+      count: cityOpacity.length,
+      min: Math.min(...cityOpacity),
+      max: Math.max(...cityOpacity),
+      sample: cityOpacity.slice(0, 12)
+    }
+  };
+};
 const rigPatterns = {
   root: [/^root$/i, /(^|[._-])root/i],
   pelvisL: [/pelvis[_-]?L/i],
@@ -341,28 +468,12 @@ function applyHumanMotion(dt) {
 }
 
 function applyCameraFollow(dt) {
-  if (!model) return;
-  const smoothPos = 1 - Math.exp(-dt * 3.6);
-  const smoothLook = 1 - Math.exp(-dt * 4.8);
-  const dx = model.position.x - motion.baseX;
-  const dz = model.position.z - motion.baseZ;
-  cameraDesired.set(
-    0.15 + motion.baseX + dx * 0.72,
-    1.38 + (model.position.y - motion.baseY) * 0.30,
-    2.75 + motion.baseZ + dz * 0.58
-  );
-  cameraTarget.set(
-    motion.baseX + dx * 0.82,
-    1.07 + (model.position.y - motion.baseY) * 0.45,
-    motion.baseZ + dz * 0.34
-  );
-  camera.position.lerp(cameraDesired, smoothPos);
-  cameraLook.lerp(cameraTarget, smoothLook);
-  camera.lookAt(cameraLook);
+  enforceCameraTopology();
 }
 
 new GLTFLoader().load(`${ASSETS}/weaver_avatar_monokini.glb`, (g) => {
   model = g.scene; scene.add(model);
+  model.traverse(configureShadowMesh);
   const box = new THREE.Box3().setFromObject(model);
   model.position.y -= box.min.y;                       // feet on floor
   motion.baseX = model.position.x;
@@ -382,14 +493,17 @@ let gaze = { x: 0, y: 0, has: false };                 // -1..1 screen space
 /* ── speaking micro-motion ── */
 let speaking = false;
 
-renderer.setAnimationLoop(() => {
+function renderFrame() {
   const dt = clock.getDelta();
   if (mixer) mixer.update(dt);
   applyHumanMotion(dt);
   applyCameraFollow(dt);
   for (const animate of penthouseAnimators) animate(clock.elapsedTime);
   renderer.render(scene, camera);
-});
+}
+globalThis.__weaverPauseScene = () => renderer.setAnimationLoop(null);
+globalThis.__weaverResumeScene = () => renderer.setAnimationLoop(renderFrame);
+renderer.setAnimationLoop(renderFrame);
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
