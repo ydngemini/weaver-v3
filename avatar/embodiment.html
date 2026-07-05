@@ -40,8 +40,8 @@
 </style>
 <script type="importmap">
 { "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    "three": "/vendor/three.module.js",
+    "three/addons/": "/vendor/addons/"
 } }
 </script>
 </head>
@@ -63,8 +63,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// Fully cloud — NO localhost. The page is served from the box (weaverv3.ai / sslip.io);
-// the brain is the SAME-ORIGIN /llm proxy → on-box llama server ⇒ no CORS, no IP.
+// Fully AWS — NO third-party CDN. three.js is vendored same-origin under /vendor/
+// (served by the box's Caddy); the brain is the SAME-ORIGIN /llm proxy → on-box
+// llama server; avatar GLBs are on S3. Nothing loads from outside AWS.
 const ASSETS = 'https://weaver-avatar-404870839825.s3.amazonaws.com';
 const BRAINS = [
   { name: 'cloud brain', models: '/llm/v1/models', chat: '/llm/v1/chat/completions', key: 'ask' },
