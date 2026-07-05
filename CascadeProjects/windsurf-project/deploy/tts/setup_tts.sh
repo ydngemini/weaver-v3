@@ -14,12 +14,22 @@
 set -euxo pipefail
 cd ~/tts
 
-sudo apt-get update -q && sudo apt-get install -y -q python3-venv python3-dev build-essential libsndfile1 ffmpeg
-python3 -m venv venv
+# OpenVoice pins numpy==1.22.0 (and similarly old friends) which have no
+# py3.12 wheels and don't compile there — the stack targets py3.10. Give it
+# its own 3.10 from deadsnakes instead of fighting the pins.
+sudo apt-get update -q && sudo apt-get install -y -q software-properties-common build-essential libsndfile1 ffmpeg
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt-get install -y -q python3.10 python3.10-venv python3.10-dev
+python3.10 -m venv venv
 ./venv/bin/pip install -U pip wheel setuptools
 ./venv/bin/pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-./venv/bin/pip install git+https://github.com/myshell-ai/OpenVoice.git
+# MeloTTS first with full deps; then OpenVoice WITHOUT deps — its requirements
+# drag in faster-whisper -> PyAV (no aarch64 wheel for the old pin, won't build
+# against noble's ffmpeg 6). We never use that path: clone-once extracts the
+# embedding via ToneColorConverter.extract_se(), no whisper/VAD needed.
 ./venv/bin/pip install git+https://github.com/myshell-ai/MeloTTS.git
+./venv/bin/pip install --no-deps git+https://github.com/myshell-ai/OpenVoice.git
+./venv/bin/pip install pydub wavmark
 ./venv/bin/python -m unidic download || true     # MeloTTS imports its ja stack even for EN
 ./venv/bin/pip install fastapi uvicorn soundfile "huggingface_hub[cli]"
 ./venv/bin/huggingface-cli download myshell-ai/OpenVoiceV2 --local-dir ~/tts/OpenVoiceV2

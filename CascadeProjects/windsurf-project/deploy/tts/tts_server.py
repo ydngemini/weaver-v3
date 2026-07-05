@@ -15,8 +15,8 @@ Runs as the weaver-tts systemd unit. 2 torch threads — the box has 2 vCPUs
 shared with the LLM; do not raise this.
 """
 import hashlib
-import io
 import os
+import threading
 import time
 
 import torch
@@ -34,7 +34,6 @@ CACHE = os.path.join(HOME, "cache")
 os.makedirs(CACHE, exist_ok=True)
 
 from melo.api import TTS
-from openvoice import se_extractor
 from openvoice.api import ToneColorConverter
 
 DEVICE = "cpu"
@@ -43,7 +42,12 @@ base = TTS(language="EN", device=DEVICE)
 SPEAKER_ID = base.hps.data.spk2id["EN-US"]
 
 print("[tts] loading tone-color converter…")
-converter = ToneColorConverter(os.path.join(CKPT_DIR, "converter", "config.json"), device=DEVICE)
+try:
+    converter = ToneColorConverter(os.path.join(CKPT_DIR, "converter", "config.json"),
+                                   device=DEVICE, enable_watermark=False)
+except TypeError:   # older signature without the kwarg
+    converter = ToneColorConverter(os.path.join(CKPT_DIR, "converter", "config.json"), device=DEVICE)
+    converter.watermark_model = None
 converter.load_ckpt(os.path.join(CKPT_DIR, "converter", "checkpoint.pth"))
 source_se = torch.load(os.path.join(CKPT_DIR, "base_speakers", "ses", "en-us.pth"),
                        map_location=DEVICE)
@@ -54,7 +58,8 @@ if os.path.exists(SAVED_SE):
     print(f"[tts] loaded saved voice embedding {SAVED_SE}")
 else:
     print(f"[tts] first boot: extracting voice embedding from {REF_WAV}…")
-    target_se, _ = se_extractor.get_se(REF_WAV, converter, vad=True)
+    # direct extraction — the 12.9s reference is one clean take; no whisper/VAD
+    target_se = converter.extract_se([REF_WAV])
     torch.save(target_se, SAVED_SE)
     print(f"[tts] saved voice embedding → {SAVED_SE} (the wav won't be processed again)")
 
@@ -65,14 +70,35 @@ class Req(BaseModel):
     text: str
 
 
+SYNTH_LOCK = threading.Lock()   # 2-core box: serialize synthesis; also guards tmp files
+
+
 def synth_to_wav_bytes(text: str) -> bytes:
-    tmp_base = os.path.join(CACHE, "_base_tmp.wav")
-    tmp_out = os.path.join(CACHE, "_out_tmp.wav")
-    base.tts_to_file(text, SPEAKER_ID, tmp_base, speed=1.0)
-    converter.convert(audio_src_path=tmp_base, src_se=source_se, tgt_se=target_se,
-                      output_path=tmp_out, message="@Weaver")
-    with open(tmp_out, "rb") as f:
-        return f.read()
+    with SYNTH_LOCK:
+        tmp_base = os.path.join(CACHE, "_base_tmp.wav")
+        tmp_out = os.path.join(CACHE, "_out_tmp.wav")
+        base.tts_to_file(text, SPEAKER_ID, tmp_base, speed=1.0)
+        converter.convert(audio_src_path=tmp_base, src_se=source_se, tgt_se=target_se,
+                          output_path=tmp_out)
+        with open(tmp_out, "rb") as f:
+            return f.read()
+
+
+def cache_put(path: str, wav: bytes):
+    """Atomic write — a crash mid-synth must never leave a 0-byte cache entry."""
+    tmp = path + ".part"
+    with open(tmp, "wb") as f:
+        f.write(wav)
+    os.replace(tmp, path)
+
+
+def cache_get(path: str):
+    if os.path.exists(path) and os.path.getsize(path) > 44:   # >WAV header = real audio
+        with open(path, "rb") as f:
+            return f.read()
+    if os.path.exists(path):
+        os.remove(path)                                        # purge poisoned entry
+    return None
 
 
 @app.get("/health")
@@ -87,13 +113,12 @@ def synth(req: Req):
         return Response(status_code=400)
     key = hashlib.sha1(text.lower().encode()).hexdigest()
     path = os.path.join(CACHE, f"{key}.wav")
-    if os.path.exists(path):                       # replay from file — zero compute
-        with open(path, "rb") as f:
-            return Response(f.read(), media_type="audio/wav")
+    cached = cache_get(path)                       # replay from file — zero compute
+    if cached:
+        return Response(cached, media_type="audio/wav")
     t0 = time.time()
     wav = synth_to_wav_bytes(text)
-    with open(path, "wb") as f:
-        f.write(wav)
+    cache_put(path, wav)
     print(f"[tts] synth {len(text)} chars in {time.time()-t0:.1f}s → cached {key[:8]}")
     return Response(wav, media_type="audio/wav")
 
@@ -103,10 +128,9 @@ WARMUP = ["Hey. I can see you now."]
 for line in WARMUP:
     k = hashlib.sha1(line.lower().encode()).hexdigest()
     p = os.path.join(CACHE, f"{k}.wav")
-    if not os.path.exists(p):
+    if cache_get(p) is None:
         try:
-            with open(p, "wb") as f:
-                f.write(synth_to_wav_bytes(line))
+            cache_put(p, synth_to_wav_bytes(line))
             print(f"[tts] warmed: {line!r}")
         except Exception as e:
             print(f"[tts] warmup failed: {e}")

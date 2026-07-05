@@ -10,8 +10,8 @@ Restart=on-failure
 RestartSec=10
 # 2-vCPU box shared with the LLM — keep this service polite
 CPUWeight=60
-MemoryHigh=2200M
-MemoryMax=2800M
+MemoryHigh=3200M
+MemoryMax=3600M
 
 [Install]
 WantedBy=multi-user.target
