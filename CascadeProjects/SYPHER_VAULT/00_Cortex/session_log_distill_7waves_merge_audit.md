@@ -52,3 +52,12 @@ Confirmed + fixed by inserting a genuine backing call+response before each Resol
 **Lesson for future wave generation:** any subagent doing a post-hoc "shrink completions to fit the char budget" pass must NOT touch call/response pairs — trim only prose in Reasoning/Recovery-reasoning lines. Worth stating explicitly in the next generation prompt.
 
 Not yet committed as of this log entry — see [[distill-regen-resume-state]] for current corpus state and next steps.
+
+## 2026-07-04/05 — weaverv3.com: penthouse rebuilt + her cloned voice live
+
+[[Weaver v3]] embodiment milestones, all on `feat/aws-graviton-deploy`:
+- **Penthouse** (`0f860f2`): `avatar/build_penthouse.py` — fully procedural Blender 4.5.9 headless build of `weaver_apartment.glb` (glazing+mullions, generated night-skyline/marble/walnut textures packed in-GLB, 153 meshes, 3.1MB), sized to embodiment.html's runtime-atmosphere bounds, composed for its fixed camera. Iterated via live Playwright screenshots (fixed: plane-UV corner-order smearing textures diagonally; light wattages blowing out under the page's 60-intensity clamp). Old scene → `weaver_apartment_v1_backup.glb` in the avatar bucket. Blender lives at `SYPHER_CORE2/tools/`.
+- **Voice** (`e7eee01`+`5d73e6a`): OpenVoice v2 clone-once pipeline serving at `/tts/synth` (key-gated) from the box; page plays her cloned voice, browser TTS fallback. Embedding extracted once from the 12.9s ref → saved `.pth`; per-line sha1 disk cache. Measured: cached 0.3-0.8s / fresh ~12s (RTF ~2.9, 2 Graviton vCPUs). Three prod bugs found+fixed en route: numpy/PyAV pin rot (py3.10 venv + `--no-deps` + direct `extract_se()`), 0-byte poisoned cache entries (atomic writes), and **systemd MemoryHigh reclaim-hell masquerading as a network hang** (759k high-breaches, D-state at 2200M ceiling; raised to 3200M).
+- Also: silent speechSynthesis failure fixed (`e1418ea`), Seymore creds rotated in.
+
+Related: [[weaverv3-live-architecture]] memory note has the operational detail.
