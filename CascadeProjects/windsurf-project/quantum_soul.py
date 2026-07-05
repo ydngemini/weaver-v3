@@ -237,35 +237,37 @@ def _run_quantum_job() -> str:
         4. Computes interference routing bias for the Pineal Gate
     Otherwise falls back to the classic GHZ-ring circuit.
     """
-    from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler
     from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
-
-    print("\n⚛️  [QUANTUM LOBE] Connecting to IBM Quantum...", flush=True)
-    service = QiskitRuntimeService(token=IBM_TOKEN, channel=IBM_CHANNEL)
 
     backend = None
     backend_name = "unknown"
+    Sampler = None
 
-    # Try real hardware first
-    try:
-        backend = service.least_busy(simulator=False, operational=True)
-        backend_name = backend.name
-        queue_len = backend.status().pending_jobs
-        print(f"⚛️  [QUANTUM LOBE] Real backend: {backend_name} (queue: {queue_len})", flush=True)
-        # Sanity check — skip if queue is absurd
-        if queue_len > 200:
-            raise RuntimeError(f"Queue too long ({queue_len}) — falling back to simulator")
-    except Exception as e:
-        print(f"⚛️  [QUANTUM LOBE] Hardware unavailable ({e}), using simulator.", flush=True)
+    # Quantum runs on the box's LOCAL Aer simulator by default — pure on-AWS, no
+    # external dependency (real IBM hardware is off-cloud and needs a valid token).
+    # Opt into real hardware with WEAVER_QUANTUM_BACKEND=ibm + a valid IBM_QUANTUM_TOKEN.
+    # NOTE: QiskitRuntimeService(token=...) validates the account at construction and
+    # raises before any try-block below it — so the IBM path is fully guarded here.
+    if IBM_TOKEN and os.getenv("WEAVER_QUANTUM_BACKEND", "local").lower() == "ibm":
         try:
-            backend = service.backend("ibmq_qasm_simulator")
-            backend_name = "ibmq_qasm_simulator"
-        except Exception:
-            # Last resort: local Aer
-            from qiskit_aer import AerSimulator
-            backend = AerSimulator()
-            backend_name = "AerSimulator (local)"
-            print("⚛️  [QUANTUM LOBE] Using local AerSimulator.", flush=True)
+            from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler
+            print("\n⚛️  [QUANTUM LOBE] Connecting to IBM Quantum...", flush=True)
+            service = QiskitRuntimeService(token=IBM_TOKEN, channel=IBM_CHANNEL)
+            backend = service.least_busy(simulator=False, operational=True)
+            backend_name = backend.name
+            queue_len = backend.status().pending_jobs
+            print(f"⚛️  [QUANTUM LOBE] Real backend: {backend_name} (queue: {queue_len})", flush=True)
+            if queue_len > 200:
+                raise RuntimeError(f"Queue too long ({queue_len})")
+        except Exception as e:
+            print(f"⚛️  [QUANTUM LOBE] IBM unavailable ({e}) — using local simulator.", flush=True)
+            backend, Sampler = None, None
+
+    if backend is None:
+        from qiskit_aer import AerSimulator
+        backend = AerSimulator()
+        backend_name = "AerSimulator (local)"
+        print("⚛️  [QUANTUM LOBE] Measuring on local AerSimulator (on-box).", flush=True)
 
     # Build circuit — use orchestrator if available, else classic
     if _orchestrator is not None:
@@ -282,7 +284,15 @@ def _run_quantum_job() -> str:
     print(f"⚛️  [QUANTUM LOBE] Submitting {SHOTS}-shot job on {backend_name}...", flush=True)
     t0 = time.monotonic()
 
-    sampler = Sampler(mode=backend)
+    # The local AerSimulator needs Aer's own sampler — qiskit_ibm_runtime's
+    # SamplerV2(mode=AerSimulator) raises (it wants an IBM runtime backend/session),
+    # which previously killed the on-box fallback silently. This is the pure-AWS
+    # path: quantum runs on the box's local simulator, no external IBM dependency.
+    if backend_name.startswith("AerSimulator"):
+        from qiskit_aer.primitives import SamplerV2 as AerSampler
+        sampler = AerSampler()
+    else:
+        sampler = Sampler(mode=backend)
     job = sampler.run([isa_circuit], shots=SHOTS)
 
     print(f"⚛️  [QUANTUM LOBE] Job ID: {job.job_id()}  — waiting...", flush=True)

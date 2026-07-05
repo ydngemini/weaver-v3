@@ -123,10 +123,12 @@ def _parse_quantum_state() -> dict:
         bitstring = result.get("bitstring")
         if bitstring and len(bitstring) >= 5:
             qubit_dim = ["logic", "emotion", "memory", "creativity", "vigilance"]
+            # bitstring is big-endian (qubit 6 first); reverse so rev[i] == qubit i
+            # (0=logic … 4=vigilance), matching quantum_soul's own parse_counts.
+            rev = bitstring.zfill(7)[::-1]
             for i, dim in enumerate(qubit_dim):
-                if i < len(bitstring):
-                    bit = int(bitstring[i])
-                    weights[dim] = 0.99 if bit == 0 else 0.70
+                bit = int(rev[i])
+                weights[dim] = 0.99 if bit == 0 else 0.70
 
         result["weights"] = weights
         return result

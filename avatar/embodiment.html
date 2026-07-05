@@ -191,6 +191,24 @@ function buildPenthouseAtmosphere() {
     color: 0xb8d7ff, roughness: 0.05, metalness: 0.0, transmission: 0.65,
     transparent: true, opacity: 0.18, depthWrite: false
   });
+  const bronzePatina = new THREE.MeshStandardMaterial({
+    color: 0x5f4526, metalness: 0.86, roughness: 0.48
+  });
+  const thermalBreak = new THREE.MeshStandardMaterial({
+    color: 0x111113, metalness: 0.0, roughness: 0.78
+  });
+  const slotSteel = new THREE.MeshStandardMaterial({
+    color: 0xa39c8c, metalness: 1.0, roughness: 0.23
+  });
+  const porcelain = new THREE.MeshStandardMaterial({
+    color: 0x756852, metalness: 0.0, roughness: 0.68
+  });
+  const warmCove = new THREE.MeshBasicMaterial({
+    color: 0xffb96a, transparent: true, opacity: 0.34, depthWrite: false, toneMapped: false
+  });
+  const coolFacade = new THREE.MeshBasicMaterial({
+    color: 0x8fb7ff, transparent: true, opacity: 0.20, depthWrite: false, toneMapped: false
+  });
   const floorSheen = new THREE.MeshBasicMaterial({
     color: 0xf0d28a, transparent: true, opacity: 0.075, depthWrite: false
   });
@@ -205,10 +223,36 @@ function buildPenthouseAtmosphere() {
 
   box('ceiling_cove_front', [7.4, 0.028, 0.028], [0, -2.62, 2.82], warmGlow);
   box('ceiling_cove_lounge', [5.2, 0.028, 0.028], [-0.2, 2.22, 2.82], warmGlow);
+  box('knife_edge_cove_window_runtime', [8.8, 0.018, 0.026], [0, -2.94, 2.73], warmCove);
+  box('knife_edge_cove_back_runtime', [8.6, 0.018, 0.026], [0, 2.72, 2.73], warmCove);
   box('window_gold_sill', [8.2, 0.035, 0.035], [0, -3.42, 0.94], goldGlow);
   box('balcony_glass', [7.8, 0.035, 0.82], [0, -3.28, 0.54], glass);
   box('left_gallery_wash', [0.026, 2.2, 0.035], [-4.36, -0.38, 2.56], coolGlow);
   box('bar_shelf_wash', [0.032, 1.8, 0.035], [4.23, 1.85, 2.34], warmGlow);
+  box('wall_grazer_left_runtime', [0.024, 5.8, 0.032], [-4.34, -0.12, 2.44], warmCove);
+  box('wall_grazer_right_runtime', [0.024, 5.6, 0.032], [4.18, 0.2, 2.44], warmCove);
+
+  const curtainXs = [-4.6, -3.45, -2.3, -1.15, 0, 1.15, 2.3, 3.45, 4.6];
+  for (let i = 0; i < curtainXs.length; i++) {
+    const x = curtainXs[i];
+    const profile = box('unitized_mullion_profile_runtime', [0.03, 0.18, 2.66], [x, -3.50, 1.45], bronzePatina);
+    profile.rotation.y = THREE.MathUtils.degToRad(i % 2 ? 3 : -3);
+    box('mullion_thermal_break_runtime', [0.012, 0.024, 2.48], [x, -3.43, 1.45], thermalBreak);
+  }
+  for (const y of [0.96, 1.88]) {
+    box('curtain_transom_runtime', [8.9, 0.06, 0.035], [0, -3.48, y], bronzePatina);
+    box('transom_thermal_break_runtime', [8.65, 0.014, 0.016], [0, -3.42, y], thermalBreak);
+  }
+  box('zero_threshold_slot_drain_runtime', [8.6, 0.030, 0.014], [0, -3.62, 0.018], slotSteel);
+  box('sub_sill_water_stop_runtime', [8.6, 0.022, 0.038], [0, -3.66, 0.012], thermalBreak);
+  box('terrace_porcelain_plane_runtime', [8.7, 1.05, 0.008], [0, -4.13, 0.006], porcelain);
+  for (let i = 0; i < 5; i++) {
+    box('paver_open_joint_x_runtime', [0.010, 1.0, 0.010], [-4 + i * 2, -4.13, 0.016], thermalBreak);
+  }
+  for (const z of [-3.78, -4.12, -4.46]) {
+    box('paver_open_joint_z_runtime', [8.45, 0.010, 0.010], [0, z, 0.018], thermalBreak);
+  }
+  box('cool_low_e_glass_edge_runtime', [8.8, 0.012, 2.62], [0, -3.515, 1.50], coolFacade);
 
   const sheen = new THREE.Mesh(new THREE.PlaneGeometry(7.4, 5.8), floorSheen);
   sheen.name = 'marble_floor_sheen';
@@ -265,7 +309,28 @@ function buildPenthouseAtmosphere() {
 
 buildPenthouseAtmosphere();
 
+function shiftImportedMeshes(root, nameTest, delta) {
+  root.traverse(o => {
+    if (o.isMesh && nameTest(o.name)) o.position.add(delta);
+  });
+}
+function enforceImportedLuxuryRules(root) {
+  shiftImportedMeshes(root, name => /^plant_L_/.test(name), new THREE.Vector3(-0.80, 0, 2.48));
+  shiftImportedMeshes(root, name => /^plant_R_/.test(name), new THREE.Vector3(0.40, 0, 2.70));
+  shiftImportedMeshes(root, name => /^lamp_/.test(name), new THREE.Vector3(-0.95, 0, 1.78));
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    if (/^art_lean/.test(o.name)) {
+      o.scale.y *= 0.42;
+      o.position.y = Math.min(o.position.y, 0.82);
+      o.name = o.name.replace(/^art_lean/, 'low_art_slab');
+    }
+  });
+  root.updateMatrixWorld(true);
+}
+
 new GLTFLoader().load(`${ASSETS}/weaver_apartment.glb`, (g) => {
+  enforceImportedLuxuryRules(g.scene);
   g.scene.traverse(o => {
     configurePunctualLight(o);
     configureShadowMesh(o);
@@ -292,6 +357,17 @@ globalThis.__weaverPose = () => model ? ({
 globalThis.__weaverSceneAudit = () => {
   const punctual = [];
   const cityOpacity = [];
+  const architecture = {
+    curtainProfiles: 0,
+    thermalBreaks: 0,
+    slotDrains: 0,
+    paverJoints: 0,
+    grazers: 0,
+    lowToGlassLimit: 1.15,
+    lowToGlassViolations: []
+  };
+  const nearGlassExempt = /(glazing|glass|rail|mullion|curtain|unitized|thermal|transom|balcony|paver|zero_threshold|sub_sill|skyline|city|cove|grazer|sill|facade|edge|drain|ceiling|wall|fascia|pend|can|bottle|bowl)/i;
+  const boxAudit = new THREE.Box3();
   scene.traverse(o => {
     if (o.isSpotLight || o.isPointLight) {
       punctual.push({
@@ -307,6 +383,26 @@ globalThis.__weaverSceneAudit = () => {
       });
     }
     if (o.name === 'distant_city_window' && o.material) cityOpacity.push(o.material.opacity);
+    if (o.isMesh) {
+      if (/unitized_mullion_profile/i.test(o.name)) architecture.curtainProfiles += 1;
+      if (/thermal_break/i.test(o.name)) architecture.thermalBreaks += 1;
+      if (/slot_drain/i.test(o.name)) architecture.slotDrains += 1;
+      if (/paver_open_joint/i.test(o.name)) architecture.paverJoints += 1;
+      if (/grazer/i.test(o.name)) architecture.grazers += 1;
+      if (!nearGlassExempt.test(o.name)) {
+        boxAudit.setFromObject(o);
+        const objectWidth = boxAudit.max.x - boxAudit.min.x;
+        const objectDepth = boxAudit.max.z - boxAudit.min.z;
+        const blocksSightline = objectWidth > 0.28 || objectDepth > 0.28;
+        if (blocksSightline && boxAudit.min.z < -2.35 && boxAudit.max.y > architecture.lowToGlassLimit) {
+          architecture.lowToGlassViolations.push({
+            name: o.name,
+            maxY: Number(boxAudit.max.y.toFixed(3)),
+            minZ: Number(boxAudit.min.z.toFixed(3))
+          });
+        }
+      }
+    }
   });
   return {
     camera: {
@@ -326,7 +422,8 @@ globalThis.__weaverSceneAudit = () => {
       min: Math.min(...cityOpacity),
       max: Math.max(...cityOpacity),
       sample: cityOpacity.slice(0, 12)
-    }
+    },
+    architecture
   };
 };
 const rigPatterns = {
@@ -628,8 +725,18 @@ function playUrl(url) {
     a.play().catch(rej);
   });
 }
+// XSS-safe line writer: textContent never parses HTML, so LLM/speech output
+// (e.g. "<img src=x onerror=...>") can't execute. The styled <span> is kept.
+function showLine(id, prefix, text, suffix) {
+  const el = $$(id);
+  el.textContent = prefix;
+  const span = document.createElement('span');
+  span.textContent = text;
+  el.appendChild(span);
+  if (suffix) el.appendChild(document.createTextNode(suffix));
+}
 async function speak(text) {
-  $$('said').innerHTML = 'She said: <span>' + text + '</span>';
+  showLine('said', 'She said: ', text);
   const parts = splitSentences(text);
   let nextUrl = fetchCloneUrl(parts[0]);          // first synth starts now
   for (let i = 0; i < parts.length; i++) {
@@ -664,7 +771,7 @@ function browserSpeak(text, retried) {
     // One retry a beat later covers that; a second failure is a real block
     // (muted system, no TTS engine, blocked permission).
     if (!retried) setTimeout(() => browserSpeak(text, true), 400);
-    else $$('said').innerHTML = 'She said: <span>' + text + '</span> (audio blocked — check browser/system sound)';
+    else showLine('said', 'She said: ', text, ' (audio blocked — check browser/system sound)');
   };
   speechSynthesis.speak(u);
 }
@@ -678,7 +785,7 @@ function startHearing() {
   rec.onresult = async (ev) => {
     const res = ev.results[ev.results.length - 1];
     const text = res[0].transcript.trim();
-    $$('heard').innerHTML = 'She heard: <span>' + text + '</span>';
+    showLine('heard', 'She heard: ', text);
     if (res.isFinal && text) {
       const reply = await think(text);
       speak(reply);
