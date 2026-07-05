@@ -20,13 +20,23 @@ import threading
 import time
 
 import torch
-torch.set_num_threads(2)
 
-from fastapi import FastAPI
+# Config via env so ONE file serves both hosts:
+#   AWS t4g box  → all defaults (cpu, 127.0.0.1:8092, ~/tts, no key — Caddy gates it)
+#   RunPod GPU   → TTS_DEVICE=cuda TTS_HOST=0.0.0.0 TTS_PORT=8888 TTS_HOME=/workspace/tts
+#                  WEAVER_TTS_KEY=<key>  (the RunPod proxy URL is public → self-gate)
+DEVICE = os.getenv("TTS_DEVICE", "cpu")
+if DEVICE == "cpu":
+    torch.set_num_threads(2)          # 2-vCPU box; irrelevant on GPU
+HOST = os.getenv("TTS_HOST", "127.0.0.1")
+PORT = int(os.getenv("TTS_PORT", "8092"))
+KEY = os.getenv("WEAVER_TTS_KEY", "")  # if set, require X-Weaver-Key header
+
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-HOME = os.path.expanduser("~/tts")
+HOME = os.getenv("TTS_HOME", os.path.expanduser("~/tts"))
 REF_WAV = os.path.join(HOME, "weaver_voice_ref.wav")
 SAVED_SE = os.path.join(HOME, "weaver_voice_se.pth")
 CKPT_DIR = os.path.join(HOME, "OpenVoiceV2")
