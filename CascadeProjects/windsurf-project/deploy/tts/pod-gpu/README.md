@@ -30,3 +30,25 @@ See `deploy/Caddyfile` `handle_path /tts/*`.
   down, `/tts` 502s and the page falls back to the browser voice on its own; or
   point Caddy's `/tts` `reverse_proxy` back to `127.0.0.1:8092` for the CPU clone.
 - **Cost:** the 4090 pod bills while running — stop it when not in use.
+
+## Durability — her voice lives on AWS S3, not RunPod
+
+RunPod's `/workspace` is a network volume in *their* Europe datacenter and its
+container disk (`/root`) is wiped on **terminate**. So the durable copy of her
+voice is kept on **AWS S3** (`s3://weaver-avatar-404870839825/voice/`) — survives
+RunPod entirely and is consistent with the rest of the stack being on AWS.
+
+What's in S3: `weaver_voice_ref.wav` (her irreplaceable voice sample),
+`tts_server_gpu.py`, `start.sh`, and the pre-synthesized `cache/`. **Not** in S3:
+the `WEAVER_TTS_KEY` secret (only in the pod's untracked `/workspace/tts/.env`),
+and the 1.8 GB XTTS model (a public Coqui download — re-fetched on first run;
+`restore_from_s3.sh` pip-installs the stack which triggers it).
+
+**Restore onto a fresh/terminated pod** (run from a trusted machine with the
+swarm-admin profile + pod SSH key — no AWS creds ever touch the rented pod):
+```bash
+WEAVER_TTS_KEY='<key>' ./restore_from_s3.sh root@<pod-ip> <ssh-port>
+```
+It syncs S3 → pod `/workspace/tts`, installs the XTTS stack, seeds `.env`, and
+starts the server. To back up new cache lines, re-run the small
+`aws s3 sync` from a trusted machine (the pod can't reach S3 by design).

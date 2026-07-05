@@ -20,8 +20,11 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-REF = "/root/weaver_voice_ref.wav"
-CACHE = "/root/tts/cache"
+# Location-independent: paths resolve next to this file (works whether it lives
+# in /root/tts, /workspace/tts, or an S3-restored dir), override via env if needed.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+REF = os.getenv("TTS_REF", os.path.join(_HERE, "weaver_voice_ref.wav"))
+CACHE = os.getenv("TTS_CACHE", os.path.join(_HERE, "cache"))
 os.makedirs(CACHE, exist_ok=True)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SR = 24000
