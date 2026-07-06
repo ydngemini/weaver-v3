@@ -36,6 +36,12 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 PORT = int(os.environ.get("WEAVER_DASHBOARD_PORT", "9990"))
 PROJ = os.path.dirname(os.path.abspath(__file__))
 VAULT = os.path.join(PROJ, "Nexus_Vault")
+N8N_WEBHOOK_URL = (
+    os.environ.get("N8N_WEBHOOK_URL")
+    or os.environ.get("WEAVER_N8N_WEBHOOK_URL")
+    or "http://localhost:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
+)
+BRAIN_API_URL = os.environ.get("WEAVER_BRAIN_API_URL", "http://localhost:8093").rstrip("/")
 
 app = FastAPI(title="Weaver Live Dashboard", version="1.0.0")
 
@@ -52,11 +58,16 @@ _sse_subscribers: list[asyncio.Queue] = []
 
 LOBES = [
     ("Nexus Bus",       "http://localhost:9998/health",  9998, "WebSocket pub/sub broker"),
+    ("AWS Brain API",   "http://localhost:8093/health",  8093, "Bedrock/Nova unified cortex"),
+    ("Headless UI",     "http://localhost:8093/health",  8093, "Headless Nova presence"),
+    ("Trained Voice",   "http://localhost:8092/health",  8092, "OpenVoice cloned voice"),
+    ("Codebase API",    "http://localhost:8091/health",  8091, "Bounded self-inspection API"),
     ("Quantum Soul",    None,                            None, "IBM Quantum 7-qubit loop"),
     ("Quantum API",     "http://localhost:9997/health",  9997, "Quantum state HTTP server"),
     ("Akashic Hub",     "http://localhost:9995/health",  9995, "Shared vector state"),
     ("Pineal Gate",     None,                            None, "Pentagon MoE router"),
     ("LoRA Server",     "http://localhost:8899/health",  8899, "1B Llama Soul Voice"),
+    ("Qwen3B Branch",    "http://localhost:8898/health",  8898, "Local Qwen branch"),
     ("Phone Bridge",    "http://localhost:8765/health",  8765, "Twilio telephony"),
     ("Health Dashboard","http://localhost:9996/health",  9996, "Legacy traffic-light"),
     ("ProactivePulse",  None,                            None, "Quantum resonance monitor"),
@@ -66,24 +77,84 @@ LOBES = [
 ]
 
 
+def _latency_class(latency_ms: float | None) -> str:
+    if latency_ms is None:
+        return "unknown"
+    if latency_ms < 220:
+        return "fast"
+    if latency_ms < 1000:
+        return "watch"
+    return "slow"
+
+
+def _fmt_ms(latency_ms: float | None) -> str:
+    if latency_ms is None:
+        return "n/a"
+    if latency_ms >= 1000:
+        return f"{latency_ms / 1000:.2f}s"
+    return f"{latency_ms:.0f}ms"
+
+
+def _weaver_key() -> str:
+    if os.environ.get("WEAVER_LLM_KEY"):
+        return os.environ["WEAVER_LLM_KEY"]
+    for path in (os.path.join(PROJ, ".env"), "/etc/default/caddy"):
+        try:
+            if not os.path.exists(path):
+                continue
+            for line in Path(path).read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("WEAVER_LLM_KEY="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+        except Exception:
+            continue
+    return ""
+
+
+async def _fetch_json(url: str, *, headers: dict | None = None, timeout: float = 3.0) -> tuple[dict, float | None, str]:
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as c:
+            r = await c.get(url, headers=headers or {})
+            latency_ms = (time.monotonic() - start) * 1000
+            if r.status_code != 200:
+                return {}, round(latency_ms, 1), f"HTTP {r.status_code}"
+            try:
+                return r.json(), round(latency_ms, 1), ""
+            except Exception:
+                return {}, round(latency_ms, 1), "non-json response"
+    except Exception as exc:
+        latency_ms = (time.monotonic() - start) * 1000
+        return {}, round(latency_ms, 1), str(exc)[:120]
+
+
 # ── Health polling ───────────────────────────────────────────────────────────
 
 async def _check_http(name: str, url: str, desc: str) -> dict:
+    start = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=3.0) as c:
             r = await c.get(url)
+            latency_ms = round((time.monotonic() - start) * 1000, 1)
             if r.status_code == 200:
                 extra = {}
                 try:
                     extra = r.json()
                 except Exception:
                     pass
-                return {"name": name, "status": "online", "desc": desc, "detail": extra}
-            return {"name": name, "status": "degraded", "desc": desc, "detail": f"HTTP {r.status_code}"}
+                return {"name": name, "status": "online", "desc": desc, "detail": extra,
+                        "latency_ms": latency_ms, "latency_class": _latency_class(latency_ms)}
+            return {"name": name, "status": "degraded", "desc": desc,
+                    "detail": f"HTTP {r.status_code}", "latency_ms": latency_ms,
+                    "latency_class": _latency_class(latency_ms)}
     except httpx.ConnectError:
-        return {"name": name, "status": "offline", "desc": desc, "detail": "Connection refused"}
+        latency_ms = round((time.monotonic() - start) * 1000, 1)
+        return {"name": name, "status": "offline", "desc": desc, "detail": "Connection refused",
+                "latency_ms": latency_ms, "latency_class": _latency_class(None)}
     except Exception as e:
-        return {"name": name, "status": "offline", "desc": desc, "detail": str(e)[:80]}
+        latency_ms = round((time.monotonic() - start) * 1000, 1)
+        return {"name": name, "status": "offline", "desc": desc, "detail": str(e)[:80],
+                "latency_ms": latency_ms, "latency_class": _latency_class(None)}
 
 
 async def _check_process(name: str, desc: str, pattern: str) -> dict:
@@ -278,6 +349,140 @@ def read_dreams(count: int = 3) -> list[dict]:
         return []
 
 
+def _tail_jsonl(path: str, limit: int = 10) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    try:
+        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return []
+
+    events: list[dict] = []
+    for line in reversed(lines[-max(limit * 4, limit):]):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except Exception:
+            continue
+        content = event.get("content") or event.get("text") or event.get("summary") or ""
+        if not content and isinstance(event.get("payload"), dict):
+            content = json.dumps(event["payload"], ensure_ascii=False)
+        events.append({
+            "ts": event.get("ts") or event.get("timestamp") or event.get("time") or "",
+            "kind": event.get("kind") or event.get("type") or "event",
+            "source": event.get("source") or "",
+            "speaker": event.get("speaker") or "",
+            "content": str(content)[:360],
+        })
+        if len(events) >= limit:
+            break
+    return events
+
+
+def read_memory_events(limit: int = 10) -> list[dict]:
+    sources = [
+        os.path.join(VAULT, "weaver_memory_events.jsonl"),
+        os.path.join(VAULT, "weaver_browser_memory.jsonl"),
+    ]
+    events: list[dict] = []
+    for source in sources:
+        events.extend(_tail_jsonl(source, limit))
+    events.sort(key=lambda e: e.get("ts") or "", reverse=True)
+    return events[:limit]
+
+
+async def read_brain_snapshot() -> dict:
+    health, health_ms, health_err = await _fetch_json("http://localhost:8093/health", timeout=2.5)
+    key = _weaver_key()
+    headers = {"X-Weaver-Key": key} if key else {}
+    state: dict = {}
+    models: dict = {}
+    state_ms = None
+    models_ms = None
+    state_err = ""
+    models_err = ""
+    if key:
+        state, state_ms, state_err = await _fetch_json("http://localhost:8093/state", headers=headers, timeout=3.0)
+        models, models_ms, models_err = await _fetch_json("http://localhost:8093/v1/models", headers=headers, timeout=3.0)
+    else:
+        state_err = "missing WEAVER_LLM_KEY"
+        models_err = state_err
+
+    routes = []
+    model_data = models.get("data", [])
+    if not isinstance(model_data, list):
+        model_data = []
+    for model in model_data[:14]:
+        routes.append({
+            "id": model.get("id") or model.get("alias") or "unknown",
+            "model_id": model.get("model_id") or model.get("id") or "",
+            "region": model.get("region") or "",
+            "purpose": model.get("purpose") or "",
+            "orchestrated": bool(model.get("orchestrated")),
+            "voice_native": bool(model.get("voice_native")),
+            "multimodal": bool(model.get("multimodal")),
+        })
+
+    status = "online" if health.get("status") in ("ok", "online") else "offline"
+    if health_err:
+        status = "offline"
+    elif state_err or models_err:
+        status = "degraded"
+
+    return {
+        "status": status,
+        "latency_ms": health_ms,
+        "state_latency_ms": state_ms,
+        "models_latency_ms": models_ms,
+        "latency_class": _latency_class(health_ms),
+        "error": state_err or models_err or health_err,
+        "active": health.get("active"),
+        "default_model": health.get("default_model") or state.get("default_model"),
+        "headless_model": state.get("headless_model"),
+        "headless_thought_model": state.get("headless_thought_model"),
+        "headless_dream_model": state.get("headless_dream_model"),
+        "thoughts": state.get("thoughts", 0),
+        "dreams": state.get("dreams", 0),
+        "memory_events": state.get("memory_events", 0),
+        "last_error": state.get("last_error", ""),
+        "last_thought": str(state.get("last_thought", ""))[:220],
+        "last_dream": str(state.get("last_dream", ""))[:300],
+        "routes": routes,
+    }
+
+
+async def read_voice_snapshot() -> dict:
+    data, latency_ms, err = await _fetch_json("http://localhost:8092/health", timeout=4.0)
+    status = "online" if data.get("status") in ("ok", "online") else "offline"
+    if err:
+        status = "offline"
+    return {
+        "status": status,
+        "latency_ms": latency_ms,
+        "latency_class": _latency_class(latency_ms if not err else None),
+        "service": data.get("service") or data.get("name") or "trained voice",
+        "detail": data,
+        "error": err,
+    }
+
+
+async def read_codebase_snapshot() -> dict:
+    data, latency_ms, err = await _fetch_json("http://localhost:8091/health", timeout=2.5)
+    status = "online" if data.get("status") in ("ok", "online") else "offline"
+    if err:
+        status = "offline"
+    return {
+        "status": status,
+        "latency_ms": latency_ms,
+        "latency_class": _latency_class(latency_ms if not err else None),
+        "root": data.get("root", ""),
+        "service": data.get("service") or "codebase-api",
+        "error": err,
+    }
+
+
 # ── Nexus Bus WebSocket listener ─────────────────────────────────────────────
 
 async def _nexus_listener():
@@ -344,12 +549,21 @@ async def _poll_loop():
     while True:
         lobes = await poll_all_lobes()
         qs = read_quantum_state()
+        brain, voice, codebase = await asyncio.gather(
+            read_brain_snapshot(),
+            read_voice_snapshot(),
+            read_codebase_snapshot(),
+        )
         uptime = time.time() - _boot_time
         online = sum(1 for l in lobes if l["status"] == "online")
         payload = {
             "type": "poll",
             "lobes": lobes,
             "quantum": qs,
+            "brain": brain,
+            "voice": voice,
+            "codebase": codebase,
+            "memory_events": read_memory_events(8),
             "online": online,
             "total": len(lobes),
             "uptime": round(uptime),
@@ -430,9 +644,18 @@ async def health():
 async def api_state():
     lobes = await poll_all_lobes()
     qs = read_quantum_state()
+    brain, voice, codebase = await asyncio.gather(
+        read_brain_snapshot(),
+        read_voice_snapshot(),
+        read_codebase_snapshot(),
+    )
     return {
         "lobes": lobes,
         "quantum": qs,
+        "brain": brain,
+        "voice": voice,
+        "codebase": codebase,
+        "memory_events": read_memory_events(10),
         "online": sum(1 for l in lobes if l["status"] == "online"),
         "total": len(lobes),
         "uptime": round(time.time() - _boot_time),
@@ -495,15 +718,19 @@ async def api_chat(request: Request):
         return {"error": "empty message"}
     try:
         async with httpx.AsyncClient(timeout=60.0) as c:
-            resp = await c.post("http://localhost:5678/webhook/weaver-input", json={
+            resp = await c.post(N8N_WEBHOOK_URL, json={
                 "text": text,
                 "source": "dashboard",
             })
             if resp.status_code == 200:
                 data = resp.json()
-                return {"response": data.get("manifested_response", ""),
+                return {"response": (data.get("manifested_response") or data.get("response") or data.get("text") or ""),
                         "metadata": {k: v for k, v in data.items() if k != "manifested_response"}}
-            return {"error": f"n8n returned {resp.status_code}", "detail": resp.text[:200]}
+            return {
+                "error": f"n8n returned {resp.status_code}",
+                "detail": resp.text[:200],
+                "url": N8N_WEBHOOK_URL,
+            }
     except httpx.ConnectError:
         return {"error": "n8n not reachable — is the workflow running?"}
     except Exception as e:
@@ -514,31 +741,61 @@ async def api_chat(request: Request):
 async def api_trigger_dream():
     """Force a dream cycle now by touching the transcript file to reset idle timer."""
     dream_file = os.path.join(VAULT, "weaver_dreams.md")
+    dream_prompt = (
+        "[DREAM MODE] Weaver is dreaming on demand. "
+        "Reflect on all recent interactions. Find patterns, unresolved threads, "
+        "creative connections. Be specific. Reference names and topics. 2-4 paragraphs."
+    )
+    n8n_error = ""
     try:
         async with httpx.AsyncClient(timeout=60.0) as c:
-            resp = await c.post("http://localhost:5678/webhook/weaver-input", json={
-                "text": (
-                    "[DREAM MODE] Weaver is dreaming on demand. "
-                    "Reflect on all recent interactions. Find patterns, unresolved threads, "
-                    "creative connections. Be specific. Reference names and topics. 2-4 paragraphs."
-                ),
+            resp = await c.post(N8N_WEBHOOK_URL, json={
+                "text": dream_prompt,
                 "source": "dream_trigger",
             })
             if resp.status_code == 200:
                 data = resp.json()
-                dream_text = data.get("manifested_response", "")
+                dream_text = data.get("manifested_response") or data.get("response") or data.get("text") or ""
                 if dream_text:
                     from datetime import datetime as _dt
                     ts = _dt.now().strftime("%Y-%m-%d %H:%M")
                     entry = f"\n\n---\n### Dream — {ts} (triggered)\n{dream_text}\n"
                     with open(dream_file, "a", encoding="utf-8") as f:
                         f.write(entry)
-                return {"dream": dream_text}
-            return {"error": f"n8n returned {resp.status_code}"}
+                return {"dream": dream_text, "route": "n8n", "url": N8N_WEBHOOK_URL}
+            n8n_error = f"n8n returned {resp.status_code} at {N8N_WEBHOOK_URL}: {resp.text[:200]}"
     except httpx.ConnectError:
-        return {"error": "n8n not reachable"}
+        n8n_error = f"n8n not reachable at {N8N_WEBHOOK_URL}"
     except Exception as e:
-        return {"error": str(e)[:200]}
+        n8n_error = str(e)[:200]
+
+    key = _weaver_key()
+    headers = {"X-Weaver-Key": key} if key else {}
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as c:
+            resp = await c.post(
+                f"{BRAIN_API_URL}/trigger/dream",
+                headers=headers,
+                json={"reason": "dashboard-manual"},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                dream_text = data.get("dream", "")
+                if dream_text:
+                    from datetime import datetime as _dt
+                    ts = _dt.now().strftime("%Y-%m-%d %H:%M")
+                    entry = f"\n\n---\n### Dream — {ts} (triggered, brain fallback)\n{dream_text}\n"
+                    with open(dream_file, "a", encoding="utf-8") as f:
+                        f.write(entry)
+                return {"dream": dream_text, "route": "brain-fallback", "n8n_error": n8n_error}
+            return {
+                "error": f"{n8n_error}; brain fallback returned {resp.status_code}",
+                "detail": resp.text[:200],
+            }
+    except httpx.ConnectError:
+        return {"error": f"{n8n_error}; brain fallback not reachable at {BRAIN_API_URL}"}
+    except Exception as e:
+        return {"error": f"{n8n_error}; brain fallback failed: {str(e)[:160]}"}
 
 
 @app.post("/api/call")
@@ -787,6 +1044,66 @@ body::after {
 .lobe-name { font-weight: 600; font-size: 11px; color: var(--text); }
 .lobe-desc { font-size: 9px; color: var(--dim); }
 .lobe-detail { font-size: 9px; color: var(--muted); margin-top: 2px; }
+.lobe-body { flex: 1; min-width: 0; }
+.lobe-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.latency-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--dim); font-size: 8px; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.latency-chip.fast { color: var(--green); border-color: rgba(0,232,123,0.25); background: rgba(0,232,123,0.06); }
+.latency-chip.watch { color: var(--orange); border-color: rgba(255,184,48,0.25); background: rgba(255,184,48,0.06); }
+.latency-chip.slow { color: var(--red); border-color: rgba(255,68,68,0.25); background: rgba(255,68,68,0.06); }
+.ops-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.signal-card {
+  background: linear-gradient(180deg, rgba(24,29,42,0.72), rgba(12,15,24,0.8));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  min-width: 0;
+}
+.signal-label {
+  color: var(--dim); font-size: 8px; font-weight: 700;
+  letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px;
+}
+.signal-value {
+  color: var(--text); font-size: 12px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.signal-sub { color: var(--muted); font-size: 9px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; max-height: 235px; overflow-y: auto; padding-right: 2px; }
+.route-card {
+  border: 1px solid rgba(30,37,54,0.85);
+  border-left: 2px solid rgba(52,212,255,0.55);
+  border-radius: 8px;
+  background: rgba(3,4,8,0.42);
+  padding: 9px 10px;
+  min-width: 0;
+}
+.route-card.orchestrated { border-left-color: var(--green); }
+.route-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
+.route-name { color: #eef3ff; font-weight: 700; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route-flags { display: flex; gap: 4px; flex-shrink: 0; }
+.route-flag {
+  color: var(--dim); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 5px; font-size: 7px; text-transform: uppercase;
+}
+.route-flag.on { color: var(--green); border-color: rgba(0,232,123,0.25); }
+.route-model { color: var(--cyan); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route-purpose { color: var(--dim); font-size: 9px; line-height: 1.45; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.memory-feed { max-height: 210px; overflow-y: auto; display: grid; gap: 7px; }
+.memory-event {
+  border: 1px solid rgba(30,37,54,0.75);
+  border-radius: 8px;
+  background: rgba(8,10,16,0.6);
+  padding: 8px 10px;
+}
+.memory-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 8px; margin-bottom: 4px; }
+.memory-kind { color: var(--orange); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.memory-content { color: var(--text); font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.empty-state { color: var(--muted); font-size: 10px; padding: 8px 2px; }
 
 /* Pentagon */
 .pentagon-panel { display: flex; align-items: center; gap: 16px; }
@@ -929,6 +1246,13 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 @media (max-width: 1000px) {
   .overview-grid, .console-grid { grid-template-columns: 1fr; }
   .pentagon-panel { flex-direction: column; }
+  .ops-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .route-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .stats-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-card { min-width: 0; }
+  .ops-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -971,6 +1295,7 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
     <div class="stat-card"><div class="stat-label">Bus Msgs</div><div class="stat-val violet" id="sMsgs">0</div></div>
     <div class="stat-card"><div class="stat-label">Bus Lobes</div><div class="stat-val orange" id="sBusLobes">0</div></div>
     <div class="stat-card"><div class="stat-label">Topics</div><div class="stat-val pink" id="sTopics">0</div></div>
+    <div class="stat-card"><div class="stat-label">Brain</div><div class="stat-val green" id="sBrain">--</div></div>
     <div class="stat-card"><div class="stat-label">Pathway</div><div class="stat-val violet" id="sPathway">--</div></div>
   </div>
 
@@ -979,7 +1304,18 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
     <div class="lobe-grid" id="lobeGrid"></div>
   </div>
 
-  <div class="panel" style="grid-row: span 3">
+  <div class="panel" style="grid-column:1">
+    <div class="panel-hdr"><span class="panel-title">Cortex Routes</span><span class="panel-badge" id="brainBadge">--</span></div>
+    <div class="ops-grid">
+      <div class="signal-card"><div class="signal-label">Default</div><div class="signal-value" id="defaultModel">--</div><div class="signal-sub" id="brainLatency">--</div></div>
+      <div class="signal-card"><div class="signal-label">Headless</div><div class="signal-value" id="headlessModel">--</div><div class="signal-sub" id="headlessMode">--</div></div>
+      <div class="signal-card"><div class="signal-label">Voice</div><div class="signal-value" id="voiceHealth">--</div><div class="signal-sub" id="voiceLatency">--</div></div>
+      <div class="signal-card"><div class="signal-label">Codebase</div><div class="signal-value" id="codebaseHealth">--</div><div class="signal-sub" id="codebaseLatency">--</div></div>
+    </div>
+    <div class="route-list" id="routeList"></div>
+  </div>
+
+  <div class="panel" style="grid-row: span 5">
     <div class="panel-hdr"><span class="panel-title">Quantum Pentagon</span></div>
     <div class="pentagon-panel">
       <canvas class="pentagon-canvas" id="pentCanvas" width="220" height="220"></canvas>
@@ -998,6 +1334,11 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
       <div class="panel-hdr"><span class="panel-title">People</span></div>
       <div class="people-list" id="peopleBox"></div>
     </div>
+  </div>
+
+  <div class="panel" style="grid-column:1">
+    <div class="panel-hdr"><span class="panel-title">Memory / Trace Feed</span><span class="panel-badge" id="memoryBadge">0</span></div>
+    <div class="memory-feed" id="memoryFeed"><div class="empty-state">Waiting for memory events...</div></div>
   </div>
 
   <div class="panel" style="grid-column:1">
@@ -1113,6 +1454,34 @@ function switchTab(name, btn) {
 let _quantumWeights = [0.5, 0.5, 0.5, 0.5, 0.5];
 let _neuralRunning = false;
 
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function fmtMs(v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return 'n/a';
+  const n = Number(v);
+  return n >= 1000 ? `${(n/1000).toFixed(2)}s` : `${Math.round(n)}ms`;
+}
+
+function latencyClass(v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return 'unknown';
+  if (Number(v) < 220) return 'fast';
+  if (Number(v) < 1000) return 'watch';
+  return 'slow';
+}
+
+function statusLabel(v) {
+  return (v || 'offline').toString().toUpperCase();
+}
+
 // ── Data fetching ────────────────────────────
 async function fetchState() {
   try {
@@ -1125,6 +1494,8 @@ async function fetchState() {
     updateTranscript(d.transcript || '');
     updatePeople(d.people || []);
     updateDreams(d.dreams || []);
+    updateBrain(d.brain || {}, d.voice || {}, d.codebase || {});
+    updateMemoryEvents(d.memory_events || []);
     document.getElementById('sOnline').textContent = `${d.online}/${d.total}`;
     document.getElementById('sUptime').textContent = fmtUp(d.uptime||0);
     document.getElementById('sMsgs').textContent = d.nexus_stats?.msg_count || 0;
@@ -1148,15 +1519,71 @@ function updateLobes(lobes) {
   const g = document.getElementById('lobeGrid');
   g.innerHTML = lobes.map(l => `
     <div class="lobe-card">
-      <div class="lobe-dot ${l.status}"></div>
-      <div>
-        <div class="lobe-name">${l.name}</div>
-        <div class="lobe-desc">${l.desc}</div>
-        <div class="lobe-detail">${typeof l.detail === 'object' ? (l.detail.status||'') : (l.detail||'')}</div>
+      <div class="lobe-dot ${esc(l.status)}"></div>
+      <div class="lobe-body">
+        <div class="lobe-top">
+          <div class="lobe-name">${esc(l.name)}</div>
+          <span class="latency-chip ${esc(l.latency_class || latencyClass(l.latency_ms))}">${fmtMs(l.latency_ms)}</span>
+        </div>
+        <div class="lobe-desc">${esc(l.desc)}</div>
+        <div class="lobe-detail">${esc(typeof l.detail === 'object' ? (l.detail.status || l.detail.service || '') : (l.detail||''))}</div>
       </div>
     </div>`).join('');
   // Feed live status into neural map
   if (_neuralRunning) updateNeuralFromLobes(lobes);
+}
+
+function updateBrain(brain, voice, codebase) {
+  const routes = Array.isArray(brain.routes) ? brain.routes : [];
+  setText('sBrain', statusLabel(brain.status));
+  setText('brainBadge', `${statusLabel(brain.status)} · ${fmtMs(brain.latency_ms)}`);
+  setText('defaultModel', brain.default_model || 'unknown');
+  setText('brainLatency', `${routes.length} routes · state ${fmtMs(brain.state_latency_ms)}`);
+  setText('headlessModel', brain.headless_model || brain.headless_thought_model || 'unknown');
+  setText('headlessMode', `${brain.thoughts || 0} thoughts · ${brain.dreams || 0} dreams`);
+  setText('voiceHealth', statusLabel(voice.status));
+  setText('voiceLatency', `${voice.service || 'trained voice'} · ${fmtMs(voice.latency_ms)}`);
+  setText('codebaseHealth', statusLabel(codebase.status));
+  setText('codebaseLatency', `${codebase.service || 'codebase'} · ${fmtMs(codebase.latency_ms)}`);
+
+  const list = document.getElementById('routeList');
+  if (!list) return;
+  if (!routes.length) {
+    list.innerHTML = `<div class="empty-state">${esc(brain.error || 'No cortex route data yet')}</div>`;
+    return;
+  }
+  list.innerHTML = routes.map(r => `
+    <div class="route-card ${r.orchestrated ? 'orchestrated' : ''}">
+      <div class="route-head">
+        <div class="route-name">${esc(r.id)}</div>
+        <div class="route-flags">
+          <span class="route-flag ${r.orchestrated ? 'on' : ''}">mesh</span>
+          <span class="route-flag ${r.multimodal ? 'on' : ''}">vision</span>
+          <span class="route-flag ${r.voice_native ? 'on' : ''}">voice</span>
+        </div>
+      </div>
+      <div class="route-model">${esc(r.model_id || r.region || '')}</div>
+      <div class="route-purpose">${esc(r.purpose || '')}</div>
+    </div>`).join('');
+}
+
+function updateMemoryEvents(events) {
+  const feed = document.getElementById('memoryFeed');
+  const badge = document.getElementById('memoryBadge');
+  if (badge) badge.textContent = events.length || 0;
+  if (!feed) return;
+  if (!events.length) {
+    feed.innerHTML = '<div class="empty-state">No memory events reported yet</div>';
+    return;
+  }
+  feed.innerHTML = events.map(e => {
+    const time = (e.ts || '').split('T')[1]?.substring(0,8) || (e.ts || '').substring(0,16);
+    const source = [e.source, e.speaker].filter(Boolean).join(' / ');
+    return `<div class="memory-event">
+      <div class="memory-meta"><span><span class="memory-kind">${esc(e.kind || 'event')}</span> ${esc(source)}</span><span>${esc(time)}</span></div>
+      <div class="memory-content">${esc(e.content || '')}</div>
+    </div>`;
+  }).join('');
 }
 
 function updateQuantum(q) {
@@ -1179,24 +1606,24 @@ function updateFeed(feed) {
   document.getElementById('feedBadge').textContent = feed.length;
   el.innerHTML = feed.slice(-15).reverse().map(f => `
     <div class="feed-item">
-      <span class="feed-ts">${(f.ts||'').split('T')[1]?.substring(0,8)||''}</span>
-      <span class="feed-from">${f.from}</span>
-      <span class="feed-topic">${f.topic}</span>
+      <span class="feed-ts">${esc((f.ts||'').split('T')[1]?.substring(0,8)||'')}</span>
+      <span class="feed-from">${esc(f.from)}</span>
+      <span class="feed-topic">${esc(f.topic)}</span>
     </div>`).join('');
 }
 
 function updateTranscript(t) { document.getElementById('transcriptBox').textContent = t || 'No transcript yet'; }
 
 function updatePeople(p) {
-  document.getElementById('peopleBox').innerHTML = p.map(x => `<span class="person-chip">${x.name}</span>`).join('');
+  document.getElementById('peopleBox').innerHTML = p.map(x => `<span class="person-chip">${esc(x.name)}</span>`).join('');
 }
 
 function updateDreams(dreams) {
   if (!dreams.length) { document.getElementById('dreamBox').innerHTML = '<span style="color:var(--muted)">No dreams yet</span>'; return; }
   document.getElementById('dreamBox').innerHTML = dreams.map(d => `
     <div class="dream-entry">
-      <div class="dream-ts">${d.timestamp}</div>
-      <div class="dream-text">${d.content.substring(0,300)}</div>
+      <div class="dream-ts">${esc(d.timestamp)}</div>
+      <div class="dream-text">${esc((d.content || '').substring(0,300))}</div>
     </div>`).join('');
 }
 
@@ -1799,6 +2226,8 @@ function connectSSE() {
         if (d.type === 'poll') {
           updateLobes(d.lobes||[]);
           updateQuantum(d.quantum||{});
+          updateBrain(d.brain||{}, d.voice||{}, d.codebase||{});
+          updateMemoryEvents(d.memory_events||[]);
           document.getElementById('sOnline').textContent = `${d.online}/${d.total}`;
           document.getElementById('sUptime').textContent = fmtUp(d.uptime||0);
           document.getElementById('sMsgs').textContent = d.nexus_msg_count||0;
@@ -1808,7 +2237,7 @@ function connectSSE() {
         }
         if (d.type === 'nexus' && d.data) {
           const el = document.getElementById('feedScroll');
-          el.insertAdjacentHTML('afterbegin', `<div class="feed-item"><span class="feed-from">${d.data.from||''}</span> <span class="feed-topic">${d.data.topic||''}</span></div>`);
+          el.insertAdjacentHTML('afterbegin', `<div class="feed-item"><span class="feed-from">${esc(d.data.from||'')}</span> <span class="feed-topic">${esc(d.data.topic||'')}</span></div>`);
         }
       } catch(e){}
     };

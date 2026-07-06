@@ -44,7 +44,7 @@ terraform output           # note: hostname (<EIP>.sslip.io), public_ip, ssh_com
 
 This creates: 1× `t4g.large` (Ubuntu 24.04 arm64, IMDSv2, encrypted gp3), an Elastic IP, a
 key pair, and a Security Group that opens **only 22 (your IP) + 80/443**. Everything Weaver
-exposes internally (9999/8899/8090/8000/9996/9997) stays localhost-only — `lora_server`
+exposes internally (9999/8899/8090/8091/8000/9996/9997) stays localhost-only — `lora_server`
 binds `0.0.0.0`, so an open port would be an exposed model endpoint.
 
 Set a shell var for the rest of this guide:
@@ -107,15 +107,23 @@ This installs + starts four units: `weaver-llm` (experts :8090), `weaver` (`--he
 # on the box — all four green:
 journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f
 curl 127.0.0.1:8090/v1/models          # experts server up
+curl 127.0.0.1:8091/health             # read-only codebase API up
 curl 127.0.0.1:8000/health             # oracle backend up
 
 # from your laptop:
 #   https://<EIP>.sslip.io   → Oracle UI loads, valid Let's Encrypt cert, wss://.../ws connects
 ```
 
-**Security:** `9999`/`8899`/`8090`/`8000`/`9996`/`9997` stay localhost-only — only `443`/`22`
+**Security:** `9999`/`8899`/`8090`/`8091`/`8000`/`9996`/`9997` stay localhost-only — only `443`/`22`
 are reachable. Before going public: set `ORACLE_SECRET_KEY` + `ORACLE_ENCRYPTION_MASTER_KEY`,
 an admin login, and keep `ORACLE_ENABLE_DEMO_LOGINS=0`.
+
+`/codebase/*` is proxied through Caddy to `127.0.0.1:8091` and requires the same
+`X-Weaver-Key` as `/llm/*`. It is read-only and serves capped, redacted source/doc
+snippets only; `.env`, vaults, models, assets, Terraform plans, hidden files, and large
+artifacts are excluded. `weaver.service` sets `WEAVER_CODEBASE_ROOT=/home/ubuntu/weaver`
+so Weaver can inspect the deployed source tree rather than only the `windsurf-project`
+subfolder.
 
 ---
 

@@ -447,9 +447,10 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
             dream_cooldown_s = DREAM_INTERVAL_HOURS * 3600
             dream_log_path = os.path.join(_vault_dir, "weaver_dreams.md")
             _dream_mem = _DreamMM(vault_dir=_vault_dir)
-            n8n_url = os.environ.get(
-                "WEAVER_N8N_WEBHOOK_URL",
-                "http://localhost:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input",
+            n8n_url = (
+                os.environ.get("WEAVER_N8N_WEBHOOK_URL")
+                or os.environ.get("N8N_WEBHOOK_URL")
+                or "http://localhost:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
             )
             last_dream_at = 0.0
 

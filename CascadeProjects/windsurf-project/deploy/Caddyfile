@@ -1,7 +1,9 @@
 # Public TLS reverse proxy for the Weaver full stack (3 origins, 1 box).
 #
 #   weaverv3.com          the embodied avatar page (avatar/embodiment.html) at the root,
-#                         plus a gated /llm/* proxy to the on-box llama.cpp server.
+#                         plus gated /brain/* and /llm/* model proxies.
+#   headless.weaverv3.com lightweight no-GPU headless Weaver presence backed by
+#                         the same unified AWS Bedrock brain service.
 #   dash.weaverv3.com     weaver_dashboard.py (127.0.0.1:9990) — full read/write control
 #                         plane, can trigger real Twilio calls via /api/call. MUST stay
 #                         behind basic_auth.
@@ -39,6 +41,14 @@ weaverv3.com {
 		reverse_proxy 127.0.0.1:8090
 	}
 
+	# unified AWS Bedrock cortex: weaver-one coordinates speed, dream, code,
+	# vision, and main reasoning routes through one OpenAI-compatible endpoint.
+	handle_path /brain/* {
+		@bdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		respond @bdenied 403
+		reverse_proxy 127.0.0.1:8093
+	}
+
 	# read-only source-code context for Weaver's self-inspection. Same key gate as /llm.
 	handle_path /codebase/* {
 		@cdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
@@ -55,22 +65,58 @@ weaverv3.com {
 		reverse_proxy 127.0.0.1:8092
 	}
 
+	# heavy remote GPU splat renderer. This is visual-only and intentionally not
+	# key-gated so <img src="/gpu-render/stream.mjpg"> can render without custom
+	# headers; if the pod is down the page falls back to the local lite scene.
+	handle_path /gpu-render/* {
+		reverse_proxy https://arl906d9mi8tpd-8888.proxy.runpod.net {
+			header_up Host arl906d9mi8tpd-8888.proxy.runpod.net
+		}
+	}
+
 	handle {
 		root * /var/www/weaver
 		file_server
 	}
 }
 
+headless.weaverv3.com {
+	encode zstd gzip
+
+	handle_path /brain/* {
+		@hbdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		respond @hbdenied 403
+		reverse_proxy 127.0.0.1:8093
+	}
+
+	handle_path /tts/* {
+		@htdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		respond @htdenied 403
+		reverse_proxy 127.0.0.1:8092
+	}
+
+	handle_path /codebase/* {
+		@hcdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		respond @hcdenied 403
+		reverse_proxy 127.0.0.1:8091
+	}
+
+	handle {
+		root * /var/www/weaver-headless
+		file_server
+	}
+}
+
 dash.weaverv3.com {
 	basicauth {
-		weaver {$WEAVER_DASH_HASH}
+		ydnop {$WEAVER_DASH_HASH}
 	}
 	reverse_proxy 127.0.0.1:9990
 }
 
 status.weaverv3.com {
 	basicauth {
-		weaver {$WEAVER_DASH_HASH}
+		ydnop {$WEAVER_DASH_HASH}
 	}
 	reverse_proxy 127.0.0.1:9996
 }

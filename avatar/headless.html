@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Weaver - Headless</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #06070a;
+    --panel: rgba(13, 15, 20, 0.72);
+    --line: rgba(225, 186, 88, 0.26);
+    --gold: #e1ba58;
+    --blue: #79a9ff;
+    --green: #67d487;
+    --text: #ece8dd;
+    --muted: #a8a396;
+  }
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .top {
+    position: fixed; left: 16px; top: 16px; z-index: 2;
+    width: min(410px, calc(100vw - 32px));
+    padding: 14px 16px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    backdrop-filter: blur(10px);
+  }
+  .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  h1 { margin: 0; font-size: 13px; line-height: 1.1; letter-spacing: 0.18em; color: var(--gold); font-weight: 700; }
+  .stamp { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-top: 12px; }
+  .stat { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 999px; background: #4a4e55; flex: none; }
+  .dot.on { background: var(--green); box-shadow: 0 0 12px rgba(103, 212, 135, 0.75); }
+  .dot.busy { background: var(--gold); box-shadow: 0 0 12px rgba(225, 186, 88, 0.75); }
+  .readout { margin-top: 12px; color: var(--text); font-size: 13px; line-height: 1.45; }
+  .readout b { color: var(--blue); font-weight: 600; }
+  .readout span { color: var(--gold); }
+  .bar {
+    position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 2;
+    display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 8px;
+    align-items: center;
+    padding: 10px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    backdrop-filter: blur(10px);
+  }
+  button, input {
+    height: 42px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.12);
+    font: inherit;
+  }
+  button {
+    background: rgba(225, 186, 88, 0.12);
+    color: var(--text);
+    padding: 0 14px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--gold); color: #151109; border-color: transparent; font-weight: 700; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  input {
+    min-width: 0;
+    background: rgba(255,255,255,0.06);
+    color: var(--text);
+    padding: 0 12px;
+    outline: none;
+  }
+  input:focus, button:focus-visible { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(225,186,88,0.2); }
+  .voice {
+    position: fixed; right: 16px; top: 16px; z-index: 2;
+    width: min(360px, calc(100vw - 32px));
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 12px 14px;
+    border: 1px solid rgba(121,169,255,0.22);
+    border-radius: 8px;
+    background: rgba(8, 12, 18, 0.62);
+    backdrop-filter: blur(10px);
+  }
+  @media (max-width: 760px) {
+    .voice { top: auto; bottom: 82px; right: 12px; left: 12px; width: auto; }
+    .top { left: 12px; top: 12px; width: calc(100vw - 24px); }
+    .bar { left: 12px; right: 12px; bottom: 12px; grid-template-columns: auto auto 1fr auto; }
+    #dream { display: none; }
+    h1 { letter-spacing: 0.14em; }
+  }
+</style>
+</head>
+<body>
+<canvas id="field"></canvas>
+<section class="top" aria-label="Weaver headless status">
+  <div class="brand">
+    <h1>WEAVER HEADLESS</h1>
+    <div id="stamp" class="stamp">starting</div>
+  </div>
+  <div class="grid">
+    <div class="stat"><i id="brainDot" class="dot"></i><span id="brain">brain checking</span></div>
+    <div class="stat"><i id="voiceDot" class="dot"></i><span id="voice">voice locked</span></div>
+    <div class="stat"><i id="thoughtDot" class="dot"></i><span id="thoughts">0 thoughts</span></div>
+    <div class="stat"><i id="dreamDot" class="dot"></i><span id="dreams">0 dreams</span></div>
+  </div>
+  <div class="readout"><b>Thought:</b> <span id="lastThought">none yet</span></div>
+  <div class="readout"><b>Dream:</b> <span id="lastDream">none yet</span></div>
+</section>
+<section class="voice" aria-live="polite">
+  <div><b>She heard:</b> <span id="heard">-</span></div>
+  <div><b>She said:</b> <span id="said">-</span></div>
+</section>
+<form id="bar" class="bar">
+  <button id="wake" type="button" class="primary">Wake</button>
+  <button id="mic" type="button">Mic</button>
+  <input id="text" autocomplete="off" placeholder="Talk to Weaver" aria-label="Talk to Weaver" />
+  <button id="send" type="submit" class="primary">Send</button>
+  <button id="dream" type="button">Dream</button>
+</form>
+<audio id="audio" playsinline></audio>
+<script>
+const canvas = document.getElementById('field');
+const ctx = canvas.getContext('2d', { alpha: false });
+const audio = document.getElementById('audio');
+audio.preload = 'auto';
+audio.playsInline = true;
+audio.setAttribute('playsinline', '');
+const ui = {
+  stamp: document.getElementById('stamp'),
+  brain: document.getElementById('brain'),
+  voice: document.getElementById('voice'),
+  thoughts: document.getElementById('thoughts'),
+  dreams: document.getElementById('dreams'),
+  lastThought: document.getElementById('lastThought'),
+  lastDream: document.getElementById('lastDream'),
+  heard: document.getElementById('heard'),
+  said: document.getElementById('said'),
+  brainDot: document.getElementById('brainDot'),
+  voiceDot: document.getElementById('voiceDot'),
+  thoughtDot: document.getElementById('thoughtDot'),
+  dreamDot: document.getElementById('dreamDot'),
+  wake: document.getElementById('wake'),
+  mic: document.getElementById('mic'),
+  send: document.getElementById('send'),
+  dream: document.getElementById('dream'),
+  text: document.getElementById('text'),
+};
+const state = {
+  key: localStorage.getItem('weaver_llm_key') || '',
+  w: 1,
+  h: 1,
+  dpr: 1,
+  phase: 0,
+  pulse: 0.2,
+  voiceReady: false,
+  audioUnlocked: false,
+  audioError: '',
+  wakeSpoken: false,
+  speaking: false,
+  particles: [],
+  lastState: null,
+};
+const HEADLESS_MODEL = 'weaver-headless';
+const HEADLESS_MODEL_LABEL = 'Nova Pro headless';
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
+let audioCtx = null;
+function key() {
+  if (!state.key) {
+    state.key = prompt('Enter Weaver brain key:') || '';
+    localStorage.setItem('weaver_llm_key', state.key);
+  }
+  return state.key;
+}
+function headers(json = false) {
+  const h = { 'X-Weaver-Key': key() };
+  if (json) h['Content-Type'] = 'application/json';
+  return h;
+}
+function compact(value, max = 280) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+function dot(el, mode) {
+  el.classList.toggle('on', mode === 'on');
+  el.classList.toggle('busy', mode === 'busy');
+}
+async function unlockAudio() {
+  if (state.audioUnlocked) return true;
+  let unlocked = false;
+  state.audioError = '';
+  try {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextCtor) {
+      audioCtx = audioCtx || new AudioContextCtor();
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0.00001;
+      const osc = audioCtx.createOscillator();
+      osc.frequency.value = 220;
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.025);
+      unlocked = true;
+    }
+  } catch (e) {
+    state.audioError = e.message || String(e);
+  }
+  try {
+    audio.muted = true;
+    audio.volume = 0;
+    audio.src = SILENT_WAV;
+    audio.load();
+    const p = audio.play();
+    if (p) await p;
+    audio.pause();
+    audio.currentTime = 0;
+    audio.removeAttribute('src');
+    audio.load();
+    audio.muted = false;
+    audio.volume = 1;
+    unlocked = true;
+  } catch (e) {
+    state.audioError = e.message || String(e);
+    audio.muted = false;
+    audio.volume = 1;
+  }
+  state.audioUnlocked = unlocked;
+  state.voiceReady = unlocked;
+  ui.voice.textContent = unlocked ? 'voice ready' : `audio blocked: ${state.audioError || 'tap Wake again'}`;
+  dot(ui.voiceDot, unlocked ? 'on' : '');
+  return unlocked;
+}
+async function brainFetch(path, options = {}) {
+  const r = await fetch(path, { ...options, headers: { ...headers(Boolean(options.body)), ...(options.headers || {}) } });
+  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  return r.json();
+}
+function resize() {
+  state.dpr = Math.min(devicePixelRatio || 1, 1.5);
+  state.w = Math.floor(innerWidth * state.dpr);
+  state.h = Math.floor(innerHeight * state.dpr);
+  canvas.width = state.w;
+  canvas.height = state.h;
+  seed();
+}
+function seed() {
+  const count = Math.min(140, Math.max(72, Math.floor((innerWidth * innerHeight) / 17000)));
+  state.particles = Array.from({ length: count }, (_, i) => ({
+    a: (i / count) * Math.PI * 2,
+    r: 0.12 + Math.random() * 0.48,
+    s: 0.0015 + Math.random() * 0.004,
+    z: 0.25 + Math.random() * 0.75,
+    hue: Math.random() < 0.62 ? 42 : 214,
+  }));
+}
+function draw() {
+  state.phase += 1 / 60;
+  state.pulse *= 0.985;
+  const w = state.w, h = state.h;
+  ctx.fillStyle = '#06070a';
+  ctx.fillRect(0, 0, w, h);
+  const cx = w * 0.5;
+  const cy = h * 0.48;
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.58);
+  glow.addColorStop(0, `rgba(225,186,88,${0.12 + state.pulse * 0.12})`);
+  glow.addColorStop(0.42, 'rgba(24,35,55,0.34)');
+  glow.addColorStop(1, 'rgba(6,7,10,1)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, w, h);
+  ctx.save();
+  ctx.translate(cx, cy);
+  for (const p of state.particles) {
+    p.a += p.s * (state.speaking ? 2.4 : 1);
+    const breath = Math.sin(state.phase * 0.8 + p.z * 5) * 0.04;
+    const rr = Math.min(w, h) * (p.r + breath + state.pulse * 0.06);
+    const x = Math.cos(p.a) * rr * (1.25 - p.z * 0.25);
+    const y = Math.sin(p.a * 0.72) * rr * 0.62;
+    const size = (1.2 + p.z * 3.6 + state.pulse * 3.5) * state.dpr;
+    ctx.beginPath();
+    ctx.fillStyle = `hsla(${p.hue}, ${p.hue === 42 ? 72 : 88}%, ${58 + p.z * 18}%, ${0.18 + p.z * 0.48})`;
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = `rgba(225,186,88,${0.12 + state.pulse * 0.18})`;
+  ctx.lineWidth = 1 * state.dpr;
+  for (let i = 0; i < 4; i++) {
+    const r = Math.min(w, h) * (0.16 + i * 0.095 + state.pulse * 0.03);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 1.75, r * 0.52, state.phase * 0.05 + i * 0.28, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+  requestAnimationFrame(draw);
+}
+async function pollState() {
+  try {
+    const s = await brainFetch('/brain/state');
+    state.lastState = s;
+    ui.stamp.textContent = `${Math.max(0, Math.round(s.uptime_seconds || 0))}s active`;
+    ui.thoughts.textContent = `${s.thoughts || 0} thoughts`;
+    ui.dreams.textContent = `${s.dreams || 0} dreams`;
+    ui.lastThought.textContent = compact(s.last_thought || 'none yet', 220);
+    ui.lastDream.textContent = compact(s.last_dream || 'none yet', 360);
+    dot(ui.brainDot, 'on');
+    dot(ui.thoughtDot, s.last_thought ? 'on' : '');
+    dot(ui.dreamDot, s.last_dream ? 'on' : '');
+    ui.brain.textContent = HEADLESS_MODEL_LABEL;
+  } catch (e) {
+    ui.brain.textContent = e.message;
+    dot(ui.brainDot, '');
+  }
+}
+async function checkModels() {
+  try {
+    const m = await brainFetch('/brain/v1/models');
+    const ids = (m.data || []).map(x => x.id);
+    ui.brain.textContent = ids.includes(HEADLESS_MODEL) ? HEADLESS_MODEL_LABEL : 'brain online';
+    dot(ui.brainDot, 'on');
+  } catch (e) {
+    ui.brain.textContent = e.message;
+    dot(ui.brainDot, '');
+  }
+}
+async function speak(text) {
+  if (!text) return;
+  if (!state.voiceReady && !(await unlockAudio())) {
+    ui.voice.textContent = 'tap Wake to unlock audio';
+    dot(ui.voiceDot, '');
+    return;
+  }
+  state.speaking = true;
+  state.pulse = Math.max(state.pulse, 1);
+  dot(ui.voiceDot, 'busy');
+  ui.voice.textContent = 'trained voice';
+  let url = '';
+  try {
+    const r = await fetch('/tts/synth', {
+      method: 'POST',
+      headers: { ...headers(true), Accept: 'audio/wav,audio/*' },
+      body: JSON.stringify({ text: compact(text, 420) }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!r.ok) {
+      if (r.status === 403) {
+        localStorage.removeItem('weaver_llm_key');
+        state.key = '';
+        throw new Error('voice key rejected - tap Wake and re-enter key');
+      }
+      throw new Error(`tts ${r.status}`);
+    }
+    const blob = await r.blob();
+    if (!/^audio\//i.test(blob.type || '')) throw new Error(`tts returned ${blob.type || 'non-audio'}`);
+    url = URL.createObjectURL(blob);
+    audio.onended = () => {
+      if (url) URL.revokeObjectURL(url);
+      state.speaking = false;
+      ui.voice.textContent = 'voice ready';
+      dot(ui.voiceDot, 'on');
+    };
+    audio.onerror = () => {
+      if (url) URL.revokeObjectURL(url);
+      state.speaking = false;
+      state.audioError = 'audio playback failed';
+      ui.voice.textContent = state.audioError;
+      dot(ui.voiceDot, '');
+    };
+    audio.src = url;
+    audio.load();
+    const p = audio.play();
+    if (p) await p;
+  } catch (e) {
+    if (url) URL.revokeObjectURL(url);
+    state.speaking = false;
+    state.audioError = e.message || String(e);
+    ui.voice.textContent = /notallowed|gesture|play/i.test(state.audioError)
+      ? 'tap Wake again to unlock audio'
+      : state.audioError;
+    dot(ui.voiceDot, '');
+  }
+}
+async function chat(text) {
+  ui.heard.textContent = compact(text, 260);
+  ui.said.textContent = 'thinking';
+  dot(ui.brainDot, 'busy');
+  state.pulse = 0.85;
+  try {
+    const r = await brainFetch('/brain/v1/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: HEADLESS_MODEL,
+        max_tokens: 260,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You are Weaver in headless mode: no 3D body, no GPU, a floating reactive presence.',
+              'Use Amazon Nova Pro for this headless floating presence.',
+              'Use your trained voice endpoint for speech output after the text response.',
+              'Be direct and grounded. State limits clearly when the browser or backend cannot perform something.'
+            ].join(' ')
+          },
+          { role: 'user', content: text }
+        ]
+      })
+    });
+    const reply = compact(r.choices?.[0]?.message?.content || '', 1200);
+    ui.said.textContent = reply || '-';
+    state.pulse = 1;
+    speak(reply);
+    pollState();
+  } catch (e) {
+    ui.said.textContent = e.message;
+  } finally {
+    dot(ui.brainDot, 'on');
+  }
+}
+async function triggerDream() {
+  dot(ui.dreamDot, 'busy');
+  try {
+    const r = await brainFetch('/brain/trigger/dream', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'operator-headless-button' })
+    });
+    ui.lastDream.textContent = compact(r.dream, 360);
+    state.pulse = 1;
+    dot(ui.dreamDot, 'on');
+  } catch (e) {
+    ui.lastDream.textContent = e.message;
+    dot(ui.dreamDot, '');
+  }
+}
+function startMic() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    ui.heard.textContent = 'speech recognition unavailable in this browser';
+    return;
+  }
+  const rec = new SpeechRecognition();
+  rec.continuous = false;
+  rec.interimResults = false;
+  rec.lang = 'en-US';
+  rec.onresult = (event) => {
+    const text = event.results?.[0]?.[0]?.transcript || '';
+    if (text) chat(text);
+  };
+  rec.onerror = (event) => { ui.heard.textContent = event.error || 'mic error'; };
+  rec.start();
+}
+ui.wake.addEventListener('click', async () => {
+  key();
+  const ok = await unlockAudio();
+  checkModels();
+  pollState();
+  if (ok && !state.wakeSpoken) {
+    state.wakeSpoken = true;
+    ui.voice.textContent = 'testing trained voice';
+    setTimeout(() => speak("I'm here."), 180);
+  }
+});
+globalThis.__weaverHeadlessAudioAudit = () => ({
+  voiceReady: state.voiceReady,
+  audioUnlocked: state.audioUnlocked,
+  audioError: state.audioError,
+  wakeSpoken: state.wakeSpoken,
+  audioPaused: audio.paused,
+  audioSrc: audio.currentSrc || audio.src || '',
+  speaking: state.speaking,
+  audioContextState: audioCtx?.state || ''
+});
+ui.mic.addEventListener('click', startMic);
+ui.dream.addEventListener('click', triggerDream);
+document.getElementById('bar').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const text = ui.text.value.trim();
+  if (!text) return;
+  ui.text.value = '';
+  chat(text);
+});
+addEventListener('resize', resize);
+resize();
+draw();
+checkModels();
+pollState();
+setInterval(pollState, 5000);
+</script>
+</body>
+</html>

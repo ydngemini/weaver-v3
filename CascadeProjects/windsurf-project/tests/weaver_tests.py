@@ -2,11 +2,14 @@
 # Bootstrap: inject the project venv's site-packages so all deps are available
 # regardless of which python3 binary invokes this script.
 import os as _os, sys as _sys, glob as _glob
-_venv_site = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
-                            "venv", "lib")
+_TESTS_DIR = _os.path.dirname(_os.path.abspath(__file__))
+_PROJ_ROOT = _os.path.dirname(_TESTS_DIR)
+_venv_site = _os.path.join(_PROJ_ROOT, "venv", "lib")
 for _sp in _glob.glob(_os.path.join(_venv_site, "python*", "site-packages")):
     if _sp not in _sys.path:
         _sys.path.insert(0, _sp)
+if _PROJ_ROOT not in _sys.path:
+    _sys.path.insert(0, _PROJ_ROOT)
 """
 weaver_tests.py — Unified Weaver Test Suite
 ════════════════════════════════════════════
@@ -53,9 +56,10 @@ import numpy as np
 from dotenv import load_dotenv
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
-PROJ = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VENV = os.path.join(PROJ, "venv", "bin", "python3")
-sys.path.insert(0, PROJ)
+if PROJ not in sys.path:
+    sys.path.insert(0, PROJ)
 load_dotenv(os.path.join(PROJ, ".env"))
 
 BAR  = "─" * 66

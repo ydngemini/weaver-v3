@@ -1,0 +1,21 @@
+[Unit]
+Description=Weaver AWS Bedrock brain router and headless cognition loop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/weaver/CascadeProjects/windsurf-project
+EnvironmentFile=/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env
+EnvironmentFile=-/etc/default/caddy
+Environment=AWS_REGION=us-east-1
+Environment=WEAVER_HEADLESS_ACTIVE=1
+Environment=WEAVER_DEFAULT_BRAIN_ALIAS=weaver-one
+ExecStart=/home/ubuntu/weaver/CascadeProjects/windsurf-project/venv/bin/uvicorn bedrock_brain_api:app --host 127.0.0.1 --port 8093 --log-level warning
+Restart=on-failure
+RestartSec=8
+TimeoutStartSec=45
+
+[Install]
+WantedBy=multi-user.target

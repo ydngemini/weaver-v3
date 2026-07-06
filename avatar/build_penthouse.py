@@ -108,11 +108,16 @@ def plane(name, sx, sy, x, y, z, mat, rot=(0, 0, 0)):
     return ob
 
 
-def point_light(name, x, y, z, color, watts):
+def point_light(name, x, y, z, color, watts, radius=2.8, soft=0.18):
     li = bpy.data.lights.new(name, "POINT")
     li.color = color
     li.energy = watts
-    li.shadow_soft_size = 0.3
+    li.use_shadow = True
+    li.shadow_soft_size = soft
+    if hasattr(li, "use_custom_distance"):
+        li.use_custom_distance = True
+    if hasattr(li, "cutoff_distance"):
+        li.cutoff_distance = radius
     ob = bpy.data.objects.new(name, li)
     ob.location = (x, y, z)
     return link(ob)
@@ -214,6 +219,25 @@ def make_walnut(size=512):
     return np.clip(img, 0, 1)
 
 
+def make_plaster(size=512):
+    base = np.array([0.302, 0.286, 0.262])
+    pore = fbm(size, size, 7, seed=51)
+    trowel = fbm(size, size, 4, seed=53)
+    stroke = 0.5 + 0.5 * np.sin((np.linspace(0, 1, size)[None, :] * 18 + trowel * 1.8) * math.pi)
+    img = base + (pore[..., None] - 0.5) * 0.055
+    img += (stroke[..., None] - 0.5) * np.array([0.030, 0.026, 0.020])
+    return np.clip(img, 0, 1)
+
+
+def make_porcelain(size=512):
+    base = np.array([0.392, 0.358, 0.305])
+    grain = fbm(size, size, 5, seed=61)
+    veils = np.abs(np.sin((grain * 4.5 + np.linspace(0, 1, size)[:, None] * 2.2) * math.pi))
+    img = base + (grain[..., None] - 0.5) * 0.036
+    img -= (veils[..., None] ** 8) * np.array([0.045, 0.038, 0.030])
+    return np.clip(img, 0, 1)
+
+
 def make_skyline(w=2048, h=768):
     """Night city panorama: layered silhouettes, lit windows, haze, moon."""
     img = np.zeros((h, w, 3))
@@ -257,6 +281,8 @@ def make_skyline(w=2048, h=768):
 
 marble_img = image_from_array("tx_marble", make_marble())
 walnut_img = image_from_array("tx_walnut", make_walnut())
+plaster_img = image_from_array("tx_hand_troweled_plaster", make_plaster())
+porcelain_img = image_from_array("tx_20mm_porcelain_paver", make_porcelain())
 skyline_img = image_from_array("tx_skyline", make_skyline())
 
 M = {
@@ -264,9 +290,11 @@ M = {
     "island":   tex_material("marble_island", marble_img, rough=0.22, uv_scale=1.2),
     "walnut":   tex_material("walnut", walnut_img, rough=0.45, uv_scale=1.0),
     "skyline":  tex_material("skyline", skyline_img, emissive=True, emit_str=1.9),
-    "wall":     pbr("wall_greige", (0.318, 0.296, 0.268), rough=0.85),
+    "wall":     tex_material("hand_troweled_plaster", plaster_img, rough=0.90, uv_scale=1.7),
     "ceiling":  pbr("ceiling_char", (0.062, 0.060, 0.058), rough=0.9),
     "mullion":  pbr("bronze_mullion", (0.055, 0.045, 0.038), rough=0.4, metal=0.9),
+    "thermal":  pbr("polyamide_thermal_break", (0.018, 0.018, 0.018), rough=0.78),
+    "drain":    pbr("electropolished_316_slot_drain", (0.56, 0.55, 0.52), rough=0.20, metal=1.0),
     "glass":    pbr("glazing", (0.72, 0.84, 1.0), rough=0.03, alpha=0.04),
     "boucle":   pbr("boucle_ivory", (0.545, 0.512, 0.458), rough=0.95),
     "cushion2": pbr("boucle_sand", (0.412, 0.368, 0.306), rough=0.95),
@@ -288,7 +316,8 @@ M = {
     "throw":    pbr("throw_rust", (0.52, 0.24, 0.12), rough=0.95),
     "art1":     pbr("art_navy", (0.055, 0.078, 0.155), rough=0.8),
     "art2":     pbr("art_gold", (0.72, 0.55, 0.25), rough=0.5, metal=0.6),
-    "deck":     pbr("deck_wood", (0.165, 0.120, 0.080), rough=0.8),
+    "deck":     tex_material("r11_exterior_porcelain", porcelain_img, rough=0.68, uv_scale=3.2),
+    "cove":     pbr("warm_knife_edge_cove", (0, 0, 0), rough=1.0, emit=(1.0, 0.74, 0.42), emit_str=2.7),
 }
 
 # ─────────────── shell: floor / walls / ceiling / glazing ───────────────
@@ -304,19 +333,39 @@ box("wall_L", 0.1, 7.2, 3.0, -4.75, 0.15, 1.5, M["wall"])
 box("wall_R", 0.1, 7.2, 3.0, 4.75, 0.15, 1.5, M["wall"])
 box("wall_back", 9.6, 0.1, 3.0, 0, -3.30, 1.5, M["wall"])
 
-# window wall: glass + bronze mullions
+# window wall: low-E glass, deep bronze unitized profiles, and thermal breaks
 plane("glazing", 9.4, 2.9, 0, 3.52, 1.45, M["glass"], rot=(math.pi / 2, 0, 0))
 box("rail_top", 9.5, 0.09, 0.10, 0, 3.53, 2.87, M["mullion"])
 box("rail_bot", 9.5, 0.09, 0.07, 0, 3.53, 0.035, M["mullion"])
+box("unitized_subsill_cradle", 9.5, 0.16, 0.055, 0, 3.47, 0.095, M["mullion"])
+box("thermal_break_sill", 9.36, 0.018, 0.026, 0, 3.43, 0.142, M["thermal"])
+for j, z in enumerate((0.96, 1.88)):
+    box(f"curtain_transom_{j}", 9.5, 0.075, 0.038, 0, 3.535, z, M["mullion"])
+    box(f"transom_thermal_break_{j}", 9.36, 0.016, 0.018, 0, 3.49, z, M["thermal"])
 for i in range(9):
     x = -4.6 + i * 1.15
     box(f"mullion_{i}", 0.055, 0.075, 2.9, x, 3.53, 1.45, M["mullion"])
+    profile = box(f"unitized_mullion_profile_{i}", 0.036, 0.19, 2.76, x, 3.57, 1.45, M["mullion"])
+    profile.rotation_euler = (0, 0, math.radians(3.0 if i % 2 else -3.0))
+    box(f"mullion_thermal_break_{i}", 0.018, 0.018, 2.64, x, 3.475, 1.45, M["thermal"])
 
-# outside: balcony deck + glass rail + skyline
+# outside: zero-threshold terrace, slot drain, dry-laid porcelain, glass rail + skyline
 box("balcony_deck", 9.6, 1.15, 0.05, 0, 4.15, -0.03, M["deck"])
+box("zero_threshold_slot_drain", 9.25, 0.035, 0.014, 0, 3.585, 0.012, M["drain"])
+box("sub_sill_water_stop", 9.25, 0.028, 0.045, 0, 3.62, -0.006, M["thermal"])
+for i, x in enumerate(np.linspace(-4.0, 4.0, 5)):
+    box(f"paver_open_joint_x_{i}", 0.012, 1.05, 0.006, x, 4.16, 0.003, M["thermal"])
+for i, y in enumerate((3.84, 4.18, 4.52)):
+    box(f"paver_open_joint_y_{i}", 9.1, 0.010, 0.006, 0, y, 0.004, M["thermal"])
 plane("balcony_rail", 9.4, 1.05, 0, 4.70, 0.55, M["glass"], rot=(math.pi / 2, 0, 0))
 box("rail_cap", 9.4, 0.05, 0.04, 0, 4.70, 1.09, M["mullion"])
 plane("skyline", 26, 9.0, 0, 6.4, 3.1, M["skyline"], rot=(math.pi / 2, 0, 0))
+
+# indirect architectural light: warm 2700K cove plus acute grazing strips
+box("knife_edge_cove_window", 9.0, 0.018, 0.024, 0, 2.96, 2.725, M["cove"])
+box("knife_edge_cove_back", 8.6, 0.018, 0.024, 0, -2.72, 2.725, M["cove"])
+box("wall_grazer_left", 0.020, 6.3, 0.025, -4.50, 0.15, 2.46, M["cove"])
+box("wall_grazer_right", 0.020, 5.8, 0.025, 4.50, 0.05, 2.46, M["cove"])
 
 # ───────────────────────── lounge (left of her) ─────────────────────────
 # rug (she stands on its edge at origin)
@@ -352,25 +401,25 @@ for ob in (chair, chair_back):
     ob.rotation_euler = (0, 0, math.radians(-24))
 box("chair_legs", 0.5, 0.5, 0.16, 1.45, 2.2, 0.08, M["brass"]).rotation_euler = (0, 0, math.radians(-24))
 
-# arc floor lamp: base, stem (arched via 3 segments), emissive globe over sofa
-cyl("lamp_base", 0.17, 0.03, -2.55, 2.6, 0.015, M["black"], verts=32)
-s1 = cyl("lamp_stem1", 0.016, 1.9, -2.55, 2.6, 0.97, M["brass"], verts=16)
-s2 = cyl("lamp_stem2", 0.015, 1.1, -2.30, 2.48, 2.05, M["brass"], verts=16)
+# arc floor lamp: tall element is pulled back to the structural core side
+cyl("lamp_base", 0.17, 0.03, -3.58, 0.58, 0.015, M["black"], verts=32)
+s1 = cyl("lamp_stem1", 0.016, 1.9, -3.58, 0.58, 0.97, M["brass"], verts=16)
+s2 = cyl("lamp_stem2", 0.015, 1.1, -3.30, 0.78, 2.05, M["brass"], verts=16)
 s2.rotation_euler = (0.32, 0.55, 0)
-sphere("lamp_globe", 0.13, -1.95, 2.28, 2.34, M["lampglow"], seg=24)
+sphere("lamp_globe", 0.13, -2.82, 0.96, 2.34, M["lampglow"], seg=24)
 
 # fire ribbon under the window, right of the sofa
 box("fire_plinth", 1.45, 0.34, 0.42, 1.35, 3.28, 0.21, M["granite"], bevel=0.012)
 box("fire_ribbon", 1.15, 0.05, 0.10, 1.35, 3.20, 0.34, M["fire"])
 box("fire_ledge", 1.45, 0.36, 0.02, 1.35, 3.28, 0.43, M["granite"])
 
-# console under window (left) + sculpture + art lean
+# console under window (left) + sculpture; all low-profile near the glazing
 box("console", 1.3, 0.32, 0.04, -2.6, 3.22, 0.72, M["walnut"], bevel=0.01)
 box("console_leg_L", 0.03, 0.28, 0.70, -3.18, 3.22, 0.35, M["black"])
 box("console_leg_R", 0.03, 0.28, 0.70, -2.02, 3.22, 0.35, M["black"])
 sphere("sculpt_orb", 0.09, -2.85, 3.2, 0.84, M["brass"], seg=24)
-box("art_lean", 0.72, 0.03, 0.95, -2.35, 3.30, 1.24, M["art1"], bevel=0.005)
-box("art_lean_frame", 0.78, 0.02, 1.01, -2.35, 3.32, 1.24, M["brass"])
+box("low_art_slab", 0.82, 0.03, 0.38, -2.35, 3.30, 0.92, M["art1"], bevel=0.005)
+box("low_art_slab_frame", 0.88, 0.02, 0.44, -2.35, 3.32, 0.92, M["brass"])
 
 # ─────────────────── kitchen island + pendants (right) ───────────────────
 isl_x, isl_y = 2.45, 2.3          # three z = -2.3
@@ -433,8 +482,8 @@ def plant(name, x, y, scale=1.0, kind="fiddle"):
                    x + math.cos(a) * rad, y + math.sin(a) * rad, h, M["leaf"], seg=12)
         s.scale = (1, 1, r.uniform(0.6, 0.85))
 
-plant("plant_L", -3.35, 2.9, 1.15)
-plant("plant_R", 3.65, 2.95, 1.0)
+plant("plant_L", -4.15, 0.42, 1.15)
+plant("plant_R", 4.05, 0.24, 1.0)
 plant("plant_bed", -4.2, -0.5, 0.8)
 
 # ───────────────────── ceiling can lights (emissive discs) ─────────────────────
@@ -442,12 +491,27 @@ for i, (cx, cy) in enumerate([(-1.4, 1.9), (-1.4, 0.0), (2.45, 2.3), (2.45, 0.2)
                               (0.4, 3.0), (-3.05, -2.15), (0.8, -2.6)]):
     cyl(f"can_{i}", 0.055, 0.012, cx, cy, 2.935, M["spot"], verts=20)
 
-# ───────────────────────── lights (page clamps intensity ≤60) ─────────────────────────
-point_light("L_lounge", -1.4, 1.6, 2.5, (1.0, 0.83, 0.62), 0.9)
-point_light("L_island", 2.45, 2.3, 2.3, (1.0, 0.85, 0.65), 0.8)
-point_light("L_fire", 1.45, 3.0, 0.6, (1.0, 0.48, 0.15), 0.55)
-point_light("L_window_cool", 0.0, 3.2, 1.8, (0.62, 0.74, 1.0), 0.25)
-point_light("L_bed", -3.05, -2.0, 1.8, (1.0, 0.80, 0.60), 0.35)
+# ───────────────────────── tightly ranged punctual lights ─────────────────────────
+point_light("L_lounge", -1.4, 1.6, 2.5, (1.0, 0.83, 0.62), 0.9, radius=2.7, soft=0.18)
+point_light("L_island", 2.45, 2.3, 2.3, (1.0, 0.85, 0.65), 0.8, radius=2.4, soft=0.16)
+point_light("L_fire", 1.45, 3.0, 0.6, (1.0, 0.48, 0.15), 0.55, radius=1.7, soft=0.14)
+point_light("L_window_cool", 0.0, 3.2, 1.8, (0.62, 0.74, 1.0), 0.25, radius=2.3, soft=0.20)
+point_light("L_bed", -3.05, -2.0, 1.8, (1.0, 0.80, 0.60), 0.35, radius=1.9, soft=0.16)
+
+# Design-time guardrail: no non-structural tall masses in the low-to-glass zone.
+low_to_glass_exempt = (
+    "glazing", "rail", "mullion", "curtain", "unitized", "thermal", "transom", "balcony",
+    "paver", "zero_threshold", "sub_sill", "skyline", "fascia", "knife_edge", "wall_grazer",
+    "ceiling", "wall", "pend", "can", "bottle", "bowl"
+)
+low_to_glass_violations = []
+for ob in col.objects:
+    if ob.type != "MESH" or ob.name.startswith(low_to_glass_exempt):
+        continue
+    if ob.location.y > 2.35 and (ob.location.z + ob.dimensions.z * 0.5) > 1.15:
+        low_to_glass_violations.append(ob.name)
+if low_to_glass_violations:
+    raise RuntimeError("Low-to-glass violations: " + ", ".join(low_to_glass_violations))
 
 # ───────────────────────── export ─────────────────────────
 kwargs = dict(filepath=OUT, export_format="GLB", export_apply=True, export_animations=False,

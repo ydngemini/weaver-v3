@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Weaver Local Hotkeys
+Comment=Shift+S screenshot and Shift+R+E screen recording for local Linux
+Exec=/home/ydn/.local/bin/weaver-local-hotkeys
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=X-Cinnamon;GNOME;MATE;XFCE;
