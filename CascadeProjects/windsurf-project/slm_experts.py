@@ -16,7 +16,7 @@ Expert Lobes:
 Each expert:
     1. Receives a FractureShard from the Pineal Gate
     2. Reads the Akashic Hub for cross-lobe context
-    3. Calls the OpenAI chat completions API with a dimension-tuned
+    3. Calls the selected chat-completions backend with a dimension-tuned
        system prompt
     4. Encodes the response into a 256-d vector and writes it back
        to the Akashic Hub
@@ -24,7 +24,7 @@ Each expert:
 
 Usage:
     from slm_experts import build_experts
-    experts = build_experts(hub, api_key=os.environ["WEAVER_MEM_KEY"])
+    experts = build_experts(hub)
     gate = PinealGate(hub, engine, top_k=3, experts=experts)
 """
 
@@ -43,7 +43,7 @@ from pineal_gate import ExpertLobe, ExpertResult
 
 # ── Expert System Prompts ─────────────────────────────────────────────────────
 # Each prompt defines the personality and reasoning style of the expert.
-# They are short and precise — the model is gpt-4o-mini so we stay fast.
+# They are short and precise so the routed experts stay low-latency.
 
 EXPERT_PROMPTS: Dict[str, str] = {
     "logic": (
@@ -84,9 +84,10 @@ EXPERT_PROMPTS: Dict[str, str] = {
 }
 
 # Model config — backend selected by WEAVER_LLM_BACKEND:
-#   "bedrock" (AWS, uses AWS creds) | "local" (llama.cpp, $0) |
-#   "gemini" (free tier) | "azure" (default, paid)
-LLM_BACKEND = os.environ.get("WEAVER_LLM_BACKEND", "azure").lower()
+#   "mantle" (AWS Bedrock-compatible gateway, default) |
+#   "bedrock" (AWS native, uses AWS creds) | "local" (llama.cpp, $0) |
+#   "gemini" (free tier) | "azure" (explicit legacy backend)
+LLM_BACKEND = os.environ.get("WEAVER_LLM_BACKEND", "mantle").lower()
 if LLM_BACKEND == "gemini":
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "gemini-2.0-flash")
 elif LLM_BACKEND == "local":
@@ -139,12 +140,12 @@ _vectorizer = HashingVectorizer(n_features=256, alternate_sign=False, norm="l2")
 # ── SLM Expert Lobe ──────────────────────────────────────────────────────────
 
 class SLMExpertLobe(ExpertLobe):
-    """An expert lobe backed by actual SLM inference via OpenAI API.
+    """An expert lobe backed by Mantle/Bedrock/local/Gemini/Azure chat.
 
     Args:
         dimension:  Which semantic axis this expert covers.
         hub:        Shared Akashic Hub.
-        api_key:    OpenAI API key (WEAVER_MEM_KEY).
+        api_key:    Backend credential, resolved from env by build_experts().
         model:      Model name for chat completions.
         temperature: Sampling temperature.
         max_tokens: Max response tokens.
@@ -404,7 +405,8 @@ def build_experts(hub: AkashicHub,
 
     Args:
         hub:         Shared Akashic Hub.
-        api_key:     OpenAI API key.  Defaults to WEAVER_MEM_KEY env var.
+        api_key:     Backend credential. Defaults to the env var required by
+                     WEAVER_LLM_BACKEND.
         model:       Model name.
         temperature: Sampling temperature.
         max_tokens:  Max response tokens.
@@ -413,9 +415,8 @@ def build_experts(hub: AkashicHub,
         Dict mapping dimension name → SLMExpertLobe instance.
     """
     if api_key is None:
-        # Each backend uses its own credential; only the paid azure/openai path
-        # needs WEAVER_MEM_KEY. Local (llama.cpp) and Gemini run free / free-tier,
-        # so the full 5-expert MoE works with no paid key on the cloud box.
+        # Each backend uses its own credential. Mantle is production default;
+        # local can run with the on-box llama; Azure is explicit legacy support.
         if LLM_BACKEND == "local":
             api_key = os.environ.get("WEAVER_LOCAL_LLM_KEY", "local")
         elif LLM_BACKEND == "gemini":

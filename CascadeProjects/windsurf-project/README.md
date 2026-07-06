@@ -37,7 +37,6 @@ Deployment files live in `deploy/`:
 - `deploy/Caddyfile`
 - `deploy/weaver.service`
 - `deploy/weaver-llm.service`
-- `deploy/weaver-codebase.service`
 - `deploy/tts/weaver-tts.service`
 - `deploy/aws-terraform/`
 

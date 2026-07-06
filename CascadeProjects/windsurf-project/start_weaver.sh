@@ -64,18 +64,25 @@ fi
 set -a
 source .env
 set +a
+SCRIPT_DIR="$(pwd)"
+export WEAVER_CODEBASE_ROOT="${WEAVER_CODEBASE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 echo "🔍 Pre-flight checks..."
 echo "   ✅ venv: found"
 echo "   ✅ .env: loaded"
-echo "   API keys: WEAVER_VOICE_KEY=${WEAVER_VOICE_KEY:0:10}..."
-echo "   API keys: IBM_QUANTUM_TOKEN=${IBM_QUANTUM_TOKEN:0:10}..."
-echo "   API keys: GEMINI_API_KEY=${GEMINI_API_KEY:0:10}..."
+echo "   ✅ codebase root: $WEAVER_CODEBASE_ROOT"
+for key_name in WEAVER_VOICE_KEY IBM_QUANTUM_TOKEN GEMINI_API_KEY MANTLE_API_KEY; do
+    if [ -n "${!key_name:-}" ]; then
+        echo "   ✅ $key_name: set"
+    else
+        echo "   ⚠️  $key_name: unset"
+    fi
+done
 echo ""
 
 # ── Clean ports ──────────────────────────────────────────────────
 echo "🧹 Cleaning ports..."
-for port in 9999 9998 9997 9996 9995 9990 8899 8898 8765; do
+for port in 9999 9998 9997 9996 9995 9990 8899 8898 8765 8091; do
     lsof -ti:$port 2>/dev/null | xargs kill -9 2>/dev/null || true
 done
 sleep 1
@@ -138,6 +145,7 @@ if [ "$PHONE_ONLY" = false ]; then
     check_lobe "Nexus Bus" "http://localhost:9998/health"
     check_lobe "LoRA Server" "http://localhost:8899/health"
     check_lobe "Live Dashboard" "http://localhost:9990/health"
+    check_lobe "Codebase API" "http://localhost:8091/health"
 fi
 
 echo ""
@@ -151,6 +159,7 @@ echo "📞 Phone Bridge:       http://localhost:8765/health"
 if [ "$PHONE_ONLY" = false ]; then
 echo "🔌 Nexus Bus:          ws://localhost:9999"
 echo "🧠 LoRA Server:        http://localhost:8899/health"
+echo "🧬 Codebase API:       http://localhost:8091/health"
 fi
 echo ""
 echo "Press Ctrl+C to stop all services"

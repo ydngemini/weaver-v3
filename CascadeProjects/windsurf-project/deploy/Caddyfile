@@ -39,18 +39,20 @@ weaverv3.com {
 		reverse_proxy 127.0.0.1:8090
 	}
 
-	# her cloned voice — XTTS-v2 on a RunPod RTX 4090 (deploy/tts/, ~0.9s GPU synth).
-	# Proxied to the pod's public RunPod URL; the pod ALSO checks X-Weaver-Key
-	# (the proxy URL is public), so the gate is enforced at both hops. If the pod
-	# is down, this 502s and the page falls back to the browser voice on its own.
-	# Local CPU OpenVoice on :8092 stays installed as a manual fallback (swap the
-	# reverse_proxy line back to 127.0.0.1:8092).
+	# read-only source-code context for Weaver's self-inspection. Same key gate as /llm.
+	handle_path /codebase/* {
+		@cdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		respond @cdenied 403
+		reverse_proxy 127.0.0.1:8091
+	}
+
+	# her cloned voice — on-box OpenVoice v2 (127.0.0.1:8092). It is slower than
+	# GPU voice, but keeps the live site fully on the AWS box and still falls back
+	# to browser speech if synthesis fails.
 	handle_path /tts/* {
 		@tdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
 		respond @tdenied 403
-		reverse_proxy https://f6t7m2t1errly1-8888.proxy.runpod.net {
-			header_up Host f6t7m2t1errly1-8888.proxy.runpod.net
-		}
+		reverse_proxy 127.0.0.1:8092
 	}
 
 	handle {

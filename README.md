@@ -66,7 +66,7 @@ Weaver is an embodied software system with real integrations, not an unrestricte
 | Port | Service |
 |---:|---|
 | 8090 | on-box OpenAI-compatible local model endpoint |
-| 8091 | read-only codebase/public-internet context API |
+| 8091 | read-only codebase/public-internet context API, supervised by `weaver.py` |
 | 8092 | on-box TTS service |
 | 8898 | Qwen/local model service when enabled |
 | 8899 | Soul Voice LoRA service |

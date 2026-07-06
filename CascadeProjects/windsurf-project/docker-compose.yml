@@ -21,7 +21,7 @@ services:
       - NEXUS_BUS_URL=ws://localhost:9999
       - LORA_API_URL=http://localhost:8899/v1/chat/completions
       - QUANTUM_BIAS_URL=http://localhost:9997/quantum/bias
-      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/weaver-input
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input
     ports:
       - "8765:8765"     # Phone Bridge
       - "8899:8899"     # LoRA Server
@@ -52,6 +52,8 @@ services:
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     container_name: weaver-n8n
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
