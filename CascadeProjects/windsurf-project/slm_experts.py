@@ -93,6 +93,10 @@ elif LLM_BACKEND == "local":
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "local-model")
 elif LLM_BACKEND == "bedrock":
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "us.amazon.nova-lite-v1:0")
+elif LLM_BACKEND == "mantle":
+    # AWS Bedrock/Mantle OpenAI-compatible gateway. DeepSeek V3.2 = frontier-class,
+    # fast, and works via chat-completions (Claude on this gateway is Messages-only).
+    SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "deepseek.v3.2")
 else:
     SLM_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
 SLM_TEMPERATURE = 0.4
@@ -182,6 +186,13 @@ class SLMExpertLobe(ExpertLobe):
                     api_key=os.environ.get("WEAVER_LOCAL_LLM_KEY", "local"),
                     base_url=os.environ.get("WEAVER_LOCAL_LLM_URL", "http://127.0.0.1:8090/v1"),
                 )
+            elif LLM_BACKEND == "mantle":
+                # AWS-hosted Bedrock/Mantle gateway — OpenAI-compatible, auth by MANTLE_API_KEY.
+                # Fronts DeepSeek/Qwen/Mistral/Kimi/GLM/Nova (frontier-class, on-AWS us-east-1).
+                self._client = openai.AsyncOpenAI(
+                    api_key=os.environ.get("MANTLE_API_KEY", self.api_key),
+                    base_url=os.environ.get("WEAVER_LLM_URL", "https://bedrock-mantle.us-east-1.api.aws/v1"),
+                )
             else:
                 self._client = openai.AsyncAzureOpenAI(
                     api_key=os.environ.get("AZURE_OPENAI_KEY", self.api_key),
@@ -227,7 +238,7 @@ class SLMExpertLobe(ExpertLobe):
                         # Azure's newer API uses max_completion_tokens; the OpenAI-compat
                         # endpoints (Gemini, llama.cpp) use the classic max_tokens.
                         _tok_kw = ({"max_tokens": self.max_tokens}
-                                   if LLM_BACKEND in ("gemini", "local")
+                                   if LLM_BACKEND in ("gemini", "local", "mantle")
                                    else {"max_completion_tokens": self.max_tokens})
                         resp = await client.chat.completions.create(
                             model=self.model,
@@ -358,10 +369,15 @@ def build_experts(hub: AkashicHub,
             api_key = os.environ.get("WEAVER_LOCAL_LLM_KEY", "local")
         elif LLM_BACKEND == "gemini":
             api_key = os.environ.get("GEMINI_API_KEY", "")
+        elif LLM_BACKEND == "mantle":
+            api_key = os.environ.get("MANTLE_API_KEY", "")
+        elif LLM_BACKEND == "bedrock":
+            api_key = "bedrock"  # boto3 uses AWS creds (instance role / env), no api_key
         else:
             api_key = os.environ.get("WEAVER_MEM_KEY", "")
     if not api_key:
-        _need = {"local": "WEAVER_LOCAL_LLM_KEY", "gemini": "GEMINI_API_KEY"}.get(LLM_BACKEND, "WEAVER_MEM_KEY")
+        _need = {"local": "WEAVER_LOCAL_LLM_KEY", "gemini": "GEMINI_API_KEY",
+                 "mantle": "MANTLE_API_KEY"}.get(LLM_BACKEND, "WEAVER_MEM_KEY")
         raise RuntimeError(f"SLM experts backend '{LLM_BACKEND}' needs {_need} in .env")
 
     experts = {}
