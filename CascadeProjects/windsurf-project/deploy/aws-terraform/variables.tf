@@ -11,9 +11,9 @@ variable "instance_type" {
 }
 
 variable "root_volume_gb" {
-  description = "Encrypted gp3 root volume size (GB). Holds two GGUF models + two Python venvs + the Vite node build."
+  description = "Encrypted gp3 root volume size (GB). Holds the full Weaver workspace, model artifacts, Python venvs, cache, and restore backup room."
   type        = number
-  default     = 50
+  default     = 150
 }
 
 variable "ssh_ingress_cidrs" {
