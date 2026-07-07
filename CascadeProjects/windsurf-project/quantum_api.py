@@ -26,6 +26,7 @@ PROJ = os.path.dirname(os.path.abspath(__file__))
 VAULT_DIR = str(default_vault_dir())
 STATE_FILE = os.path.join(VAULT_DIR, "quantum_state.txt")
 PORT = int(os.environ.get("QUANTUM_API_PORT", "9997"))
+HOST = os.environ.get("QUANTUM_API_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
 
 app = FastAPI(title="Weaver Quantum API", version="1.1.0")
 
@@ -207,7 +208,7 @@ async def health():
 async def quantum_api_serve():
     """Entry point for launching from weaver.py."""
     import uvicorn
-    config = uvicorn.Config(app, host="0.0.0.0", port=PORT, log_level="warning")
+    config = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning")
     server = uvicorn.Server(config)
     await server.serve()
 
@@ -216,7 +217,7 @@ if __name__ == "__main__":
     import uvicorn
     # Parse state once on startup
     _state = _parse_quantum_state()
-    print(f"⚛️  Quantum API starting on port {PORT}")
+    print(f"⚛️  Quantum API starting on http://{HOST}:{PORT}")
     print(f"   Dominant pathway: {_state['dominant']}")
     print(f"   Weights: {_state['weights']}")
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    uvicorn.run(app, host=HOST, port=PORT)

@@ -37,6 +37,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 PROJ = os.path.dirname(os.path.abspath(__file__))
 ADAPTER_PATH = os.environ.get("WEAVER_LORA_ADAPTER", os.path.join(PROJ, "weaver_fracture_1B_lora"))
 DEFAULT_PORT = 8899
+DEFAULT_HOST = os.environ.get("WEAVER_LORA_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
 ADMIN_KEY = os.environ.get("WEAVER_LORA_ADMIN_KEY", os.environ.get("WEAVER_LLM_KEY", ""))
 
 # ── Lazy model loading ─────────────────────────────────────────────────────
@@ -492,6 +493,7 @@ def _notify_nexus_bus():
 
 def main():
     parser = argparse.ArgumentParser(description="Weaver LoRA Inference Server")
+    parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--preload", action="store_true", help="Load model at startup")
     # parse_args([]) ignores sys.argv so weaver.py's --headless flag doesn't bleed in
@@ -501,8 +503,8 @@ def main():
     preload_thread = Thread(target=_preload_in_background, daemon=True)
     preload_thread.start()
 
-    server = ThreadedHTTPServer(("0.0.0.0", args.port), LoRAHandler)
-    print(f"[LORA] 🧠 Weaver LoRA server on http://0.0.0.0:{args.port}", flush=True)
+    server = ThreadedHTTPServer((args.host, args.port), LoRAHandler)
+    print(f"[LORA] 🧠 Weaver LoRA server on http://{args.host}:{args.port}", flush=True)
     print(f"[LORA]    POST /v1/chat/completions  (OpenAI-compatible)", flush=True)
     print(f"[LORA]    GET  /health", flush=True)
     print(f"[LORA]    GET  /v1/models", flush=True)

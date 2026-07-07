@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, Response
 from memory_manager import default_vault_dir
 
 PORT = int(os.environ.get("HEALTH_DASHBOARD_PORT", "9996"))
+HOST = os.environ.get("HEALTH_DASHBOARD_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
 
 app = FastAPI(title="Weaver Health Dashboard", version="2.1.0")
 
@@ -612,12 +613,12 @@ async def api_metrics():
 async def health_dashboard_serve():
     """Entry point for launching from weaver.py."""
     import uvicorn
-    config = uvicorn.Config(app, host="0.0.0.0", port=PORT, log_level="warning")
+    config = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning")
     server = uvicorn.Server(config)
     await server.serve()
 
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"🌀 Weaver Health Dashboard starting on http://localhost:{PORT}")
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    print(f"🌀 Weaver Health Dashboard starting on http://{HOST}:{PORT}")
+    uvicorn.run(app, host=HOST, port=PORT)

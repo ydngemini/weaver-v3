@@ -51,7 +51,7 @@ NEXUS_TOPICS = ["quantum_state", "gate_decision", "lobe_status", "transcript", "
 
 VAULT_PATH = os.path.expanduser("~/Weaver_Vault")
 N8N_WEBHOOK_URL = "http://localhost:5678/webhook/weaver-input"
-LISTENER_HOST = "0.0.0.0"
+LISTENER_HOST = os.environ.get("OBSIDIAN_LISTENER_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
 LISTENER_PORT = 5679
 
 # Debounce: ignore repeated events within this window (seconds)
@@ -660,7 +660,7 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, LISTENER_HOST, LISTENER_PORT)
     await site.start()
-    print(f"[BRIDGE] 📡 Response listener on http://localhost:{LISTENER_PORT}/weaver-response", flush=True)
+    print(f"[BRIDGE] 📡 Response listener on http://{LISTENER_HOST}:{LISTENER_PORT}/weaver-response", flush=True)
     print(f"[BRIDGE] ✅ Bridge online. Create a .md note with #weaver to activate.\n", flush=True)
 
     # Start Nexus Bus listener (connects lobes to vault graph)

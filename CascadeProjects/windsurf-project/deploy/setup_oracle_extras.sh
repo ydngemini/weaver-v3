@@ -90,8 +90,16 @@ printf '[Service]\nEnvironmentFile=/etc/default/caddy\n' \
 echo "▶ 5/6  Install + start systemd units"
 sudo cp "$WIN/deploy/weaver-llm.service" "$WIN/deploy/weaver.service" \
         "$WIN/deploy/oracle-backend.service" /etc/systemd/system/
+if command -v docker >/dev/null 2>&1; then
+    sudo cp "$WIN/deploy/n8n.service" /etc/systemd/system/
+else
+    echo "   ⚠ docker not installed — n8n.service not installed"
+fi
 sudo systemctl daemon-reload
 sudo systemctl enable --now weaver-llm oracle-backend caddy
+if [ -f /etc/systemd/system/n8n.service ]; then
+    sudo systemctl enable --now n8n
+fi
 echo "   …giving the experts server a few seconds to load before Weaver starts"
 sleep 6
 sudo systemctl enable --now weaver

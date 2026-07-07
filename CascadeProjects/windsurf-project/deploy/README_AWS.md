@@ -44,8 +44,7 @@ terraform output           # note: public_ip, ssh_command, and public_urls
 
 This creates: 1× `t4g.large` (Ubuntu 24.04 arm64, IMDSv2, encrypted gp3), an Elastic IP, a
 key pair, and a Security Group that opens **only 22 (your IP) + 80/443**. Everything Weaver
-exposes internally (9999/8899/8090/8091/8000/9996/9997) stays localhost-only — `lora_server`
-binds `0.0.0.0`, so an open port would be an exposed model endpoint.
+exposes internally (9999/8899/8090/8091/8000/9996/9997) stays localhost-only by default.
 
 Set shell vars for the rest of this guide:
 ```bash
@@ -104,20 +103,23 @@ sudo systemctl restart oracle-backend
 `CLOUD=aws` makes the script skip the Oracle-only `iptables` guidance — the Security Group
 from step 0 already opened 80/443, and AWS Ubuntu AMIs have no default firewall to poke.
 
-This installs + starts four units: `weaver-llm` (experts :8090), `weaver` (`--headless`),
-`oracle-backend` (:8000), and `caddy` (:443).
+This installs + starts the core units: `weaver-llm` (experts :8090), `weaver`
+(`--headless`), `oracle-backend` (:8000), `caddy` (:443), and `n8n` if Docker is present.
 
 ## 5. Verify
 
 ```bash
-# on the box — all four green:
-journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f
+# on the box — core units green:
+journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -u n8n -f
 curl 127.0.0.1:8090/v1/models          # experts server up
 curl 127.0.0.1:8091/health             # read-only codebase API up
 curl 127.0.0.1:8000/health             # oracle backend up
 curl -X POST 127.0.0.1:5678/webhook/weaver-input \
   -H 'Content-Type: application/json' \
   -d '{"text":"restore smoke","source_file":"/tmp/weaver.md"}'
+
+# validate Caddy with systemd-style env loading; do not source /etc/default/caddy directly
+sudo bash deploy/validate_caddy.sh
 
 # from your laptop:
 #   https://weaverv3.com            → embodied avatar
@@ -126,7 +128,7 @@ curl -X POST 127.0.0.1:5678/webhook/weaver-input \
 #   https://status.weaverv3.com     → protected health dashboard
 ```
 
-**Security:** `9999`/`8899`/`8090`/`8091`/`8000`/`9996`/`9997` stay localhost-only — only `443`/`22`
+**Security:** `9999`/`8899`/`8090`/`8091`/`8000`/`9996`/`9997` stay localhost-only — only `80`/`443`/`22`
 are reachable. Before going public: set `ORACLE_SECRET_KEY` + `ORACLE_ENCRYPTION_MASTER_KEY`,
 an admin login, and keep `ORACLE_ENABLE_DEMO_LOGINS=0`.
 

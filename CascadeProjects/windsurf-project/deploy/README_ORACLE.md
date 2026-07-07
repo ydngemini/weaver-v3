@@ -25,7 +25,7 @@ the only free tier big enough for this stack (measured ~4 GB; 24 GB leaves room 
 
 **Security:** leave the default ingress **closed** (only SSH/22). Everything Weaver exposes is
 localhost-only; reach dashboards via SSH tunnel (step 5). Don't open 8899/9990/9996 publicly —
-`lora_server` binds `0.0.0.0`, so an open port = an exposed model endpoint.
+internal services are loopback-only by default, but public firewall rules would still expose them.
 
 ---
 

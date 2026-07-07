@@ -35,6 +35,7 @@ from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from memory_manager import default_vault_dir
 
 PORT = int(os.environ.get("WEAVER_DASHBOARD_PORT", "9990"))
+HOST = os.environ.get("WEAVER_DASHBOARD_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
 PROJ = os.path.dirname(os.path.abspath(__file__))
 VAULT = str(default_vault_dir())
 N8N_WEBHOOK_URL = (
@@ -2687,12 +2688,12 @@ window.addEventListener('resize', () => { if (_neuralRunning) neuralResize(); })
 async def weaver_dashboard_serve():
     """Entry point for launching from weaver.py."""
     import uvicorn
-    config = uvicorn.Config(app, host="0.0.0.0", port=PORT, log_level="warning")
+    config = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning")
     server = uvicorn.Server(config)
     await server.serve()
 
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"Weaver Live Dashboard starting on http://127.0.0.1:{PORT}", flush=True)
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    print(f"Weaver Live Dashboard starting on http://{HOST}:{PORT}", flush=True)
+    uvicorn.run(app, host=HOST, port=PORT)

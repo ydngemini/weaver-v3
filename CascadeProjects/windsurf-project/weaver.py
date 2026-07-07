@@ -120,7 +120,9 @@ def _load_modules():
         from twilio_weaver_bridge import app as _phone_bridge_app
         async def _phone_bridge_serve():
             import uvicorn
-            config = uvicorn.Config(_phone_bridge_app, host="0.0.0.0", port=8765, log_level="warning")
+            _phone_host = os.environ.get("TWILIO_BRIDGE_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
+            _phone_port = int(os.environ.get("TWILIO_BRIDGE_PORT", "8765"))
+            config = uvicorn.Config(_phone_bridge_app, host=_phone_host, port=_phone_port, log_level="warning")
             server = uvicorn.Server(config)
             await server.serve()
     except Exception as e:
@@ -268,7 +270,9 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         "active_lobes": len(_hub_ref.active_lobes())}
 
             async def _hub_api_serve():
-                config = _uvicorn.Config(_hub_app, host="0.0.0.0", port=9995, log_level="warning")
+                _hub_host = os.environ.get("AKASHIC_HUB_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
+                _hub_port = int(os.environ.get("AKASHIC_HUB_PORT", "9995"))
+                config = _uvicorn.Config(_hub_app, host=_hub_host, port=_hub_port, log_level="warning")
                 server = _uvicorn.Server(config)
                 await server.serve()
 

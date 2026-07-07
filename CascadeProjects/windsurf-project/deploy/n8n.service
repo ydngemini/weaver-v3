@@ -1,0 +1,27 @@
+[Unit]
+Description=Weaver n8n workflow container
+Requires=docker.service
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker rm -f n8n
+ExecStart=/usr/bin/docker run --name n8n --restart=no \
+  -p 127.0.0.1:5678:5678 \
+  -v n8n_data:/home/node/.n8n \
+  -e N8N_HOST=127.0.0.1 \
+  -e N8N_PORT=5678 \
+  -e N8N_DIAGNOSTICS_ENABLED=false \
+  -e N8N_SECURE_COOKIE=false \
+  -e GENERIC_TIMEZONE=America/New_York \
+  n8nio/n8n:latest
+ExecStop=/usr/bin/docker stop -t 20 n8n
+ExecStopPost=-/usr/bin/docker rm -f n8n
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

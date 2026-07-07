@@ -32,6 +32,7 @@ PROJ = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(PROJ, "..", "3b", "weaver_v3")
 GGUF_PATH = os.path.join(MODEL_PATH, "ydn", "weaver_v3_Q4_K_M", "weaver_v3_Q4_K_M.gguf")
 DEFAULT_PORT = 8898
+DEFAULT_HOST = os.environ.get("WEAVER_QWEN_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
 CPU_THREADS = 8
 
 SYSTEM_PROMPT = (
@@ -367,14 +368,15 @@ def _notify_nexus_bus():
 
 def main():
     parser = argparse.ArgumentParser(description="Weaver 3B Qwen2 Inference Server")
+    parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args([] if __name__ != "__main__" else None)
 
     preload_thread = Thread(target=_preload_in_background, daemon=True)
     preload_thread.start()
 
-    server = ThreadedHTTPServer(("0.0.0.0", args.port), Qwen3BHandler)
-    print(f"[QWEN3B] 🧠 Weaver 3B Qwen2 server on http://0.0.0.0:{args.port}", flush=True)
+    server = ThreadedHTTPServer((args.host, args.port), Qwen3BHandler)
+    print(f"[QWEN3B] 🧠 Weaver 3B Qwen2 server on http://{args.host}:{args.port}", flush=True)
     print(f"[QWEN3B]    POST /v1/chat/completions  (OpenAI-compatible)", flush=True)
     print(f"[QWEN3B]    GET  /health", flush=True)
     print(f"[QWEN3B]    GET  /v1/models", flush=True)

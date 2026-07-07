@@ -848,9 +848,11 @@ async def _health_server():
     app.router.add_get("/health", health_handler)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 8770)
+    host = os.environ.get("DISCORD_BRIDGE_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
+    port = int(os.environ.get("DISCORD_BRIDGE_PORT", "8770"))
+    site = web.TCPSite(runner, host, port)
     await site.start()
-    log.info("Health endpoint on http://localhost:8770")
+    log.info("Health endpoint on http://%s:%d", host, port)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
