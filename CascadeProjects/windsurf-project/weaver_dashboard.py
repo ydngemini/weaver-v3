@@ -1268,6 +1268,17 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 .neural-wrap { position: relative; width: 100%; height: calc(100vh - 100px); background: radial-gradient(ellipse at center, #0a0c14 0%, #030408 100%); overflow: hidden; cursor: crosshair; }
 .neural-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 .neural-wrap #neuralMain { pointer-events: auto; cursor: crosshair; }
+.neural-wrap.stale canvas { opacity: 0.42; filter: grayscale(0.7) saturate(0.35); }
+.neural-live-overlay {
+  position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+  display: none; z-index: 18; pointer-events: none;
+  border: 1px solid rgba(255,184,48,0.35); border-radius: 8px;
+  background: rgba(8,10,16,0.88); color: var(--orange);
+  padding: 8px 12px; font-size: 9px; font-weight: 700;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+}
+.neural-wrap.stale .neural-live-overlay { display: block; }
 .neural-hud {
   position: absolute; top: 16px; left: 16px;
   background: rgba(8,10,16,0.92); backdrop-filter: blur(12px);
@@ -1279,6 +1290,9 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 .nhud-row { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 3px; }
 .nhud-label { color: var(--dim); font-size: 9px; }
 .nhud-val { color: var(--cyan); font-weight: 600; font-variant-numeric: tabular-nums; font-size: 10px; }
+.nhud-val.live { color: var(--green); }
+.nhud-val.stale { color: var(--orange); }
+.nhud-val.offline { color: var(--red); }
 .nhud-sep { height: 1px; background: rgba(52,212,255,0.08); margin: 6px 0; }
 .neural-tooltip {
   position: absolute; z-index: 20; pointer-events: none;
@@ -1491,9 +1505,13 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
   <canvas id="neuralBg"></canvas>
   <canvas id="neuralMain"></canvas>
   <canvas id="neuralFx"></canvas>
+  <div class="neural-live-overlay" id="neuralLiveOverlay">Waiting for live telemetry</div>
   <!-- HUD Panel -->
   <div class="neural-hud" id="neuralHud">
     <div class="nhud-title">NEURAL TOPOLOGY</div>
+    <div class="nhud-row"><span class="nhud-label">Link</span><span class="nhud-val stale" id="nLive">BOOT</span></div>
+    <div class="nhud-row"><span class="nhud-label">Last Data</span><span class="nhud-val" id="nAge">--</span></div>
+    <div class="nhud-sep"></div>
     <div class="nhud-row"><span class="nhud-label">Neurons</span><span class="nhud-val" id="nN">0</span></div>
     <div class="nhud-row"><span class="nhud-label">Firing</span><span class="nhud-val" id="nF">0</span></div>
     <div class="nhud-row"><span class="nhud-label">Synapses</span><span class="nhud-val" id="nS">0</span></div>
@@ -1548,6 +1566,16 @@ let _quantumArchitecture = null;
 let _quantumLast = {};
 let _matrixRAF = null;
 let _neuralRunning = false;
+let _liveState = {
+  sse: false,
+  browserOnline: navigator.onLine !== false,
+  lastFetchAt: 0,
+  lastPollAt: 0,
+  lastNexusAt: 0,
+  lastKind: 'boot',
+  lastError: '',
+  staleAfterMs: 12000,
+};
 
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, ch => ({
@@ -1577,12 +1605,70 @@ function statusLabel(v) {
   return (v || 'offline').toString().toUpperCase();
 }
 
+function liveLastAt() {
+  return Math.max(_liveState.lastFetchAt, _liveState.lastPollAt, _liveState.lastNexusAt);
+}
+
+function liveAgeMs() {
+  const last = liveLastAt();
+  return last ? Date.now() - last : Infinity;
+}
+
+function isNeuralFresh() {
+  return _liveState.browserOnline && liveAgeMs() <= _liveState.staleAfterMs;
+}
+
+function liveAgeLabel() {
+  const age = liveAgeMs();
+  if (!Number.isFinite(age)) return '--';
+  if (age < 1000) return 'now';
+  if (age < 60000) return `${Math.floor(age / 1000)}s`;
+  return `${Math.floor(age / 60000)}m`;
+}
+
+function updateLiveHud() {
+  const fresh = isNeuralFresh();
+  const wrap = document.getElementById('neuralWrap');
+  if (wrap) wrap.classList.toggle('stale', !fresh);
+  const live = document.getElementById('nLive');
+  if (live) {
+    live.className = 'nhud-val ' + (fresh ? 'live' : (_liveState.browserOnline ? 'stale' : 'offline'));
+    live.textContent = fresh ? 'LIVE' : (_liveState.browserOnline ? 'STALE' : 'OFFLINE');
+  }
+  setText('nAge', liveAgeLabel());
+  const overlay = document.getElementById('neuralLiveOverlay');
+  if (overlay) {
+    const age = liveAgeLabel();
+    overlay.textContent = _liveState.browserOnline
+      ? (age === '--' ? 'Waiting for live telemetry' : `Waiting for live telemetry - last data ${age} ago`)
+      : 'Browser offline - neural map frozen';
+  }
+}
+
+function markLive(kind) {
+  const now = Date.now();
+  _liveState.lastKind = kind;
+  _liveState.lastError = '';
+  _liveState.browserOnline = navigator.onLine !== false;
+  if (kind === 'poll') _liveState.lastPollAt = now;
+  else if (kind === 'nexus') _liveState.lastNexusAt = now;
+  else _liveState.lastFetchAt = now;
+  updateLiveHud();
+}
+
+function markOffline(reason) {
+  _liveState.lastError = reason || 'offline';
+  _liveState.browserOnline = reason === 'browser offline' ? false : navigator.onLine !== false;
+  updateLiveHud();
+}
+
 // ── Data fetching ────────────────────────────
 async function fetchState() {
   try {
-    const r = await fetch('/api/state');
-    if (!r.ok) return;
+    const r = await fetch('/api/state', {cache: 'no-store'});
+    if (!r.ok) { markOffline(`state ${r.status}`); return; }
     const d = await r.json();
+    markLive('fetch');
     updateLobes(d.lobes || []);
     updateQuantum(d.quantum || {}, d.quantum_architecture || null);
     updateFeed(d.nexus_feed || []);
@@ -1601,7 +1687,7 @@ async function fetchState() {
       const el = document.getElementById('publicUrl');
       el.href = d.ngrok_url; el.textContent = d.ngrok_url.replace('https://',''); el.style.display = 'inline-block';
     }
-  } catch(e) { console.warn('fetch:', e.message); }
+  } catch(e) { markOffline(e.message); console.warn('fetch:', e.message); }
 }
 
 function fmtUp(s) {
@@ -2258,14 +2344,7 @@ function neuralWheel(e) {
 
 function neuralDblClick(e) {
   if (_hoveredRegion) {
-    // Fire all neurons in hovered region
-    neurons.filter(n => n.region === _hoveredRegion).forEach(n => { n.fire = 1; });
-    // Send signal burst from this region
-    const regionSynapses = synapses.filter(s => s.fromRegion === _hoveredRegion);
-    regionSynapses.forEach(s => {
-      signals.push({ax:s.a.x, ay:s.a.y, bx:s.b.x, by:s.b.y, t:0, color:s.a.color, size:3.5, trail:true});
-      s.a.fire = 1;
-    });
+    queueNeuralPulse(_hoveredRegion, 1.5);
   }
 }
 
@@ -2296,10 +2375,52 @@ function selectRegion(id) {
 
 function closeNeuralInfo() { document.getElementById('neuralInfo').style.display='none'; _selectedRegion=null; document.getElementById('nSel').textContent='—'; }
 function legendClick(id) { selectRegion(id); document.querySelectorAll('.legend-item').forEach(el => el.classList.toggle('active', el.dataset.region===id)); }
-function fireRegion(id) { neurons.filter(n=>n.region===id).forEach(n=>{n.fire=1;}); synapses.filter(s=>s.fromRegion===id).forEach(s=>{signals.push({ax:s.a.x,ay:s.a.y,bx:s.b.x,by:s.b.y,t:0,color:s.a.color,size:3,trail:true});}); }
+function queueNeuralPulse(regionId, intensity=1) {
+  if (!isNeuralFresh() || !neurons.length) return;
+  const regionNeurons = neurons.filter(n => n.region === regionId);
+  if (!regionNeurons.length) return;
+  const count = Math.max(2, Math.min(10, Math.round(regionNeurons.length * 0.08 * intensity)));
+  for (let i = 0; i < count; i++) {
+    const n = regionNeurons[Math.floor(Math.random() * regionNeurons.length)];
+    n.fire = Math.max(n.fire, 0.72 + Math.min(intensity, 1.5) * 0.18);
+  }
+  const outbound = synapses.filter(s => s.fromRegion === regionId || s.toRegion === regionId);
+  const signalCount = Math.min(4, outbound.length);
+  for (let i = 0; i < signalCount; i++) {
+    const s = outbound[Math.floor(Math.random() * outbound.length)];
+    signals.push({ax:s.a.x, ay:s.a.y, bx:s.b.x, by:s.b.y, t:0, color:s.a.color, size:2.5 + intensity, trail:true});
+    s.a.fire = Math.max(s.a.fire, 0.8);
+    s.b.fire = Math.max(s.b.fire, 0.45);
+    s.pulse = 1;
+    _signalCount++;
+  }
+}
+function fireRegion(id) { queueNeuralPulse(id, 1.4); }
 function neuralReset() { _zoom=1; _panX=0; _panY=0; document.getElementById('nZoom').textContent='1.0x'; }
-function neuralBurst() { neurons.forEach(n=>{n.fire=1;}); for(let i=0;i<20&&synapses.length;i++){const s=synapses[Math.floor(Math.random()*synapses.length)]; signals.push({ax:s.a.x,ay:s.a.y,bx:s.b.x,by:s.b.y,t:0,color:s.a.color,size:3.5,trail:true});} }
+function neuralBurst() {
+  if (!isNeuralFresh()) { updateLiveHud(); return; }
+  Object.keys(regionCenters).forEach(id => queueNeuralPulse(id, 0.9));
+}
 function neuralTogglePause() { _paused=!_paused; document.getElementById('nctrPause').textContent=_paused?'▶':'▮▮'; if(!_paused) requestAnimationFrame(neuralFrame); }
+
+function pulseFromNexus(entry) {
+  if (!entry) return;
+  const text = `${entry.from || ''} ${entry.topic || ''} ${entry.event || ''}`.toLowerCase();
+  const routes = [
+    ['quantum', ['quantum', 'qubit', 'kingston', 'matrix']],
+    ['pineal', ['pineal', 'route', 'routing', 'gate', 'moe']],
+    ['akashic', ['akashic', 'memory', 'recall']],
+    ['lora', ['lora', 'soul', 'forge', 'fracture', 'dataset']],
+    ['qwen', ['qwen', 'local', 'slm']],
+    ['phone', ['phone', 'twilio', 'call']],
+    ['vtv', ['voice', 'audio', 'vision', 'vtv', 'tts']],
+    ['dream', ['dream', 'sleep']],
+    ['discord', ['discord']],
+    ['pulse', ['pulse', 'proactive']],
+  ];
+  const route = routes.find(([, words]) => words.some(word => text.includes(word)));
+  queueNeuralPulse(route ? route[0] : 'nexus_bus', 1.15);
+}
 
 // Update lobe statuses from polling data
 function updateNeuralFromLobes(lobes) {
@@ -2309,10 +2430,7 @@ function updateNeuralFromLobes(lobes) {
     const regionId = mapping[l.name];
     if (regionId) {
       _lobeStatusMap[regionId] = l.status;
-      if (l.status === 'online') {
-        // Stochastic firing for online lobes
-        neurons.filter(n=>n.region===regionId).forEach(n => { if(Math.random()<0.02) n.fire=1; });
-      }
+      if (l.status === 'online') queueNeuralPulse(regionId, l.latency_class === 'slow' ? 0.5 : 0.9);
     }
   });
 }
@@ -2322,13 +2440,16 @@ function neuralFrame(ts) {
   if (!_neuralRunning || _paused) return;
   const dt = Math.min((ts - _lastNeural)/16.67, 3);
   _lastNeural = ts;
+  const live = isNeuralFresh();
+  const motionDt = live ? dt : 0;
   const W = nMain.width, H = nMain.height;
   if (W < 10) { requestAnimationFrame(neuralFrame); return; }
+  updateLiveHud();
 
   // Clear with subtle fade
   ctxMain.save();
   ctxMain.setTransform(_zoom, 0, 0, _zoom, _panX, _panY);
-  ctxMain.fillStyle = 'rgba(3,4,8,0.15)';
+  ctxMain.fillStyle = live ? 'rgba(3,4,8,0.15)' : 'rgba(3,4,8,0.04)';
   ctxMain.fillRect(-_panX/_zoom, -_panY/_zoom, W/_zoom, H/_zoom);
 
   // FX layer clear
@@ -2342,7 +2463,7 @@ function neuralFrame(ts) {
     const isSelected = id === _selectedRegion;
     const reg = rc.region;
     const pulsePhase = (ts/2000 + REGIONS.indexOf(reg)*0.5) % (Math.PI*2);
-    const pulseAlpha = 0.03 + Math.sin(pulsePhase)*0.015;
+    const pulseAlpha = live ? 0.03 + Math.sin(pulsePhase)*0.015 : 0.012;
     ctxMain.beginPath();
     ctxMain.arc(rc.x, rc.y, rc.r*1.6, 0, Math.PI*2);
     ctxMain.strokeStyle = `rgba(${reg.color[0]},${reg.color[1]},${reg.color[2]},${isHovered?0.2:isSelected?0.15:pulseAlpha})`;
@@ -2362,9 +2483,9 @@ function neuralFrame(ts) {
   let firing = 0;
   const time = ts * 0.001;
   neurons.forEach(n => {
-    // Organic micro-motion with breathing
-    n.x += n.vx*dt + Math.sin(time*0.5 + n.phase)*0.05;
-    n.y += n.vy*dt + Math.cos(time*0.4 + n.phase)*0.05;
+    // Motion is telemetry-gated; stale/offline freezes the map.
+    n.x += n.vx*motionDt + (live ? Math.sin(time*0.5 + n.phase)*0.05 : 0);
+    n.y += n.vy*motionDt + (live ? Math.cos(time*0.4 + n.phase)*0.05 : 0);
 
     // Soft boundary (attract back to origin)
     const dx = n.x - n.ox, dy = n.y - n.oy;
@@ -2372,8 +2493,10 @@ function neuralFrame(ts) {
     const maxDist = 40;
     if (dist > maxDist) { n.vx -= dx*0.001; n.vy -= dy*0.001; }
 
-    if (n.fire > 0) { n.fire -= 0.015*dt; firing++; }
-    if (Math.random() < 0.0008) n.fire = 1;
+    if (n.fire > 0) {
+      if (live) n.fire = Math.max(0, n.fire - 0.015*dt);
+      firing++;
+    }
 
     // Highlight neurons in hovered region
     const inHovered = n.region === _hoveredRegion;
@@ -2403,7 +2526,7 @@ function neuralFrame(ts) {
   synapses.forEach(s => {
     const alpha = 0.025 + (s.a.fire+s.b.fire)*0.05 + s.pulse*0.1;
     if (alpha < 0.015) return;
-    s.pulse *= 0.95;
+    if (live) s.pulse *= 0.95;
     const isHighlighted = s.fromRegion===_hoveredRegion || s.toRegion===_hoveredRegion;
     ctxMain.beginPath();
     // Bezier curve for organic feel
@@ -2417,17 +2540,8 @@ function neuralFrame(ts) {
   });
   ctxMain.globalCompositeOperation = 'source-over';
 
-  // Signal propagation with trails
-  if (Math.random() < 0.04 && synapses.length) {
-    const s = synapses[Math.floor(Math.random()*synapses.length)];
-    signals.push({ax:s.a.x, ay:s.a.y, bx:s.b.x, by:s.b.y, t:0, color:s.a.color, size:2.5, trail:false});
-    s.a.fire = 1;
-    s.pulse = 1;
-    _signalCount++;
-  }
-
   signals = signals.filter(sig => {
-    sig.t += 0.018*dt;
+    sig.t += live ? 0.018*dt : 0;
     if (sig.t >= 1) { return false; }
     const t = sig.t;
     // Ease-out interpolation
@@ -2462,7 +2576,7 @@ function neuralFrame(ts) {
 
   // Signal rate calculation
   if (ts - _lastSignalCheck > 1000) {
-    _signalRate = _signalCount;
+    _signalRate = live ? _signalCount : 0;
     _signalCount = 0;
     _lastSignalCheck = ts;
   }
@@ -2484,14 +2598,24 @@ function neuralFrame(ts) {
 
 // ── SSE + Polling ────────────────────────────
 let _sseRetries = 0;
+let _eventSource = null;
 function connectSSE() {
   try {
+    if (_eventSource) _eventSource.close();
     const es = new EventSource('/api/stream');
-    es.onopen = () => { _sseRetries = 0; document.getElementById('sseText').textContent = 'LIVE'; document.getElementById('ssePill').classList.remove('off'); };
+    _eventSource = es;
+    es.onopen = () => {
+      _liveState.sse = true;
+      _sseRetries = 0;
+      document.getElementById('sseText').textContent = 'LIVE';
+      document.getElementById('ssePill').classList.remove('off');
+      updateLiveHud();
+    };
     es.onmessage = (ev) => {
       try {
         const d = JSON.parse(ev.data);
         if (d.type === 'poll') {
+          markLive('poll');
           updateLobes(d.lobes||[]);
           updateQuantum(d.quantum||{}, d.quantum_architecture || null);
           updateBrain(d.brain||{}, d.voice||{}, d.codebase||{});
@@ -2504,13 +2628,18 @@ function connectSSE() {
           document.getElementById('lobeBadge').textContent = `${d.online}/${d.total}`;
         }
         if (d.type === 'nexus' && d.data) {
+          markLive('nexus');
+          pulseFromNexus(d.data);
           const el = document.getElementById('feedScroll');
           el.insertAdjacentHTML('afterbegin', `<div class="feed-item"><span class="feed-from">${esc(d.data.from||'')}</span> <span class="feed-topic">${esc(d.data.topic||'')}</span></div>`);
         }
       } catch(e){}
     };
     es.onerror = () => {
+      _liveState.sse = false;
+      markOffline('sse error');
       es.close();
+      if (_eventSource === es) _eventSource = null;
       _sseRetries++;
       document.getElementById('ssePill').classList.add('off');
       if (_sseRetries <= 3) {
@@ -2521,15 +2650,31 @@ function connectSSE() {
       }
     };
   } catch(e) {
+    _liveState.sse = false;
+    markOffline(e.message || 'sse unavailable');
     document.getElementById('sseText').textContent = 'POLL';
   }
 }
 
 // ── Boot ─────────────────────────────────────
 setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+window.addEventListener('offline', () => {
+  _liveState.browserOnline = false;
+  _liveState.sse = false;
+  if (_eventSource) { _eventSource.close(); _eventSource = null; }
+  markOffline('browser offline');
+});
+window.addEventListener('online', () => {
+  _liveState.browserOnline = true;
+  updateLiveHud();
+  fetchState();
+  connectSSE();
+});
+updateLiveHud();
 fetchState();
 connectSSE();
 setInterval(fetchState, 5000);
+setInterval(updateLiveHud, 1000);
 startKingstonMatrix();
 window.addEventListener('resize', () => { if (_neuralRunning) neuralResize(); });
 </script>
