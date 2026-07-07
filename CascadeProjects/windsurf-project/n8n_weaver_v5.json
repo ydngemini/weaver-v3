@@ -11,6 +11,7 @@
       "name": "1. Input Gateway",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
+      "webhookId": "weaver-input",
       "position": [
         200,
         500

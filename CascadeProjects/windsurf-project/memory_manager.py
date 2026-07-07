@@ -846,7 +846,7 @@ class MemoryManager:
         gguf = Path(gguf_path).expanduser() if gguf_path else Path("")
         cfg_hash = ""
         cfg_path = adapter / "adapter_config.json" if adapter_path else Path("")
-        if cfg_path.exists():
+        if adapter_path and cfg_path.is_file():
             cfg_hash = _stable_hash(cfg_path.read_text(encoding="utf-8", errors="replace"), 20)
             try:
                 cfg = json.loads(cfg_path.read_text(encoding="utf-8"))

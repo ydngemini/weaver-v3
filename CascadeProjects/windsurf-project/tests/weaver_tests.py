@@ -625,6 +625,33 @@ async def test_lora_version_registry():
         return _res("lora_version_registry", "LoRA registry: rollback restores previous version",
                     ok, f"before={r2['version_id']} after={rolled['version_id']}")
 
+@register("unit", "lora_version_registry_gguf")
+async def test_lora_version_registry_gguf():
+    """MemoryManager LoRA registry: GGUF-only versions register without adapter files."""
+    from memory_manager import MemoryManager
+    with tempfile.TemporaryDirectory() as tmp:
+        mem = MemoryManager(tmp)
+        gguf = os.path.join(tmp, "soul.gguf")
+        with open(gguf, "wb") as f:
+            f.write(b"gguf-test-model")
+        record = mem.register_lora_version(
+            gguf_path=gguf,
+            backend="gguf",
+            notes="arm soul voice",
+            metadata={"service": "test"},
+        )
+        active = mem.active_lora_version()
+        ok = (
+            record["backend"] == "gguf"
+            and record["adapter_path"] == ""
+            and record["gguf_path"] == gguf
+            and active
+            and active["version_id"] == record["version_id"]
+            and active["fingerprints"]["gguf"]["exists"]
+        )
+        return _res("lora_version_registry_gguf", "LoRA registry: GGUF-only version registers",
+                    ok, f"version={record['version_id']}")
+
 @register("unit", "vault_persistence")
 async def test_vault_persistence():
     """Nexus_Vault: directory + key persistence files present."""
@@ -1119,10 +1146,10 @@ async def test_google_drive():
 
 @register("n8n", "n8n_webhook_smoke")
 async def test_n8n_webhook_smoke():
-    """n8n: POST /webhook-test/weaver-input returns 2xx."""
-    code, body = _http_post("http://localhost:5678/webhook-test/weaver-input",
-                             {"text": "Smoke test", "source_file": "/tmp/t.md"}, timeout=10)
-    ok = code is not None and 200 <= code < 500
+    """n8n: POST /webhook/weaver-input returns 2xx."""
+    code, body = _http_post("http://localhost:5678/webhook/weaver-input",
+                             {"text": "Smoke test", "source_file": "/tmp/t.md"}, timeout=60)
+    ok = code is not None and 200 <= code < 300
     return _res("n8n_webhook_smoke", f"n8n webhook smoke: status={code}", ok, f"body={body[:100]}")
 
 @register("n8n", "n8n_pipeline")
@@ -1145,9 +1172,13 @@ async def test_n8n_pipeline():
 @register("n8n", "obsidian_bridge_post")
 async def test_obsidian_bridge_post():
     """Obsidian bridge: POST /weaver-response returns 2xx and writes to vault."""
+    test_note = os.path.join(os.path.expanduser("~/Weaver_Vault"), "Test_Note.md")
+    os.makedirs(os.path.dirname(test_note), exist_ok=True)
+    with open(test_note, "w", encoding="utf-8") as f:
+        f.write("# Test Note\n\n#weaver\n")
     code, body = _http_post("http://localhost:5679/weaver-response", {
         "manifested_response": "The quantum entanglement reveals akashic resonance through the pineal gate.",
-        "source_file": "/home/ydn/Weaver_Vault/Test_Note.md",
+        "source_file": test_note,
         "experts_activated": ["logic", "creativity", "memory"],
         "interference": 0.0131,
     }, timeout=10)
@@ -1157,7 +1188,7 @@ async def test_obsidian_bridge_post():
 @register("n8n", "obsidian_vault_write")
 async def test_obsidian_vault_write():
     """Obsidian vault write: weaver response block with wikilinks present in Test_Note.md."""
-    path = "/home/ydn/Weaver_Vault/Test_Note.md"
+    path = os.path.join(os.path.expanduser("~/Weaver_Vault"), "Test_Note.md")
     if not os.path.isfile(path):
         return _res("obsidian_vault_write", "Obsidian vault: Test_Note.md not found (run obsidian_bridge_post first)", False)
     content = open(path).read()

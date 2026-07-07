@@ -37,7 +37,9 @@ weaverv3.com {
 
 	handle_path /llm/* {
 		@denied {
-			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+			not {
+				header X-Weaver-Key {$WEAVER_LLM_KEY}
+			}
 		}
 		respond @denied 403
 		reverse_proxy 127.0.0.1:8090
@@ -54,7 +56,9 @@ weaverv3.com {
 	# vision, and main reasoning routes through one OpenAI-compatible endpoint.
 	handle_path /brain/* {
 		@bdenied {
-			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+			not {
+				header X-Weaver-Key {$WEAVER_LLM_KEY}
+			}
 		}
 		respond @bdenied 403
 		reverse_proxy 127.0.0.1:8093
@@ -63,7 +67,9 @@ weaverv3.com {
 	# read-only source-code context for Weaver's self-inspection. Same key gate as /llm.
 	handle_path /codebase/* {
 		@cdenied {
-			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+			not {
+				header X-Weaver-Key {$WEAVER_LLM_KEY}
+			}
 		}
 		respond @cdenied 403
 		reverse_proxy 127.0.0.1:8091
@@ -73,7 +79,9 @@ weaverv3.com {
 	# (127.0.0.1:8092), with browser speech fallback if synthesis fails.
 	handle_path /tts/* {
 		@tdenied {
-			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+			not {
+				header X-Weaver-Key {$WEAVER_LLM_KEY}
+			}
 		}
 		respond @tdenied 403
 		reverse_proxy 127.0.0.1:8092
@@ -104,7 +112,9 @@ headless.weaverv3.com {
 
 	handle_path /brain/* {
 		@hbdenied {
-			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+			not {
+				header X-Weaver-Key {$WEAVER_LLM_KEY}
+			}
 		}
 		respond @hbdenied 403
 		reverse_proxy 127.0.0.1:8093
@@ -112,7 +122,9 @@ headless.weaverv3.com {
 
 	handle_path /tts/* {
 		@htdenied {
-			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+			not {
+				header X-Weaver-Key {$WEAVER_LLM_KEY}
+			}
 		}
 		respond @htdenied 403
 		reverse_proxy 127.0.0.1:8092
@@ -120,7 +132,9 @@ headless.weaverv3.com {
 
 	handle_path /codebase/* {
 		@hcdenied {
-			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+			not {
+				header X-Weaver-Key {$WEAVER_LLM_KEY}
+			}
 		}
 		respond @hcdenied 403
 		reverse_proxy 127.0.0.1:8091

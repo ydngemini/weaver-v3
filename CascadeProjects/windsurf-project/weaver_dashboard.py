@@ -601,6 +601,9 @@ def _find_cloudflared() -> Optional[str]:
 
 async def _start_tunnel():
     global _ngrok_url
+    if os.environ.get("WEAVER_DASHBOARD_TUNNEL", "").lower() not in {"1", "true", "yes", "on"}:
+        print("[DASHBOARD] public quick tunnel disabled (set WEAVER_DASHBOARD_TUNNEL=1 to enable)", flush=True)
+        return
     cf = _find_cloudflared()
     if not cf:
         print("[DASHBOARD] cloudflared not found — no public URL", flush=True)

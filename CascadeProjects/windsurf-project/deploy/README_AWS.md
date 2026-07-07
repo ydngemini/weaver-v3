@@ -115,6 +115,9 @@ journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f
 curl 127.0.0.1:8090/v1/models          # experts server up
 curl 127.0.0.1:8091/health             # read-only codebase API up
 curl 127.0.0.1:8000/health             # oracle backend up
+curl -X POST 127.0.0.1:5678/webhook/weaver-input \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"restore smoke","source_file":"/tmp/weaver.md"}'
 
 # from your laptop:
 #   https://weaverv3.com            → embodied avatar
@@ -136,6 +139,20 @@ subfolder. Both `weaver.service` and `weaver-brain.service` set
 `WEAVER_VAULT_DIR=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault`
 so headless cognition, quantum state, browser memory, and Akashic persistence use one
 shared vault across restarts.
+
+If a restored n8n import returns 404 for `/webhook/weaver-input`, repair the persisted
+production webhook row on the box:
+
+```bash
+cd ~/weaver/CascadeProjects/windsurf-project
+sudo python3 deploy/repair_n8n_weaver_webhook.py
+curl -X POST 127.0.0.1:5678/webhook/weaver-input \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"restore smoke","source_file":"/tmp/weaver.md"}'
+```
+
+The repair script stops the `n8n` container if it is running, creates a timestamped SQLite
+backup, patches the route to `weaver-input`, and starts the container again.
 
 ---
 
