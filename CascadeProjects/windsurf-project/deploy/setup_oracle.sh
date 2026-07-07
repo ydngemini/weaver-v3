@@ -54,6 +54,9 @@ GGUF="$PROJ/weaver_merged_1B_Q4_K_M.gguf"
 
 echo "▶ .env present?"
 [ -f .env ] || { echo "   ⚠ copy deploy/env.oracle.example → .env and fill it in"; }
+for secret_file in .env Weaver_Vault/.env ghost_key.json; do
+    [ -f "$secret_file" ] && chmod 600 "$secret_file"
+done
 
 echo ""
 echo "✅ Setup done. Start it with:"

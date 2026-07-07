@@ -37,6 +37,7 @@ python3 -m venv "$ORA/backend/venv"
 "$ORA/backend/venv/bin/pip" install -r "$ORA/backend/requirements.txt"
 [ -f "$ORA/backend/.env" ] || { cp "$WIN/deploy/env.oracle-backend.example" "$ORA/backend/.env"; \
     echo "   ⚠ created $ORA/backend/.env from template — set ORACLE_SECRET_KEY + admin creds before going public"; }
+chmod 600 "$ORA/backend/.env"
 
 echo "▶ 3/6  Build the Oracle frontend (prod env baked in) → /var/www/oracle"
 # Vite requires Node >=20; Ubuntu 24.04's apt nodejs is 18. Use NodeSource if too old.
