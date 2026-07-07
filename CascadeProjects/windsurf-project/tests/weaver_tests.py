@@ -545,6 +545,86 @@ async def test_lora_artifacts():
     return _res("lora_artifacts", "LoRA adapter: all files present + config valid", ok,
                 f"files={files_ok}  config={cfg_ok} ({cfg_detail})")
 
+@register("unit", "state_reconciliation_same_turn")
+async def test_state_reconciliation_same_turn():
+    """MemoryManager.reconcile_thought: same caller/turn is accepted and logged."""
+    from memory_manager import MemoryManager
+    with tempfile.TemporaryDirectory() as tmp:
+        mem = MemoryManager(tmp)
+        history = [{"role": "user", "content": "Remember the quantum routing plan for the phone bridge"}]
+        snap = mem.snapshot_conversation_state(
+            caller="Nate",
+            latest_user=history[-1]["content"],
+            conversation_history=history,
+            quantum_bias={"dominant": "Logic"},
+            turn_id="call-1",
+        )
+        result = mem.reconcile_thought(
+            thought="The quantum routing plan should preserve phone bridge memory and logic.",
+            expected=snap,
+            caller="Nate",
+            latest_user=history[-1]["content"],
+            conversation_history=history,
+            quantum_bias={"dominant": "Logic"},
+        )
+        log_path = os.path.join(tmp, "weaver_state_reconciliation.jsonl")
+        ok = result["ok"] and os.path.getsize(log_path) > 0
+        return _res("state_reconciliation_same_turn", "State reconciliation: same turn accepted",
+                    ok, f"score={result['score']} reasons={result['reasons']}")
+
+@register("unit", "state_reconciliation_stale_turn")
+async def test_state_reconciliation_stale_turn():
+    """MemoryManager.reconcile_thought: stale slow-path thought is quarantined."""
+    from memory_manager import MemoryManager
+    with tempfile.TemporaryDirectory() as tmp:
+        mem = MemoryManager(tmp)
+        old_history = [{"role": "user", "content": "Tell me about yesterday's LoRA training"}]
+        snap = mem.snapshot_conversation_state(
+            caller="Nate",
+            latest_user=old_history[-1]["content"],
+            conversation_history=old_history,
+            turn_id="call-1",
+        )
+        new_history = old_history + [{"role": "user", "content": "Actually stop and call Mom now"}]
+        result = mem.reconcile_thought(
+            thought="Yesterday's LoRA training improved the soul voice.",
+            expected=snap,
+            caller="Nate",
+            latest_user=new_history[-1]["content"],
+            conversation_history=new_history,
+        )
+        ok = (not result["ok"]) and result["action"] == "quarantine" and "stale_user_turn" in result["reasons"]
+        return _res("state_reconciliation_stale_turn", "State reconciliation: stale thought quarantined",
+                    ok, f"score={result['score']} reasons={result['reasons']}")
+
+@register("unit", "lora_version_registry")
+async def test_lora_version_registry():
+    """MemoryManager LoRA registry: register two versions and roll back active pointer."""
+    from memory_manager import MemoryManager
+    with tempfile.TemporaryDirectory() as tmp:
+        mem = MemoryManager(tmp)
+        a1 = os.path.join(tmp, "adapter-v1")
+        a2 = os.path.join(tmp, "adapter-v2")
+        os.makedirs(a1)
+        os.makedirs(a2)
+        for path, base in ((a1, "base-one"), (a2, "base-two")):
+            with open(os.path.join(path, "adapter_config.json"), "w", encoding="utf-8") as f:
+                json.dump({"peft_type": "LORA", "base_model_name_or_path": base}, f)
+            with open(os.path.join(path, "adapter_model.safetensors"), "wb") as f:
+                f.write(base.encode("utf-8"))
+        r1 = mem.register_lora_version(adapter_path=a1, backend="transformers", notes="known good")
+        r2 = mem.register_lora_version(adapter_path=a2, backend="transformers", notes="new candidate")
+        active_before = mem.active_lora_version()
+        rolled = mem.rollback_lora_version()
+        active_after = mem.active_lora_version()
+        ok = (
+            active_before and active_before["version_id"] == r2["version_id"]
+            and rolled["version_id"] == r1["version_id"]
+            and active_after and active_after["version_id"] == r1["version_id"]
+        )
+        return _res("lora_version_registry", "LoRA registry: rollback restores previous version",
+                    ok, f"before={r2['version_id']} after={rolled['version_id']}")
+
 @register("unit", "vault_persistence")
 async def test_vault_persistence():
     """Nexus_Vault: directory + key persistence files present."""

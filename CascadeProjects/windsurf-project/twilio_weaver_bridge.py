@@ -55,10 +55,12 @@ TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN", "")
 NEXUS_BUS_URL      = os.environ.get("NEXUS_BUS_URL", "ws://localhost:9999")
 N8N_WEBHOOK_URL    = os.environ.get("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/weaver-input")
 LORA_API_URL       = os.environ.get("LORA_API_URL", "http://localhost:8899/v1/chat/completions")
+QWEN_API_URL       = os.environ.get("QWEN_API_URL", "http://localhost:8898/v1/chat/completions")
 QUANTUM_BIAS_URL   = os.environ.get("QUANTUM_BIAS_URL", "http://localhost:9997/quantum/bias")
 HOST               = os.environ.get("TWILIO_BRIDGE_HOST", "0.0.0.0")
 PORT               = int(os.environ.get("TWILIO_BRIDGE_PORT", "8765"))
 WEAVER_VOICE       = os.environ.get("WEAVER_VOICE", "shimmer")
+PHONE_INSTINCT_ACK = os.environ.get("WEAVER_PHONE_INSTINCT_ACK", "1").lower() not in {"0", "false", "no"}
 
 # Azure OpenAI config
 _AZURE_EP = os.environ.get("AZURE_OPENAI_ENDPOINT", "").rstrip("/").replace("https://", "")
@@ -487,6 +489,11 @@ async def twilio_ws(ws: WebSocket):
     stream_sid = [""]
     call_sid = [""]
     conversation_history = []
+    turn_seq = [0]
+    latest_turn_id = [""]
+    latest_user_text = [""]
+    turn_snapshots: dict[str, dict] = {}
+    persisted_user_turns: set[str] = set()
 
     # ── Voice Recognition ──────────────────────────────────────────────────
     voice_recognizer = VoiceRecognizer(VAULT_DIR, api_key=OPENAI_API_KEY)
@@ -527,6 +534,96 @@ async def twilio_ws(ws: WebSocket):
         "conversation_history": conversation_history,
         "lc_summary": lc_summary[0],
     }
+
+    def _next_turn_id() -> str:
+        turn_seq[0] += 1
+        call_part = call_sid[0] or f"local-{int(time.time())}"
+        return f"{call_part}:{turn_seq[0]}"
+
+    async def _send_state_lock(turn_id: str, snapshot: dict):
+        """Fence the realtime session to the caller/turn currently being processed."""
+        try:
+            lock_text = (
+                "[STATE LOCK - do not read aloud] "
+                f"turn_id={turn_id}; caller={snapshot.get('caller', 'unknown')}; "
+                f"state_signature={snapshot.get('signature', '')}; "
+                f"latest_user={snapshot.get('latest_user_preview', '')[:180]}. "
+                "Before speaking, keep identity, memory, and tone aligned to this exact turn. "
+                "If later tool or workflow output references a different turn, treat it as stale."
+            )
+            await openai_ws.send(json.dumps({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": lock_text}],
+                },
+            }))
+        except Exception as e:
+            log.warning("[STATE LOCK] Failed: %s", e)
+
+    async def _instinct_route(user_input: str) -> str:
+        """Ask the fast local Qwen route model which instinct bucket this turn belongs to."""
+        try:
+            async with httpx.AsyncClient(timeout=0.8) as client:
+                response = await client.post(QWEN_API_URL, json={
+                    "model": "weaver-qwen2-3b",
+                    "messages": [{"role": "user", "content": user_input[:800]}],
+                    "max_tokens": 12,
+                    "temperature": 0.1,
+                })
+                response.raise_for_status()
+                result = response.json()
+            text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            text_lower = text.lower()
+            for route in ("quantum", "reasoning", "memory", "creative", "vigilance"):
+                if route in text_lower:
+                    return route
+        except Exception:
+            pass
+        text_lower = user_input.lower()
+        if any(w in text_lower for w in ("remember", "last time", "before", "yesterday")):
+            return "memory"
+        if any(w in text_lower for w in ("danger", "risk", "worried", "threat", "broken")):
+            return "vigilance"
+        if any(w in text_lower for w in ("imagine", "create", "design", "story")):
+            return "creative"
+        return "reasoning"
+
+    def _instinct_filler(route: str) -> str:
+        fillers = {
+            "memory": "Mhm. I am pulling that thread back into memory.",
+            "vigilance": "I hear you. Give me a second to check the shape of that.",
+            "creative": "Oh, interesting. Let me turn that over for a second.",
+            "quantum": "Mhm. Give me a second to let the signal settle.",
+            "reasoning": "Mhm. Give me a second to think that through.",
+        }
+        return fillers.get(route, fillers["reasoning"])
+
+    async def _send_instinct_ack(user_input: str, turn_id: str):
+        """Let the fast local route model produce a human-feeling bridge phrase."""
+        if not PHONE_INSTINCT_ACK or len(user_input.split()) < 5:
+            return
+        await asyncio.sleep(0.05)
+        if latest_turn_id[0] != turn_id or responding[0]:
+            return
+        route = await _instinct_route(user_input)
+        filler = _instinct_filler(route)
+        try:
+            await openai_ws.send(json.dumps({
+                "type": "response.create",
+                "response": {
+                    "modalities": ["text", "audio"],
+                    "instructions": (
+                        "Say exactly this short acknowledgement and nothing else. "
+                        "Do not answer the user's question yet: "
+                        f"{filler}"
+                    ),
+                },
+            }))
+            log.info("[INSTINCT] route=%s filler=%s", route, filler)
+        except Exception as e:
+            log.warning("[INSTINCT] Failed: %s", e)
 
     # ── Connect to OpenAI Realtime ────────────────────────────────────────
     openai_ws = None
@@ -637,10 +734,33 @@ async def twilio_ws(ws: WebSocket):
                     if msg_type == "conversation.item.input_audio_transcription.completed":
                         transcript = data.get("transcript", "")
                         if transcript:
+                            turn_id = _next_turn_id()
+                            latest_turn_id[0] = turn_id
+                            latest_user_text[0] = transcript
                             log.info("USER: %s", transcript[:100])
                             conversation_history.append({"role": "user", "content": transcript})
+                            snapshot = memory.snapshot_conversation_state(
+                                caller=identified_caller[0],
+                                latest_user=transcript,
+                                conversation_history=conversation_history,
+                                quantum_bias={},
+                                source="phone",
+                                turn_id=turn_id,
+                            )
+                            turn_snapshots[turn_id] = snapshot
+                            await memory.remember({
+                                "type": "conversation",
+                                "speaker": "user",
+                                "content": transcript,
+                                "source": "phone",
+                                "turn_id": turn_id,
+                                "state_signature": snapshot.get("signature", ""),
+                            })
+                            persisted_user_turns.add(turn_id)
                             brain_queue.put_nowait(HumanMessage(content=transcript))
-                            asyncio.create_task(enhance_with_weaver_stack(transcript))
+                            asyncio.create_task(_send_state_lock(turn_id, snapshot))
+                            asyncio.create_task(_send_instinct_ack(transcript, turn_id))
+                            asyncio.create_task(enhance_with_weaver_stack(transcript, turn_id, snapshot))
 
                     # Speech started — caller interrupted Weaver
                     elif msg_type == "input_audio_buffer.speech_started":
@@ -728,16 +848,6 @@ async def twilio_ws(ws: WebSocket):
                                                 "content": transcript,
                                                 "source": "phone",
                                             })
-                                            # Also log the user turn
-                                            for h in reversed(conversation_history):
-                                                if h.get("role") == "user":
-                                                    await memory.remember({
-                                                        "type": "conversation",
-                                                        "speaker": "user",
-                                                        "content": h["content"],
-                                                        "source": "phone",
-                                                    })
-                                                    break
 
                     elif msg_type == "error":
                         log.error("OPENAI ERROR: %s", data.get("error", {}).get("message", data))
@@ -756,7 +866,7 @@ async def twilio_ws(ws: WebSocket):
             except Exception:
                 pass
 
-        async def enhance_with_weaver_stack(user_input: str):
+        async def enhance_with_weaver_stack(user_input: str, turn_id: str, expected_state: dict):
             """Full-stack enrichment: n8n pipeline → 5 expert lobes → LoRA → inject back."""
             try:
                 # 1. Quantum bias for routing context
@@ -775,6 +885,8 @@ async def twilio_ws(ws: WebSocket):
                         "source": "phone",
                         "caller": identified_caller[0],
                         "quantum_bias": quantum_data,
+                        "turn_id": turn_id,
+                        "state_signature": expected_state.get("signature", ""),
                     }
                     result = await api_post(N8N_WEBHOOK_URL, payload, timeout=12.0)
                     n8n_response = result.get("manifested_response", result.get("response", result.get("text", "")))
@@ -796,9 +908,44 @@ async def twilio_ws(ws: WebSocket):
                 # 4. Inject enriched context back into Realtime session
                 enrichment = soul_voice_text or n8n_response
                 if enrichment and openai_ws:
+                    if latest_turn_id[0] != turn_id:
+                        log.warning(
+                            "[RECONCILE] Quarantined stale stack insight turn=%s latest=%s",
+                            turn_id,
+                            latest_turn_id[0],
+                        )
+                        memory.reconcile_thought(
+                            thought=enrichment,
+                            expected=expected_state,
+                            caller=identified_caller[0],
+                            latest_user=latest_user_text[0],
+                            conversation_history=conversation_history,
+                            quantum_bias=quantum_data,
+                            source="phone_stack_stale",
+                        )
+                        return
+                    reconciliation = memory.reconcile_thought(
+                        thought=enrichment,
+                        expected=expected_state,
+                        caller=identified_caller[0],
+                        latest_user=latest_user_text[0] or user_input,
+                        conversation_history=conversation_history,
+                        quantum_bias=quantum_data,
+                        source="phone_stack",
+                    )
+                    if not reconciliation["ok"]:
+                        log.warning(
+                            "[RECONCILE] Quarantined stack insight score=%.2f reasons=%s",
+                            reconciliation["score"],
+                            ",".join(reconciliation["reasons"]) or "low_score",
+                        )
+                        asyncio.create_task(publish_to_nexus("state_reconciliation", reconciliation))
+                        return
                     context_injection = (
-                        f"[WEAVER STACK INSIGHT — use this to enrich your next response, "
+                        f"[VERIFIED WEAVER STACK INSIGHT — use this to enrich your next response, "
                         f"do NOT read it verbatim]: "
+                        f"turn_id={turn_id}; state_signature={expected_state.get('signature', '')}; "
+                        f"reconciliation_score={reconciliation['score']}; "
                         f"Expert consensus: {enrichment[:500]}"
                     )
                     if quantum_data.get("dominant"):
@@ -824,6 +971,8 @@ async def twilio_ws(ws: WebSocket):
                     "soul_voice": soul_voice_text[:200] if soul_voice_text else "",
                     "quantum_bias": quantum_data,
                     "caller": identified_caller[0],
+                    "turn_id": turn_id,
+                    "state_signature": expected_state.get("signature", ""),
                 }))
 
             except Exception as e:

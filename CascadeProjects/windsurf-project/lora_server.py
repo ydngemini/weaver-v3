@@ -26,14 +26,18 @@ import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from threading import Thread
+from urllib.parse import urlparse
+
+from memory_manager import MemoryManager, default_vault_dir
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 PROJ = os.path.dirname(os.path.abspath(__file__))
-ADAPTER_PATH = os.path.join(PROJ, "weaver_fracture_1B_lora")
+ADAPTER_PATH = os.environ.get("WEAVER_LORA_ADAPTER", os.path.join(PROJ, "weaver_fracture_1B_lora"))
 DEFAULT_PORT = 8899
+ADMIN_KEY = os.environ.get("WEAVER_LORA_ADMIN_KEY", os.environ.get("WEAVER_LLM_KEY", ""))
 
 # ── Lazy model loading ─────────────────────────────────────────────────────
 _model = None
@@ -46,6 +50,54 @@ _llm = None  # llama-cpp-python handle when WEAVER_LORA_BACKEND=gguf
 LORA_BACKEND = os.environ.get("WEAVER_LORA_BACKEND", "transformers").lower()
 SOUL_GGUF = os.environ.get(
     "WEAVER_SOUL_GGUF", os.path.join(PROJ, "weaver_merged_1B_Q4_K_M.gguf"))
+_memory = MemoryManager(default_vault_dir())
+_active_version = None
+
+
+def _current_lora_record(notes: str = "server-load", activate: bool = True) -> dict:
+    global _active_version
+    record = _memory.register_lora_version(
+        adapter_path=ADAPTER_PATH if LORA_BACKEND != "gguf" else "",
+        gguf_path=SOUL_GGUF if LORA_BACKEND == "gguf" else "",
+        backend=LORA_BACKEND,
+        notes=notes,
+        activate=activate,
+        metadata={"service": "lora_server", "port": DEFAULT_PORT},
+    )
+    _active_version = record.get("version_id")
+    return record
+
+
+def _reset_loaded_model() -> None:
+    global _model, _tokenizer, _loaded, _load_error, _llm
+    _model = None
+    _tokenizer = None
+    _llm = None
+    _loaded = False
+    _load_error = None
+
+
+def _apply_registered_version(record: dict) -> None:
+    global ADAPTER_PATH, SOUL_GGUF, LORA_BACKEND, _active_version
+    backend = str(record.get("backend") or LORA_BACKEND).lower()
+    adapter_path = str(record.get("adapter_path") or "")
+    gguf_path = str(record.get("gguf_path") or "")
+    if backend == "gguf":
+        if gguf_path:
+            SOUL_GGUF = gguf_path
+        LORA_BACKEND = "gguf"
+    else:
+        if adapter_path:
+            ADAPTER_PATH = adapter_path
+        LORA_BACKEND = backend or "transformers"
+    _active_version = record.get("version_id")
+    _reset_loaded_model()
+
+
+def _admin_allowed(headers) -> bool:
+    if not ADMIN_KEY:
+        return True
+    return headers.get("X-Weaver-Key", "") == ADMIN_KEY
 
 
 def _load_model_gguf():
@@ -71,6 +123,7 @@ def _load_model_gguf():
         )
         _model = _llm  # so /health and request guards see "loaded"
         _loaded = True
+        _current_lora_record(notes="loaded gguf soul voice", activate=True)
         print(f"[LORA] ✅ Soul Voice GGUF ready ({time.monotonic()-t0:.1f}s)", flush=True)
         return True
     except Exception as e:
@@ -173,6 +226,7 @@ def _load_model():
 
         elapsed = time.monotonic() - t0
         device = next(_model.parameters()).device
+        _current_lora_record(notes=f"loaded transformers soul voice on {device}", activate=True)
         print(f"[LORA] ✅ Weaver Fracture 1B LoRA ready on {device} ({elapsed:.1f}s)", flush=True)
         _loaded = True
         return True
@@ -253,13 +307,20 @@ class LoRAHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/health":
+        path = urlparse(self.path).path
+        if path == "/health":
+            active = _memory.active_lora_version()
             self._send_json(200, {
                 "status": "ok" if _model is not None else "model_not_loaded",
                 "model": "weaver-fracture-1b-lora",
+                "backend": LORA_BACKEND,
+                "active_version": _active_version,
+                "active_record": active,
                 "error": _load_error,
             })
-        elif self.path == "/v1/models":
+        elif path == "/lora/versions":
+            self._send_json(200, _memory.lora_versions())
+        elif path == "/v1/models":
             self._send_json(200, {
                 "object": "list",
                 "data": [{
@@ -272,7 +333,36 @@ class LoRAHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path != "/v1/chat/completions":
+        path = urlparse(self.path).path
+        if path in {"/lora/register", "/lora/rollback"}:
+            if not _admin_allowed(self.headers):
+                self._send_json(403, {"error": "invalid admin key"})
+                return
+            content_len = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(content_len) if content_len else b"{}"
+            try:
+                req = json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                self._send_json(400, {"error": "invalid JSON"})
+                return
+            try:
+                if path == "/lora/register":
+                    record = _current_lora_record(
+                        notes=req.get("notes", "manual register"),
+                        activate=bool(req.get("activate", True)),
+                    )
+                    self._send_json(200, {"status": "registered", "record": record})
+                    return
+                target = _memory.rollback_lora_version(str(req.get("version_id", "")))
+                _apply_registered_version(target)
+                Thread(target=_preload_in_background, daemon=True).start()
+                self._send_json(200, {"status": "rollback_started", "active": target})
+                return
+            except Exception as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+
+        if path != "/v1/chat/completions":
             self._send_json(404, {"error": "not found"})
             return
 

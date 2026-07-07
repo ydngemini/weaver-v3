@@ -47,6 +47,8 @@ MEMORY_FILENAMES: dict[str, str] = {
     "quantum": "quantum_state.txt",
     "todos": "weaver_todos.md",
     "discord_transcript": "weaver_discord_transcript.txt",
+    "state_reconciliation": "weaver_state_reconciliation.jsonl",
+    "lora_versions": "weaver_lora_versions.json",
 }
 
 
@@ -182,6 +184,44 @@ def _text_vector(text: str, dim: int = 256) -> np.ndarray:
         vec[idx] += sign
     norm = np.linalg.norm(vec)
     return vec / norm if norm > 1e-12 else vec
+
+
+def _stable_hash(value: Any, length: int = 16) -> str:
+    payload = json.dumps(_sanitize_payload(value), sort_keys=True, ensure_ascii=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:length]
+
+
+def _keywords(text: str, limit: int = 16) -> list[str]:
+    stop = {
+        "about", "after", "again", "also", "because", "before", "being", "could",
+        "should", "would", "there", "these", "those", "their", "thing", "think",
+        "right", "really", "still", "where", "which", "while", "with", "your",
+        "youre", "have", "what", "when", "from", "that", "this", "just", "like",
+    }
+    words = re.findall(r"[a-z0-9']{4,}", str(text or "").lower())
+    seen: set[str] = set()
+    result: list[str] = []
+    for word in words:
+        word = word.strip("'")
+        if not word or word in stop or word in seen:
+            continue
+        seen.add(word)
+        result.append(word)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _file_fingerprint(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"path": str(path), "exists": False}
+    stat = path.stat()
+    return {
+        "path": str(path),
+        "exists": True,
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
 
 
 class PeopleMemory:
@@ -387,9 +427,17 @@ class MemoryManager:
             "vision",
             "quantum",
             "discord_transcript",
+            "state_reconciliation",
+            "lora_versions",
         ):
             self.paths[key].parent.mkdir(parents=True, exist_ok=True)
-            self.paths[key].touch(exist_ok=True)
+            if key == "lora_versions" and not self.paths[key].exists():
+                self.paths[key].write_text(
+                    json.dumps({"active_version": "", "versions": []}, indent=2),
+                    encoding="utf-8",
+                )
+            else:
+                self.paths[key].touch(exist_ok=True)
 
     def sources(self) -> dict[str, str]:
         return {name: str(path) for name, path in self.paths.items()}
@@ -644,6 +692,236 @@ class MemoryManager:
             w_str = ", ".join(f"{key}={value:.2f}" for key, value in weights.items()) if weights else "N/A"
             parts.append(f"## QUANTUM STATE:\nDominant pathway: {dom}\nWeights: {w_str}\n")
         return "\n".join(parts)
+
+    def snapshot_conversation_state(
+        self,
+        *,
+        caller: str = "unknown",
+        latest_user: str = "",
+        conversation_history: list[dict[str, Any]] | None = None,
+        quantum_bias: Optional[Dict[str, Any]] = None,
+        source: str = "phone",
+        turn_id: str | int | None = None,
+    ) -> dict[str, Any]:
+        """Capture the current turn contract for cross-service reconciliation.
+
+        This is intentionally small and hash-heavy. Services can pass the snapshot
+        through slow paths (n8n, Pineal Gate, LoRA) without copying the whole
+        transcript, then verify the returned thought still belongs to this exact
+        caller/turn before it is allowed to steer speech.
+        """
+        history = list(conversation_history or [])[-8:]
+        recent_text = "\n".join(
+            f"{item.get('role', 'unknown')}: {item.get('content', '')}"
+            for item in history
+        )
+        latest_user = _redact_text(latest_user, 2000)
+        caller = _redact_text(caller or "unknown", 120) or "unknown"
+        quantum_bias = _sanitize_payload(quantum_bias or {})
+        keywords = _keywords(" ".join([latest_user, recent_text]), 20)
+        payload = {
+            "caller": caller.lower(),
+            "latest_user_hash": _stable_hash(latest_user),
+            "recent_hash": _stable_hash(recent_text),
+            "history_len": len(history),
+            "quantum_dominant": str(quantum_bias.get("dominant", "unknown")).lower(),
+            "keywords": keywords,
+            "turn_id": str(turn_id or ""),
+            "source": source,
+        }
+        payload["signature"] = _stable_hash(payload, 24)
+        payload["timestamp"] = _utc_iso()
+        payload["latest_user_preview"] = latest_user[:240]
+        return payload
+
+    def reconcile_thought(
+        self,
+        *,
+        thought: str,
+        expected: dict[str, Any],
+        caller: str = "unknown",
+        latest_user: str = "",
+        conversation_history: list[dict[str, Any]] | None = None,
+        quantum_bias: Optional[Dict[str, Any]] = None,
+        source: str = "pineal_gate",
+        min_score: float = 0.62,
+    ) -> dict[str, Any]:
+        """Verify a slow-path thought still matches the live conversation state."""
+        current = self.snapshot_conversation_state(
+            caller=caller,
+            latest_user=latest_user,
+            conversation_history=conversation_history,
+            quantum_bias=quantum_bias,
+            source=source,
+            turn_id=expected.get("turn_id"),
+        )
+        reasons: list[str] = []
+        score = 0.0
+
+        if current.get("latest_user_hash") == expected.get("latest_user_hash"):
+            score += 0.38
+        else:
+            reasons.append("stale_user_turn")
+
+        if current.get("caller") == expected.get("caller"):
+            score += 0.17
+        else:
+            reasons.append("caller_changed")
+
+        expected_keywords = set(expected.get("keywords") or [])
+        thought_keywords = set(_keywords(thought, 24))
+        context_keywords = set(current.get("keywords") or [])
+        overlap = len((thought_keywords & expected_keywords) | (thought_keywords & context_keywords))
+        if expected_keywords:
+            keyword_score = min(0.28, 0.28 * (overlap / max(3, min(len(expected_keywords), 8))))
+            score += keyword_score
+            if overlap == 0:
+                reasons.append("no_topic_overlap")
+        else:
+            score += 0.12
+
+        if current.get("quantum_dominant") == expected.get("quantum_dominant"):
+            score += 0.07
+        elif expected.get("quantum_dominant") in {"", "unknown", None}:
+            score += 0.04
+        else:
+            reasons.append("quantum_context_shift")
+
+        if current.get("history_len", 0) >= expected.get("history_len", 0):
+            score += 0.10
+        else:
+            reasons.append("history_regressed")
+
+        hard_stale = any(reason in reasons for reason in ("stale_user_turn", "caller_changed"))
+        ok = score >= min_score and not hard_stale
+        result = {
+            "timestamp": _utc_iso(),
+            "ok": ok,
+            "action": "inject" if ok else "quarantine",
+            "score": round(score, 3),
+            "min_score": min_score,
+            "reasons": reasons,
+            "source": source,
+            "expected_signature": expected.get("signature", ""),
+            "current_signature": current.get("signature", ""),
+            "turn_id": expected.get("turn_id", ""),
+            "caller": current.get("caller", "unknown"),
+            "thought_preview": _redact_text(thought, 400),
+        }
+        with open(self.paths["state_reconciliation"], "a", encoding="utf-8") as f:
+            f.write(json.dumps(result, ensure_ascii=False, default=str) + "\n")
+        return result
+
+    def _read_lora_registry(self) -> dict[str, Any]:
+        path = self.paths["lora_versions"]
+        try:
+            data = json.loads(path.read_text(encoding="utf-8") or "{}")
+            if not isinstance(data, dict):
+                raise ValueError("registry is not an object")
+        except Exception:
+            data = {}
+        data.setdefault("active_version", "")
+        data.setdefault("versions", [])
+        if not isinstance(data["versions"], list):
+            data["versions"] = []
+        return data
+
+    def _write_lora_registry(self, data: dict[str, Any]) -> None:
+        data["updated_at"] = _utc_iso()
+        self.paths["lora_versions"].write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+    def register_lora_version(
+        self,
+        *,
+        adapter_path: str = "",
+        gguf_path: str = "",
+        backend: str = "transformers",
+        base_model: str = "",
+        notes: str = "",
+        activate: bool = True,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Record a LoRA/GGUF soul checkpoint so it can be rolled back later."""
+        adapter = Path(adapter_path).expanduser() if adapter_path else Path("")
+        gguf = Path(gguf_path).expanduser() if gguf_path else Path("")
+        cfg_hash = ""
+        cfg_path = adapter / "adapter_config.json" if adapter_path else Path("")
+        if cfg_path.exists():
+            cfg_hash = _stable_hash(cfg_path.read_text(encoding="utf-8", errors="replace"), 20)
+            try:
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                base_model = base_model or str(cfg.get("base_model_name_or_path", ""))
+            except Exception:
+                pass
+        fingerprints = {
+            "adapter": _file_fingerprint(adapter) if adapter_path else {},
+            "adapter_config": _file_fingerprint(cfg_path) if adapter_path else {},
+            "adapter_model": _file_fingerprint(adapter / "adapter_model.safetensors") if adapter_path else {},
+            "gguf": _file_fingerprint(gguf) if gguf_path else {},
+        }
+        version_seed = {
+            "adapter_path": str(adapter) if adapter_path else "",
+            "gguf_path": str(gguf) if gguf_path else "",
+            "backend": backend,
+            "base_model": base_model,
+            "config_hash": cfg_hash,
+            "fingerprints": fingerprints,
+        }
+        version_id = _stable_hash(version_seed, 20)
+        record = {
+            "version_id": version_id,
+            "created_at": _utc_iso(),
+            "backend": _redact_text(backend, 80),
+            "adapter_path": str(adapter) if adapter_path else "",
+            "gguf_path": str(gguf) if gguf_path else "",
+            "base_model": _redact_text(base_model, 300),
+            "config_hash": cfg_hash,
+            "notes": _redact_text(notes, 500),
+            "metadata": _sanitize_payload(metadata or {}),
+            "fingerprints": fingerprints,
+        }
+        data = self._read_lora_registry()
+        versions = [item for item in data["versions"] if item.get("version_id") != version_id]
+        versions.append(record)
+        data["versions"] = versions[-80:]
+        if activate or not data.get("active_version"):
+            data["active_version"] = version_id
+        self._write_lora_registry(data)
+        return record
+
+    def lora_versions(self) -> dict[str, Any]:
+        return self._read_lora_registry()
+
+    def active_lora_version(self) -> dict[str, Any] | None:
+        data = self._read_lora_registry()
+        active = data.get("active_version")
+        for record in data.get("versions", []):
+            if record.get("version_id") == active:
+                return record
+        return None
+
+    def rollback_lora_version(self, version_id: str = "") -> dict[str, Any]:
+        data = self._read_lora_registry()
+        versions = data.get("versions", [])
+        target = None
+        if version_id:
+            target = next((item for item in versions if item.get("version_id") == version_id), None)
+        elif len(versions) >= 2:
+            current = data.get("active_version")
+            previous = [item for item in versions if item.get("version_id") != current]
+            target = previous[-1] if previous else None
+        if not target:
+            raise ValueError("No LoRA version available for rollback")
+        data["active_version"] = target["version_id"]
+        data.setdefault("rollback_events", []).append({
+            "timestamp": _utc_iso(),
+            "version_id": target["version_id"],
+            "backend": target.get("backend", ""),
+            "notes": "active LoRA version changed",
+        })
+        data["rollback_events"] = data["rollback_events"][-100:]
+        self._write_lora_registry(data)
+        return target
 
     def build_vtv_context(self) -> str:
         parts: list[str] = []
