@@ -2,11 +2,14 @@
 # Bootstrap: inject the project venv's site-packages so all deps are available
 # regardless of which python3 binary invokes this script.
 import os as _os, sys as _sys, glob as _glob
-_venv_site = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
-                            "venv", "lib")
+_TESTS_DIR = _os.path.dirname(_os.path.abspath(__file__))
+_PROJ_ROOT = _os.path.dirname(_TESTS_DIR)
+_venv_site = _os.path.join(_PROJ_ROOT, "venv", "lib")
 for _sp in _glob.glob(_os.path.join(_venv_site, "python*", "site-packages")):
     if _sp not in _sys.path:
         _sys.path.insert(0, _sp)
+if _PROJ_ROOT not in _sys.path:
+    _sys.path.insert(0, _PROJ_ROOT)
 """
 weaver_tests.py — Unified Weaver Test Suite
 ════════════════════════════════════════════
@@ -53,9 +56,11 @@ import numpy as np
 from dotenv import load_dotenv
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
-PROJ = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VENV = os.path.join(PROJ, "venv", "bin", "python3")
-sys.path.insert(0, PROJ)
+PYTHON = VENV if os.path.exists(VENV) else sys.executable
+if PROJ not in sys.path:
+    sys.path.insert(0, PROJ)
 load_dotenv(os.path.join(PROJ, ".env"))
 
 BAR  = "─" * 66
@@ -114,7 +119,7 @@ async def _terminate(proc) -> None:
 
 async def _start_nexus() -> "asyncio.subprocess.Process":
     proc = await asyncio.create_subprocess_exec(
-        VENV, os.path.join(PROJ, "nexus_bus.py"),
+        PYTHON, os.path.join(PROJ, "nexus_bus.py"),
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
         cwd=PROJ,
@@ -166,19 +171,19 @@ def _http_get(url: str, timeout: int = 5) -> Tuple[Optional[int], str]:
 
 @register("unit", "quantum_parse")
 async def test_quantum_parse():
-    """quantum_soul.parse_counts: maps bit strings to pentagon pathways correctly."""
+    """quantum_soul.parse_counts: maps 12-bit Kingston core strings correctly."""
     qs = importlib.import_module("quantum_soul")
-    b1, a1, m1 = qs.parse_counts({"0000001": 7, "0000000": 1})
-    b2, a2, m2 = qs.parse_counts({"1000000": 5, "0000000": 1})
-    b3, a3, m3 = qs.parse_counts({"0000000": 9})
+    b1, a1, m1 = qs.parse_counts({"000000000001": 7, "000000000000": 1})
+    b2, a2, m2 = qs.parse_counts({"100000000000": 5, "000000000000": 1})
+    b3, a3, m3 = qs.parse_counts({"000000000000": 9})
     ok = (
-        b1 == "0000001" and a1 == ["Awakening"] and abs(m1["Awakening"] - 0.875) < 1e-6
-        and b2 == "1000000" and a2 == ["Void"]
-        and b3 == "0000000" and a3 == ["Void"]
+        b1 == "000000000001" and a1 == ["Logic"] and abs(m1["Logic"] - 0.875) < 1e-6
+        and b2 == "100000000000" and a2 == ["Meta-Reasoning"]
+        and b3 == "000000000000" and a3 == ["Stability"]
         and all(v == 0.0 for v in m3.values())
         and set(m1.keys()) == set(qs.PATHWAYS.values())
     )
-    return _res("quantum_parse", "quantum_soul.parse_counts: pentagon pathway mapping", ok,
+    return _res("quantum_parse", "quantum_soul.parse_counts: Kingston pathway mapping", ok,
                 f"bits={b1} active={a1}\nbits={b2} active={a2}\nbits={b3} active={a3}")
 
 @register("unit", "quantum_description")
@@ -186,12 +191,12 @@ async def test_quantum_description():
     """quantum_soul.build_description: sentence branches + state file write."""
     qs  = importlib.import_module("quantum_soul")
     base = {n: 0.0 for n in qs.PATHWAYS.values()}
-    s1 = qs.build_description("0000001", ["Awakening"],
-                               {**base, "Awakening": 0.91}, "be1")
-    s2 = qs.build_description("0010001", ["Awakening", "Weaver"],
-                               {**base, "Awakening": 0.55, "Weaver": 0.45}, "be2")
-    s3 = qs.build_description("0010101", ["Awakening", "Resonance", "Weaver"],
-                               {**base, "Weaver": 0.51, "Awakening": 0.44, "Resonance": 0.39}, "be3")
+    s1 = qs.build_description("000000000001", ["Logic"],
+                               {**base, "Logic": 0.91}, "be1")
+    s2 = qs.build_description("000100000001", ["Logic", "Language"],
+                               {**base, "Logic": 0.55, "Language": 0.45}, "be2")
+    s3 = qs.build_description("100100000001", ["Logic", "Language", "Meta-Reasoning"],
+                               {**base, "Meta-Reasoning": 0.51, "Logic": 0.44, "Language": 0.39}, "be3")
     tmp = tempfile.mkdtemp(prefix="wvr_qs_")
     old_v, old_s = qs.VAULT_DIR, qs.STATE_FILE
     write_ok = False
@@ -406,7 +411,7 @@ async def test_pineal_gate_sparse_topk():
 
 @register("unit", "quantum_net_topologies")
 async def test_quantum_net_topologies():
-    """QuantumNetworks: all 5 topologies produce valid (ctrl, tgt) CNOT pairs."""
+    """QuantumNetworks: Kingston topologies produce valid (ctrl, tgt) pairs."""
     from quantum_networks import EntanglementTopology
     details = []
     all_ok  = True
@@ -416,16 +421,16 @@ async def test_quantum_net_topologies():
         details.append(f"{name}: {len(pairs)} pairs {'✓' if valid else '✗'}")
         if not valid:
             all_ok = False
-    return _res("quantum_net_topologies", "QuantumNetworks: all 5 topologies valid", all_ok,
+    return _res("quantum_net_topologies", "QuantumNetworks: Kingston topologies valid", all_ok,
                 "\n".join(details))
 
 @register("unit", "quantum_variational_circuit")
 async def test_quantum_variational_circuit():
-    """VariationalFractureCircuit: 7-qubit, 3-layer pentagon gives 42 params."""
+    """VariationalFractureCircuit: 12-qubit, 3-layer Kingston core gives 72 params."""
     from quantum_networks import VariationalFractureCircuit
-    vc = VariationalFractureCircuit(n_qubits=7, n_layers=3, topology="pentagon")
+    vc = VariationalFractureCircuit(n_qubits=12, n_layers=3, topology="kingston_manifold")
     qc = vc.build()
-    ok = vc.param_count() == 42 and qc.num_qubits == 7
+    ok = vc.param_count() == 72 and qc.num_qubits == 12 and vc.architecture_summary()["total_qubits"] == 156
     return _res("quantum_variational_circuit",
                 f"VariationalFractureCircuit: params={vc.param_count()} qubits={qc.num_qubits}", ok)
 
@@ -433,9 +438,9 @@ async def test_quantum_variational_circuit():
 async def test_quantum_learner_fitness():
     """QuantumLearner.compute_fitness: returns float in (0, 1) from mock counts."""
     from quantum_networks import VariationalFractureCircuit, QuantumLearner
-    vc      = VariationalFractureCircuit(n_qubits=7, n_layers=3, topology="pentagon")
+    vc      = VariationalFractureCircuit(n_qubits=12, n_layers=3, topology="kingston_manifold")
     learner = QuantumLearner(vc)
-    fitness = learner.compute_fitness({"0000001": 200, "1000000": 150, "0111011": 100, "0000000": 50})
+    fitness = learner.compute_fitness({"000000000001": 200, "100000000000": 150, "011101100001": 100, "000000000000": 50})
     return _res("quantum_learner_fitness", f"QuantumLearner fitness={fitness:.4f}", 0.0 < fitness < 1.0)
 
 @register("unit", "quantum_interference_bias")
@@ -443,7 +448,7 @@ async def test_quantum_interference_bias():
     """QuantumInterferenceNetwork: routing bias covers all 5 dims, values in [0, 1]."""
     from quantum_networks import QuantumInterferenceNetwork
     ifn    = QuantumInterferenceNetwork()
-    biases = ifn.compute_routing_bias({"0000001": 200, "1000000": 150, "0111011": 100, "0000000": 50})
+    biases = ifn.compute_routing_bias({"000000000001": 200, "100000000000": 150, "011101100001": 100, "000000000000": 50})
     ok     = len(biases) == 5 and all(0.0 <= v <= 1.0 for v in biases.values())
     return _res("quantum_interference_bias", "QuantumInterferenceNetwork: 5-dim bias in [0,1]", ok,
                 f"biases={biases}")
@@ -714,7 +719,7 @@ async def test_nexus_port_collision():
     contender = None
     try:
         contender = await asyncio.create_subprocess_exec(
-            VENV, os.path.join(PROJ, "nexus_bus.py"),
+            PYTHON, os.path.join(PROJ, "nexus_bus.py"),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=PROJ,
         )
         try:
@@ -1217,7 +1222,7 @@ async def test_vtv_env_contract():
         f"    print(str(e))\n"
     )
     proc = await asyncio.create_subprocess_exec(
-        VENV, "-c", script,
+        PYTHON, "-c", script,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=PROJ,
     )
     out, _ = await proc.communicate()
@@ -1231,7 +1236,7 @@ async def test_mic_survival():
     """Mic stays live post-greeting: chunks_sent gains ≥500 within 120s of greeting."""
     import re
     proc = await asyncio.create_subprocess_exec(
-        VENV, os.path.join(PROJ, "weaver.py"),
+        PYTHON, os.path.join(PROJ, "weaver.py"),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, cwd=PROJ,
     )
     greeting_at = baseline = peak = 0
@@ -1263,7 +1268,7 @@ async def test_mic_hold_timing():
     """Mic re-enables within 10s of TTS completion (measured by MIC PROBE log lines)."""
     import re
     proc = await asyncio.create_subprocess_exec(
-        VENV, os.path.join(PROJ, "weaver.py"),
+        PYTHON, os.path.join(PROJ, "weaver.py"),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, cwd=PROJ,
     )
     tts_at = mic_at = None

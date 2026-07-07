@@ -39,17 +39,20 @@ cp terraform.tfvars.example terraform.tfvars
 #   → edit: set ssh_ingress_cidr to "$(curl -s ifconfig.me)/32", confirm public_key_path
 terraform init
 terraform apply            # review the plan, type "yes"
-terraform output           # note: hostname (<EIP>.sslip.io), public_ip, ssh_command
+terraform output           # note: public_ip, ssh_command, and public_urls
 ```
 
 This creates: 1× `t4g.large` (Ubuntu 24.04 arm64, IMDSv2, encrypted gp3), an Elastic IP, a
 key pair, and a Security Group that opens **only 22 (your IP) + 80/443**. Everything Weaver
-exposes internally (9999/8899/8090/8000/9996/9997) stays localhost-only — `lora_server`
+exposes internally (9999/8899/8090/8091/8000/9996/9997) stays localhost-only — `lora_server`
 binds `0.0.0.0`, so an open port would be an exposed model endpoint.
 
-Set a shell var for the rest of this guide:
+Set shell vars for the rest of this guide:
 ```bash
-export ORACLE_HOST="$(terraform output -raw hostname)"   # e.g. 203.0.113.4.sslip.io
+export ORACLE_HOST=weaverv3.com
+export WEAVER_HEADLESS_HOST=headless.weaverv3.com
+export WEAVER_DASH_HOST=dash.weaverv3.com
+export WEAVER_STATUS_HOST=status.weaverv3.com
 export BOX="ubuntu@$(terraform output -raw public_ip)"
 cd -
 ```
@@ -88,7 +91,10 @@ bash deploy/setup_oracle.sh           # venv + ARM-safe deps + llama-cpp-python(
 ## 4. Wire the full public stack (experts + Oracle backend/frontend + Caddy)
 
 ```bash
-export ORACLE_HOST=<EIP>.sslip.io          # the terraform output from step 0
+ORACLE_HOST=weaverv3.com \
+WEAVER_HEADLESS_HOST=headless.weaverv3.com \
+WEAVER_DASH_HOST=dash.weaverv3.com \
+WEAVER_STATUS_HOST=status.weaverv3.com \
 CLOUD=aws bash deploy/setup_oracle_extras.sh
 #   → then edit ~/oracle/backend/.env: ORACLE_SECRET_KEY, ORACLE_ENCRYPTION_MASTER_KEY,
 #     ORACLE_ADMIN_ID/PASSPHRASE, and keep ORACLE_ENABLE_DEMO_LOGINS=0
@@ -107,57 +113,95 @@ This installs + starts four units: `weaver-llm` (experts :8090), `weaver` (`--he
 # on the box — all four green:
 journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f
 curl 127.0.0.1:8090/v1/models          # experts server up
+curl 127.0.0.1:8091/health             # read-only codebase API up
 curl 127.0.0.1:8000/health             # oracle backend up
 
 # from your laptop:
-#   https://<EIP>.sslip.io   → Oracle UI loads, valid Let's Encrypt cert, wss://.../ws connects
+#   https://weaverv3.com            → embodied avatar
+#   https://headless.weaverv3.com   → headless quantum presence
+#   https://dash.weaverv3.com       → protected operator dashboard
+#   https://status.weaverv3.com     → protected health dashboard
 ```
 
-**Security:** `9999`/`8899`/`8090`/`8000`/`9996`/`9997` stay localhost-only — only `443`/`22`
+**Security:** `9999`/`8899`/`8090`/`8091`/`8000`/`9996`/`9997` stay localhost-only — only `443`/`22`
 are reachable. Before going public: set `ORACLE_SECRET_KEY` + `ORACLE_ENCRYPTION_MASTER_KEY`,
 an admin login, and keep `ORACLE_ENABLE_DEMO_LOGINS=0`.
 
+`/codebase/*` is proxied through Caddy to `127.0.0.1:8091` and requires the same
+`X-Weaver-Key` as `/llm/*`. It is read-only and serves capped, redacted source/doc
+snippets only; `.env`, vaults, models, assets, Terraform plans, hidden files, and large
+artifacts are excluded. `weaver.service` sets `WEAVER_CODEBASE_ROOT=/home/ubuntu/weaver`
+so Weaver can inspect the deployed source tree rather than only the `windsurf-project`
+subfolder. Both `weaver.service` and `weaver-brain.service` set
+`WEAVER_VAULT_DIR=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault`
+so headless cognition, quantum state, browser memory, and Akashic persistence use one
+shared vault across restarts.
+
 ---
 
-## Optional: put it on your own domain (e.g. weaverv3.com)
+## Production URLs
 
-The stack is **domain-agnostic** — the `Caddyfile` serves `{$ORACLE_HOST}` and
-`setup_oracle_extras.sh` bakes that host into the Vite build **and** Caddy's env
-(`/etc/default/caddy`). A custom domain is therefore **just DNS + a re-run, no
-code change**. The Elastic IP (`terraform output -raw public_ip`) is stable, so
-the DNS record never churns.
+The current production DNS records all point at the Elastic IP:
 
-1. **Register the domain** — this is a purchase, done at a registrar (it cannot be
-   scripted from here). Cloudflare Registrar is at-cost (~$10/yr, free DNS);
-   Route53 is ~$13/yr + $0.50/mo per hosted zone and needs the `route53domains`
-   IAM policy attached to your user.
+| URL | Purpose |
+|---|---|
+| `https://weaverv3.com` | embodied avatar UI |
+| `https://headless.weaverv3.com` | headless 3D quantum presence |
+| `https://dash.weaverv3.com` | protected live operator dashboard |
+| `https://status.weaverv3.com` | protected health dashboard |
+| `https://weaverv3.com/brain/*` | key-gated Bedrock brain API |
+| `wss://weaverv3.com/brain/realtime/voice` | Nova Sonic realtime voice |
+| `https://weaverv3.com/tts/*` | key-gated AWS Polly TTS |
+| `https://weaverv3.com/codebase/*` | key-gated read-only source context |
 
-2. **Point the apex at the box.** At your DNS host create:
+The Elastic IP (`terraform output -raw public_ip`) is stable, so these DNS
+records should not churn.
 
-   | Type | Name | Value |
-   |---|---|---|
-   | A | `@` (the apex, e.g. `weaverv3.com`) | `<Elastic IP>` |
+## DNS Maintenance
 
-   Then verify from your laptop **before** step 3 — ACME will fail until it
-   resolves (the Security Group already opens 80/443):
-   ```bash
-   dig +short weaverv3.com        # must print the Elastic IP
-   ```
-   (`www` is optional and needs its own redirect block — Caddy's `{$ORACLE_HOST}`
-   is a single canonical host, and the Vite build bakes exactly one API base.)
+At your DNS host, keep these records pointed at the Elastic IP:
 
-3. **Flip the box to the new host** — rebakes the SPA + rewrites Caddy's env
-   (idempotent; safe to re-run):
-   ```bash
-   ssh "$BOX"
-   cd ~/weaver/CascadeProjects/windsurf-project
-   ORACLE_HOST=weaverv3.com CLOUD=aws bash deploy/setup_oracle_extras.sh
-   sudo systemctl reload caddy    # Caddy auto-issues the Let's Encrypt cert for the new host
-   ```
+| Type | Name | Value |
+|---|---|---|
+| A | `@` (the apex, e.g. `weaverv3.com`) | `<Elastic IP>` |
+| A | `headless` | `<Elastic IP>` |
+| A | `dash` | `<Elastic IP>` |
+| A | `status` | `<Elastic IP>` |
 
-4. **Verify:** `https://weaverv3.com` loads the Oracle UI with a valid cert and
-   `wss://weaverv3.com/ws` connects. The old `<EIP>.sslip.io` stops being the
-   canonical host — bookmark the domain.
+Then verify from your laptop. Each command should print the Elastic IP:
+
+```bash
+dig +short weaverv3.com
+dig +short headless.weaverv3.com
+dig +short dash.weaverv3.com
+dig +short status.weaverv3.com
+```
+
+`www.weaverv3.com` is intentionally not listed unless you add DNS for it and a
+redirect block in Caddy.
+
+The Terraform `hostname` output remains useful for a brand-new box before custom
+DNS is ready. Use it only as a temporary sslip.io bootstrap host; the canonical
+Weaver URLs above are the production paths.
+
+## Reapply Canonical URLs
+
+To rewrite the box env and reload Caddy after a host change:
+
+```bash
+ssh "$BOX"
+cd ~/weaver/CascadeProjects/windsurf-project
+ORACLE_HOST=weaverv3.com \
+WEAVER_HEADLESS_HOST=headless.weaverv3.com \
+WEAVER_DASH_HOST=dash.weaverv3.com \
+WEAVER_STATUS_HOST=status.weaverv3.com \
+CLOUD=aws bash deploy/setup_oracle_extras.sh
+sudo systemctl reload caddy
+```
+
+Verify: `https://weaverv3.com`, `https://headless.weaverv3.com`,
+`https://dash.weaverv3.com`, and `https://status.weaverv3.com` all load with
+valid certs.
 
 ---
 

@@ -8,7 +8,7 @@ Saves voice embeddings to voice_registry.npz alongside face embeddings.
 Usage:
     from voice_recognition import VoiceRecognizer
 
-    recognizer = VoiceRecognizer("Nexus_Vault")
+    recognizer = VoiceRecognizer()
 
     # Register a voice
     await recognizer.register_voice("Nate", audio_samples=[audio1, audio2, audio3])
@@ -21,18 +21,18 @@ Usage:
 import asyncio
 import base64
 import os
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 import httpx
 import numpy as np
+from memory_manager import resolve_vault_dir
 
 
 class VoiceRecognizer:
     """Speaker identification using OpenAI audio embeddings."""
 
-    def __init__(self, vault_dir: str = "Nexus_Vault", api_key: Optional[str] = None):
-        self.vault_dir = Path(vault_dir)
+    def __init__(self, vault_dir: str | os.PathLike[str] | None = None, api_key: Optional[str] = None):
+        self.vault_dir = resolve_vault_dir(vault_dir)
         self.vault_dir.mkdir(parents=True, exist_ok=True)
         self.registry_path = self.vault_dir / "voice_registry.npz"
 
@@ -141,7 +141,7 @@ class VoiceRecognizer:
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _example():
-    recognizer = VoiceRecognizer("Nexus_Vault")
+    recognizer = VoiceRecognizer()
 
     # Mock audio samples (in reality these would be from phone calls)
     sample1 = base64.b64encode(b"mock_audio_nate_sample_1").decode()

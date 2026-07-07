@@ -23,6 +23,14 @@ CascadeProjects/windsurf-project/pretrain_moe/kaggle_smoke/
 avatar/*.glb
 avatar/*.blend
 avatar/*.blend1
+avatar/assets/
+avatar/**/*.zip
+avatar/renders/
+
+# Terraform plan files
+*.tfplan
+tfplan
+
 
 # Python / IDE / local-agent cruft
 __pycache__/

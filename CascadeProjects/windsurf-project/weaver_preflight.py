@@ -9,16 +9,16 @@ Called by: make preflight, weaver.py startup
 import os
 import socket
 import sys
+from memory_manager import default_vault_dir
 
 PROJ = os.path.dirname(os.path.abspath(__file__))
 
-REQUIRED_ENV = [
-    ("WEAVER_VOICE_KEY", "OpenAI Realtime + voice"),
-    ("WEAVER_MEM_KEY", "Memory/summarization calls"),
-]
-
 OPTIONAL_ENV = [
-    ("WEAVER_VISION_KEY", "Vision model (gpt-4o)"),
+    ("MANTLE_API_KEY", "AWS Mantle primary model gateway"),
+    ("WEAVER_LOCAL_LLM_URL", "on-box local expert fallback"),
+    ("WEAVER_VOICE_KEY", "legacy OpenAI realtime/phone bridge"),
+    ("WEAVER_MEM_KEY", "legacy OpenAI/Azure expert backend"),
+    ("WEAVER_VISION_KEY", "legacy vision model"),
     ("GEMINI_API_KEY", "Gemini vision"),
     ("IBM_QUANTUM_TOKEN", "IBM Quantum hardware"),
     ("TWILIO_ACCOUNT_SID", "Twilio telephony"),
@@ -37,13 +37,9 @@ PORTS = [
     (8899, "LoRA Server"),
     (8898, "Qwen3B Server"),
     (8765, "Phone Bridge"),
+    (8091, "Codebase API"),
     (5679, "Obsidian Bridge"),
     (5678, "n8n Workflow"),
-]
-
-VAULT_DIRS = [
-    "Nexus_Vault",
-    "Nexus_Vault/akashic_persist",
 ]
 
 CRITICAL_FILES = [
@@ -82,13 +78,30 @@ def preflight_check(verbose: bool = True) -> dict:
     else:
         results["errors"].append(".env not found — run: cp .env.example .env")
 
-    # ── Required env vars ──
-    for var, desc in REQUIRED_ENV:
-        val = os.environ.get(var, "")
-        if val and not val.startswith("sk-..."):
-            results["ok"].append(f"{var} set")
+    # ── Backend-specific env vars ──
+    backend = os.environ.get("WEAVER_LLM_BACKEND", "mantle").lower()
+    results["ok"].append(f"WEAVER_LLM_BACKEND={backend}")
+    if backend == "mantle":
+        if os.environ.get("MANTLE_API_KEY", ""):
+            results["ok"].append("MANTLE_API_KEY set")
         else:
-            results["errors"].append(f"{var} missing or placeholder ({desc})")
+            results["errors"].append("MANTLE_API_KEY missing (required for WEAVER_LLM_BACKEND=mantle)")
+    elif backend == "local":
+        results["ok"].append("local backend selected; no cloud model key required")
+    elif backend == "gemini":
+        if os.environ.get("GEMINI_API_KEY", ""):
+            results["ok"].append("GEMINI_API_KEY set")
+        else:
+            results["errors"].append("GEMINI_API_KEY missing (required for WEAVER_LLM_BACKEND=gemini)")
+    elif backend == "bedrock":
+        results["ok"].append("bedrock backend selected; AWS credentials/instance role are checked at call time")
+    elif backend == "azure":
+        if os.environ.get("AZURE_OPENAI_KEY", "") and os.environ.get("AZURE_OPENAI_ENDPOINT", ""):
+            results["ok"].append("AZURE_OPENAI_KEY/AZURE_OPENAI_ENDPOINT set")
+        else:
+            results["errors"].append("AZURE_OPENAI_KEY and AZURE_OPENAI_ENDPOINT required for legacy azure backend")
+    else:
+        results["errors"].append(f"Unknown WEAVER_LLM_BACKEND={backend!r}")
 
     # ── Optional env vars ──
     for var, desc in OPTIONAL_ENV:
@@ -106,16 +119,20 @@ def preflight_check(verbose: bool = True) -> dict:
             results["warnings"].append(f"Port {port} ({svc}) already in use")
 
     # ── Vault directories ──
-    for d in VAULT_DIRS:
-        full = os.path.join(PROJ, d)
+    vault_dirs = [
+        default_vault_dir(),
+        default_vault_dir() / "akashic_persist",
+    ]
+    for d in vault_dirs:
+        full = str(d)
         if os.path.isdir(full):
-            results["ok"].append(f"{d}/ exists")
+            results["ok"].append(f"{full}/ exists")
         else:
             try:
                 os.makedirs(full, exist_ok=True)
-                results["ok"].append(f"{d}/ created")
+                results["ok"].append(f"{full}/ created")
             except OSError as e:
-                results["errors"].append(f"Cannot create {d}/: {e}")
+                results["errors"].append(f"Cannot create {full}/: {e}")
 
     # ── Critical files ──
     for f in CRITICAL_FILES:

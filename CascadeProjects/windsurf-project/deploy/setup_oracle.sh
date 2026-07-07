@@ -37,7 +37,8 @@ fi
 # left Nexus Bus / MoE router / Obsidian bridge dark on the first cloud run. These are
 # pure-Python (ARM wheels) and non-negotiable for the headless brain.
 echo "▶ Core brain runtime deps (explicit — survive a partial requirements failure)"
-venv/bin/pip install --upgrade websockets scikit-learn aiohttp watchdog httpx numpy
+venv/bin/pip install --upgrade websockets scikit-learn aiohttp watchdog httpx numpy boto3 \
+    "aws-sdk-bedrock-runtime>=0.7.0" "smithy-aws-core>=0.7.0"
 
 echo "▶ Inference deps: OpenAI client + llama-cpp-python (built with OpenBLAS)"
 venv/bin/pip install --upgrade "openai>=1.40" python-dotenv

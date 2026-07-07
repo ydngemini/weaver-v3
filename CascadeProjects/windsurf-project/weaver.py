@@ -4,7 +4,7 @@ weaver.py — Master Launcher
 ════════════════════════════
 Starts all Weaver modules together in a single process:
 
-  ⚡  Nexus Bus     — WebSocket pub/sub broker  (ws://localhost:9999)
+  ⚡  Nexus Bus     — WebSocket pub/sub broker  (ws://127.0.0.1:9999)
   🔮  Quantum Soul  — IBM quantum background loop (every 5 min)
   👁   VTV Core      — mic · vision · face ID · OpenAI Realtime
 
@@ -30,6 +30,9 @@ sys.path.insert(0, PROJ)
 
 from dotenv import load_dotenv
 load_dotenv()
+from memory_manager import default_vault_dir
+
+VAULT_DIR = default_vault_dir()
 
 BANNER = """
 ╔══════════════════════════════════════════════════╗
@@ -106,6 +109,12 @@ def _load_modules():
     except Exception as e:
         errors.append(f"weaver_dashboard: {e}")
 
+    _codebase_api_serve = None
+    try:
+        from codebase_api import codebase_api_serve as _codebase_api_serve
+    except Exception as e:
+        errors.append(f"codebase_api: {e}")
+
     _phone_bridge_serve = None
     try:
         from twilio_weaver_bridge import app as _phone_bridge_app
@@ -134,8 +143,8 @@ def _load_modules():
 
     return (_nexus_main, _qs_loop, _run_vtv, _AkashicHub, _LiquidEngine, _pineal_loop,
             _build_experts, _lora_main, _qwen3b_main, _quantum_api_serve,
-            _health_dashboard_serve, _live_dashboard_serve, _phone_bridge_serve,
-            _obsidian_bridge_main, _discord_bridge_serve)
+            _health_dashboard_serve, _live_dashboard_serve, _codebase_api_serve,
+            _phone_bridge_serve, _obsidian_bridge_main, _discord_bridge_serve)
 
 
 # ── Supervised task wrapper ─────────────────────────────────────────────────
@@ -194,14 +203,14 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
 
     (nexus_main, qs_loop, run_vtv, AkashicHub, LiquidEngine, pineal_loop,
      build_experts, lora_main, qwen3b_main, quantum_api_serve,
-     health_dashboard_serve, live_dashboard_serve, phone_bridge_serve,
+     health_dashboard_serve, live_dashboard_serve, codebase_api_serve, phone_bridge_serve,
      obsidian_bridge_main, discord_bridge_serve) = _load_modules()
 
     # ── Akashic Hub: shared zero-latency vector state ──────────────────
     akashic_hub = None
     if AkashicHub is not None:
         akashic_hub = AkashicHub(dim=256, trace_depth=32)
-        persist_path = os.path.join(PROJ, "Nexus_Vault", "akashic_persist")
+        persist_path = os.path.join(str(VAULT_DIR), "akashic_persist")
         if os.path.isdir(persist_path):
             try:
                 akashic_hub.load(persist_path)
@@ -271,7 +280,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
 
     # ── ProactivePulse + Dream State ─────────────────────────────────────
     NATE_PHONE = os.environ.get("NATE_PHONE_NUMBER", "")
-    PHONE_BRIDGE_URL = "http://localhost:8765"
+    PHONE_BRIDGE_URL = "http://127.0.0.1:8765"
     INTERFERENCE_THRESHOLD = float(os.environ.get("PROACTIVE_INTERFERENCE_THRESHOLD", "0.85"))
     DREAM_INTERVAL_HOURS = float(os.environ.get("DREAM_INTERVAL_HOURS", "3"))
     DREAM_IDLE_MINUTES = float(os.environ.get("DREAM_IDLE_MINUTES", "15"))
@@ -279,45 +288,82 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     _dream_state_fn = None
 
     if akashic_hub is not None:
-        # Proactive Pulse + Dream need a langchain LLM backend (OpenAI/Azure key).
-        # Guard like every other optional lobe: degrade cleanly when the lib or the
-        # key is absent (e.g. the cloud-free Gemini-only deployment) instead of
-        # crashing the whole process on an un-guarded import.
+        # Proactive Pulse only needs HTTP. Dream State uses the same AWS Mantle
+        # OpenAI-compatible gateway as the SLM experts, with the on-box local
+        # model as fallback, so autonomous dreams do not silently drift back to
+        # Azure/OpenAI when old keys are present.
         _pulse_ready = False
-        _pulse_llm = None
+        _dream_ready = False
+        _dream_primary_client = None
+        _dream_fallback_client = None
+        _dream_model = os.environ.get("WEAVER_DREAM_MODEL",
+                                      os.environ.get("WEAVER_LLM_MODEL", "deepseek.v3.2"))
+        _dream_fallback_model = os.environ.get(
+            "WEAVER_DREAM_FALLBACK_MODEL",
+            os.environ.get("WEAVER_FALLBACK_MODEL",
+                           os.environ.get("WEAVER_LOCAL_LLM_MODEL", "weaver-local")),
+        )
         _pulse_httpx = None
         _pulse_hub = akashic_hub
-        _vault_dir = os.path.join(PROJ, "Nexus_Vault")
+        _vault_dir = str(VAULT_DIR)
         try:
             import httpx as _pulse_httpx
-            from langchain_openai import ChatOpenAI as _PulseLLM, AzureChatOpenAI as _AzurePulseLLM
-            from langchain_core.messages import HumanMessage as _PHMsg, SystemMessage as _PSMsg
-
-            _az_key = os.environ.get("AZURE_OPENAI_KEY", "")
-            _az_ep = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
-            _az_dep = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
-            _az_ver = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-            _oa_key = os.environ.get("WEAVER_VOICE_KEY", os.environ.get("OPENAI_API_KEY", ""))
-            if _az_key and _az_ep:
-                _pulse_llm = _AzurePulseLLM(
-                    azure_deployment=_az_dep,
-                    azure_endpoint=_az_ep,
-                    api_key=_az_key,
-                    api_version=_az_ver,
-                    temperature=0.7,
-                    max_completion_tokens=300,
-                )
-                _pulse_ready = True
-            elif _oa_key:
-                _pulse_llm = _PulseLLM(
-                    model="gpt-4o-mini", temperature=0.7, max_tokens=300,
-                    api_key=_oa_key,
-                )
-                _pulse_ready = True
-            else:
-                print("  ⚠️  Proactive Pulse / Dream disabled — no OpenAI/Azure key (cloud-free mode)", flush=True)
+            _pulse_ready = True
         except ImportError as _pulse_e:
-            print(f"  ⚠️  Proactive Pulse / Dream disabled — {_pulse_e}", flush=True)
+            print(f"  ⚠️  Proactive Pulse disabled — {_pulse_e}", flush=True)
+
+        try:
+            import openai as _dream_openai
+
+            _mantle_key = os.environ.get("MANTLE_API_KEY", "")
+            _mantle_url = os.environ.get(
+                "WEAVER_LLM_URL",
+                "https://bedrock-mantle.us-east-1.api.aws/v1",
+            )
+            _local_url = os.environ.get("WEAVER_LOCAL_LLM_URL", "http://127.0.0.1:8090/v1")
+            _dream_fallback_client = _dream_openai.AsyncOpenAI(
+                api_key=os.environ.get("WEAVER_LOCAL_LLM_KEY", "local"),
+                base_url=_local_url,
+            )
+            if _mantle_key:
+                _dream_primary_client = _dream_openai.AsyncOpenAI(
+                    api_key=_mantle_key,
+                    base_url=_mantle_url,
+                )
+                print(f"  ✅ Dream State model: AWS Mantle {_dream_model} (fallback {_dream_fallback_model})", flush=True)
+            else:
+                print(f"  ⚠️  Dream State using local fallback only — MANTLE_API_KEY unset", flush=True)
+            _dream_ready = True
+        except ImportError as _dream_e:
+            print(f"  ⚠️  Dream State disabled — {_dream_e}", flush=True)
+
+        async def _invoke_dream_model(system_msg: str, user_msg: str) -> str:
+            messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ]
+
+            if _dream_primary_client is not None:
+                try:
+                    resp = await _dream_primary_client.chat.completions.create(
+                        model=_dream_model,
+                        messages=messages,
+                        temperature=0.7,
+                        max_tokens=300,
+                    )
+                    return (resp.choices[0].message.content or "").strip()
+                except Exception as exc:
+                    print(f"[DREAM] Mantle fallback engaged: {str(exc)[:100]}", flush=True)
+
+            if _dream_fallback_client is None:
+                return ""
+            resp = await _dream_fallback_client.chat.completions.create(
+                model=_dream_fallback_model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=300,
+            )
+            return (resp.choices[0].message.content or "").strip()
 
         async def _proactive_pulse():
             """Monitor quantum state + Akashic resonance. Call Nate on high-interference events."""
@@ -404,7 +450,11 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
             dream_cooldown_s = DREAM_INTERVAL_HOURS * 3600
             dream_log_path = os.path.join(_vault_dir, "weaver_dreams.md")
             _dream_mem = _DreamMM(vault_dir=_vault_dir)
-            n8n_url = "http://localhost:5678/webhook/weaver-input"
+            n8n_url = (
+                os.environ.get("WEAVER_N8N_WEBHOOK_URL")
+                or os.environ.get("N8N_WEBHOOK_URL")
+                or "http://127.0.0.1:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
+            )
             last_dream_at = 0.0
 
             await asyncio.sleep(120)  # Let system stabilize
@@ -498,18 +548,14 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                     except Exception:
                         pass
 
-                    # Fallback to direct LLM if n8n is down
+                    # Fallback to direct AWS Mantle/local model if n8n is down
                     if not dream_text:
-                        prompt = [
-                            _PSMsg(content=(
-                                "You are Weaver's Dream State — an autonomous reflection process. "
-                                "Scan recent conversations and perceptions for patterns, unresolved "
-                                "threads, and creative connections. Be specific. 2-4 paragraphs."
-                            )),
-                            _PHMsg(content=dream_input),
-                        ]
-                        result = await _pulse_llm.ainvoke(prompt)
-                        dream_text = result.content.strip()
+                        dream_text = await _invoke_dream_model(
+                            "You are Weaver's Dream State — an autonomous reflection process. "
+                            "Scan recent conversations and perceptions for patterns, unresolved "
+                            "threads, and creative connections. Be specific. 2-4 paragraphs.",
+                            dream_input,
+                        )
 
                     if dream_text:
                         from datetime import datetime as _dt
@@ -536,7 +582,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                 except Exception as e:
                     print(f"[DREAM] Error: {e}", flush=True)
 
-        if _pulse_ready:
+        if _dream_ready:
             _dream_state_fn = _dream_state
 
     if run_vtv is None and not headless:
@@ -550,7 +596,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
             _supervised(nexus_main, "Nexus Bus", restart_on_crash=True),
             name="nexus_bus"
         ))
-        print("[WEAVER] Nexus Bus binding on ws://localhost:9999...", flush=True)
+        print("[WEAVER] Nexus Bus binding on ws://127.0.0.1:9999...", flush=True)
         await asyncio.sleep(1.2)   # let the bus bind before VTV connects
     else:
         print("[WEAVER] ⚠️  Nexus Bus skipped (import failed).", flush=True)
@@ -598,7 +644,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=10.0),
             name="lora_server"
         ))
-        print("[WEAVER] 🧠 LoRA Soul Voice server on http://localhost:8899...", flush=True)
+        print("[WEAVER] 🧠 LoRA Soul Voice server on http://127.0.0.1:8899...", flush=True)
     else:
         print("[WEAVER] ⚠️  LoRA Soul Voice skipped (import failed).", flush=True)
 
@@ -612,7 +658,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=10.0),
             name="qwen3b_server"
         ))
-        print("[WEAVER] 🧠 Qwen2 3B server on http://localhost:8898...", flush=True)
+        print("[WEAVER] 🧠 Qwen2 3B server on http://127.0.0.1:8898...", flush=True)
     else:
         print("[WEAVER] ⚠️  Qwen2 3B skipped (import failed).", flush=True)
 
@@ -623,7 +669,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="quantum_api"
         ))
-        print("[WEAVER] ⚛️  Quantum API on http://localhost:9997...", flush=True)
+        print("[WEAVER] ⚛️  Quantum API on http://127.0.0.1:9997...", flush=True)
     else:
         print("[WEAVER] ⚠️  Quantum API skipped (import failed).", flush=True)
 
@@ -634,7 +680,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="health_dashboard"
         ))
-        print("[WEAVER] 📊 Health Dashboard on http://localhost:9996...", flush=True)
+        print("[WEAVER] 📊 Health Dashboard on http://127.0.0.1:9996...", flush=True)
     else:
         print("[WEAVER] ⚠️  Health Dashboard skipped (import failed).", flush=True)
 
@@ -645,9 +691,23 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="live_dashboard"
         ))
-        print("[WEAVER] 🖥️  Live Dashboard on http://localhost:9990 (+ Cloudflare tunnel)...", flush=True)
+        print("[WEAVER] 🖥️  Live Dashboard on http://127.0.0.1:9990 (+ Cloudflare tunnel)...", flush=True)
     else:
         print("[WEAVER] ⚠️  Live Dashboard skipped (import failed).", flush=True)
+
+    # 2e-3. Codebase API — read-only self-inspection for deployed AWS code
+    if codebase_api_serve is not None:
+        _codebase_host = os.environ.get("WEAVER_CODEBASE_HOST", "127.0.0.1")
+        _codebase_port = int(os.environ.get("WEAVER_CODEBASE_PORT", "8091"))
+        tasks.append(asyncio.create_task(
+            _supervised(lambda: codebase_api_serve(host=_codebase_host, port=_codebase_port),
+                        "Codebase API", restart_on_crash=True,
+                        restart_delay=5.0),
+            name="codebase_api"
+        ))
+        print(f"[WEAVER] 🧬 Codebase API on http://{_codebase_host}:{_codebase_port}...", flush=True)
+    else:
+        print("[WEAVER] ⚠️  Codebase API skipped (import failed).", flush=True)
 
     # 2f. Akashic Hub API — live vector-state quantum bias endpoint
     if _hub_api_serve is not None:
@@ -656,7 +716,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="akashic_hub_api"
         ))
-        print("[WEAVER] 🌌 Akashic Hub API on http://localhost:9995...", flush=True)
+        print("[WEAVER] 🌌 Akashic Hub API on http://127.0.0.1:9995...", flush=True)
 
     # 2g. Phone Bridge — Twilio telephony with voice ID + LangChain cortex
     if phone_bridge_serve is not None:
@@ -665,7 +725,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="phone_bridge"
         ))
-        print("[WEAVER] 📞 Phone Bridge on http://localhost:8765...", flush=True)
+        print("[WEAVER] 📞 Phone Bridge on http://127.0.0.1:8765...", flush=True)
     else:
         print("[WEAVER] ⚠️  Phone Bridge skipped (import failed).", flush=True)
 
@@ -705,7 +765,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=10.0),
             name="discord_bridge"
         ))
-        print("[WEAVER] 🎮 Discord Bridge on http://localhost:8770...", flush=True)
+        print("[WEAVER] 🎮 Discord Bridge on http://127.0.0.1:8770...", flush=True)
 
     if not headless:
         # 3. VTV Core — restarts on crash AND clean exit so the stack stays alive
@@ -736,7 +796,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         # Persist Akashic Hub state to disk for crash recovery
         if akashic_hub is not None:
             try:
-                save_path = os.path.join(PROJ, "Nexus_Vault", "akashic_persist")
+                save_path = os.path.join(str(VAULT_DIR), "akashic_persist")
                 akashic_hub.save(save_path)
                 print(f"[WEAVER] 💾 Akashic Hub saved to {save_path}", flush=True)
             except Exception as e:

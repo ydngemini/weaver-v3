@@ -42,7 +42,7 @@ from aiohttp import web
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent, FileCreatedEvent
 from watchdog.observers import Observer
 
-from memory_manager import MemoryManager
+from memory_manager import MemoryManager, default_vault_dir
 
 NEXUS_TOPICS = ["quantum_state", "gate_decision", "lobe_status", "transcript", "phone_transcript",
                  "dream_state", "sms_exchange", "proactive_pulse"]
@@ -201,8 +201,7 @@ def _get_memory() -> MemoryManager:
     """Lazy-init the global MemoryManager instance."""
     global _memory
     if _memory is None:
-        vault_dir = os.path.join(PROJ, "Nexus_Vault")
-        _memory = MemoryManager(vault_dir=vault_dir)
+        _memory = MemoryManager(vault_dir=default_vault_dir())
     return _memory
 
 

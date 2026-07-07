@@ -43,7 +43,8 @@ python3 test_deep_research.py             # Deep research tests
 ```bash
 python3 -m venv venv
 venv/bin/pip install -r venv/requirements.txt
-# Copy .env and fill in API keys (OpenAI, Gemini, IBM Quantum)
+# Copy .env and fill in MANTLE_API_KEY for AWS/Mantle primary models.
+# Optional legacy integrations use their own env vars.
 ```
 
 ## Architecture
@@ -65,12 +66,12 @@ The system starts in `weaver.py`, which launches all lobes as supervised async t
 
 ```
 Microphone/Camera/n8n Webhook
-  → vtv_basic.py  (Gemini 2.5 vision, OpenAI Realtime API, face ID)
+  → vtv_basic.py  (perception loop, optional legacy realtime/vision, face ID)
   → nexus_bus.py  (WebSocket pub/sub, topic routing)
   → akashic_hub.py (zero-latency shared vector state, cosine-similarity queries)
   → liquid_fracture.py (decomposes input into 5 semantic shards via LTC time-constants)
   → pineal_gate.py (pentagon-geometry MoE router, interference-weighted collapse)
-  → slm_experts.py (5x gpt-4o-mini lobes: Logic/Emotion/Memory/Creativity/Vigilance)
+  → slm_experts.py (5x AWS/Mantle DeepSeek lobes with on-box local fallback)
   → lora_server.py (1B Llama LoRA "Soul Voice" personality filter)
   → n8n workflow  (orchestrates the full pipeline via webhooks)
   → obsidian_bridge.py (bidirectional Obsidian Vault sync)
@@ -86,13 +87,13 @@ Microphone/Camera/n8n Webhook
 | `vtv_basic.py` | Real-time audio/video/face perception (1379 LOC) |
 | `pineal_gate.py` | Pentagon-geometry MoE router; wave-collapse merge |
 | `liquid_fracture.py` | Fracture Principle engine; LTC dynamic time-constants |
-| `slm_experts.py` | 5 dimension-tuned OpenAI expert calls |
+| `slm_experts.py` | 5 dimension-tuned Mantle/Bedrock/local/Gemini/Azure expert calls |
 | `quantum_soul.py` | IBM Quantum 7-qubit GHZ; pathway biases expert routing |
 | `quantum_networks.py` | Extended topologies: ring/star/full/layered/pentagon |
 | `lora_server.py` | OpenAI-compatible API wrapping 4-bit quantized LoRA |
 | `quantum_api.py` | HTTP API serving quantum state/bias to all lobes (port 9997) |
 | `health_dashboard.py` | Traffic-light HTML dashboard for all lobes (port 9996) |
-| `twilio_weaver_bridge.py` | Phone bridge: Twilio + OpenAI RT + voice ID + LangChain (port 8765) |
+| `twilio_weaver_bridge.py` | Optional legacy phone bridge: Twilio + realtime voice + voice ID (port 8765) |
 | `memory_manager.py` | Unified memory: people + conversations + Akashic persistence |
 | `voice_recognition.py` | Speaker identification via audio embeddings |
 | `obsidian_bridge.py` | File-watcher + webhook for Obsidian Vault sync |
@@ -110,10 +111,12 @@ Microphone/Camera/n8n Webhook
 
 ## External Services
 
-- **OpenAI** — `gpt-4o-mini` for all 5 expert lobes; Realtime API for audio
-- **Google Gemini** — `gemini-2.5-flash` (real-time vision), `gemini-2.5-pro` (diary)
-- **IBM Quantum Platform** — 7-qubit hardware execution (5-min cycle)
-- **n8n** — workflow orchestrator at `localhost:5678`; import `n8n_weaver_v5.json`
+- **AWS/Mantle** — production primary model gateway (`deepseek.v3.2`) for expert and dream reasoning.
+- **On-box llama** — local OpenAI-compatible fallback on `127.0.0.1:8090`.
+- **Soul Voice LoRA** — local final voice/personality endpoint on `127.0.0.1:8899`.
+- **Google Gemini / OpenAI / Twilio** — optional legacy perception/phone integrations only when their env vars are configured.
+- **IBM Quantum Platform** — optional hardware execution; local simulator is the default-safe path.
+- **n8n** — workflow orchestrator at `localhost:5678`; import `n8n_weaver_v5.json`.
 - **Google Drive** — optional cloud memory via `init_drive.py`
 
 All credentials live in `.env`. The LoRA adapter is in `weaver_fracture_1B_lora/` (rank=16, alpha=16, base: `unsloth/llama-3.2-1b-instruct-unsloth-bnb-4bit`).

@@ -1,10 +1,18 @@
 [Unit]
-Description=Weaver cloned-voice TTS (OpenVoice v2, 127.0.0.1:8092)
+Description=Weaver TTS (AWS Polly, 127.0.0.1:8092)
 After=network.target
 
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/tts
+# AWS Polly generative voice is the default realistic voice path. The older
+# OpenVoice clone remains available by setting TTS_PROVIDER=openvoice.
+Environment=TTS_PROVIDER=polly
+Environment=TTS_FALLBACK_PROVIDER=none
+Environment=TTS_AWS_REGION=us-east-1
+Environment=TTS_POLLY_ENGINE=generative
+Environment=TTS_POLLY_VOICE=Ruth
+Environment=TTS_POLLY_OUTPUT_FORMAT=mp3
 ExecStart=/home/ubuntu/tts/venv/bin/python /home/ubuntu/tts/tts_server.py
 Restart=on-failure
 RestartSec=10

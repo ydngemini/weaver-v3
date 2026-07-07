@@ -24,11 +24,12 @@ from typing import Any, Dict, Optional
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from memory_manager import MemoryManager, default_vault_dir
 
 # ── Config (env-driven, with sane defaults) ───────────────────────────────────
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VAULT_DIR = os.path.join(BASE_DIR, "Nexus_Vault")
+VAULT_DIR = str(default_vault_dir())
 OBSIDIAN_VAULT = os.path.expanduser("~/Weaver_Vault")
 LORA_API_URL = os.environ.get("LORA_API_URL", "http://localhost:8899/v1/chat/completions")
 QUANTUM_BIAS_URL = os.environ.get("QUANTUM_BIAS_URL", "http://localhost:9997/quantum/bias")
@@ -39,6 +40,14 @@ PHONE_BRIDGE_PORT = int(os.environ.get("TWILIO_BRIDGE_PORT", "8765"))
 
 _todo_list_path = os.path.join(VAULT_DIR, "weaver_todos.md")
 _active_timers: list = []
+_memory_manager_ref: MemoryManager | None = None
+
+
+def _default_memory_manager() -> MemoryManager:
+    global _memory_manager_ref
+    if _memory_manager_ref is None:
+        _memory_manager_ref = MemoryManager(default_vault_dir())
+    return _memory_manager_ref
 
 # ══════════════════════════════════════════════════════════════════════════════
 # WEAVER TOOL BELT — 20 Universal Command Blocks
@@ -298,6 +307,7 @@ async def execute_weaver_tool(name: str, args: dict,
 
         elif name == "recall_memory":
             query = args.get("query", "")
+            memory_manager = memory_manager or _default_memory_manager()
             if memory_manager:
                 result = await memory_manager.recall(query)
                 parts = []
@@ -311,6 +321,7 @@ async def execute_weaver_tool(name: str, args: dict,
         elif name == "remember_fact":
             fact = args.get("fact", "")
             about = args.get("about", "general")
+            memory_manager = memory_manager or _default_memory_manager()
             if memory_manager:
                 await memory_manager.remember({
                     "type": "conversation", "speaker": "system",

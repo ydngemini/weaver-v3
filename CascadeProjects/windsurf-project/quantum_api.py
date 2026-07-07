@@ -20,16 +20,37 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI
+from memory_manager import default_vault_dir
 
 PROJ = os.path.dirname(os.path.abspath(__file__))
-VAULT_DIR = os.path.join(PROJ, "Nexus_Vault")
+VAULT_DIR = str(default_vault_dir())
 STATE_FILE = os.path.join(VAULT_DIR, "quantum_state.txt")
 PORT = int(os.environ.get("QUANTUM_API_PORT", "9997"))
 
-app = FastAPI(title="Weaver Quantum API", version="1.0.0")
+app = FastAPI(title="Weaver Quantum API", version="1.1.0")
 
-PATHWAYS = ["Awakening", "Resonance", "Echo", "Prophet", "Fracture", "Weaver", "Void"]
+try:
+    from quantum_networks import PATHWAYS as _PATHWAY_MAP, SYSTEM_SUMMARY
+    PATHWAYS = list(_PATHWAY_MAP.values())
+    CORE_WIDTH = len(_PATHWAY_MAP)
+except Exception:
+    SYSTEM_SUMMARY = {"name": "Legacy Quantum State"}
+    PATHWAYS = ["Awakening", "Resonance", "Echo", "Prophet", "Fracture", "Weaver", "Void"]
+    CORE_WIDTH = 7
+
 DIMENSION_MAP = {
+    "Logic": "logic",
+    "Emotion": "emotion",
+    "Intuition": "creativity",
+    "Memory": "memory",
+    "Sovereignty": "vigilance",
+    "Attention": "emotion",
+    "Reflection": "memory",
+    "Language": "logic",
+    "Planning": "creativity",
+    "Novelty": "creativity",
+    "Stability": "vigilance",
+    "Meta-Reasoning": "logic",
     "Awakening": "logic",
     "Resonance": "emotion",
     "Echo": "memory",
@@ -40,6 +61,7 @@ DIMENSION_MAP = {
 }
 
 _state = {
+    "architecture": SYSTEM_SUMMARY.get("name", "Legacy Quantum State"),
     "dominant": "unknown",
     "secondary": None,
     "raw_description": "",
@@ -67,6 +89,7 @@ def _parse_quantum_state() -> dict:
 
         result = dict(_state)
         result["raw_description"] = text
+        result["architecture"] = SYSTEM_SUMMARY.get("name", result.get("architecture"))
 
         # Extract timestamp: [2026-04-30 06:56:44]
         ts_match = re.search(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]", text)
@@ -119,16 +142,18 @@ def _parse_quantum_state() -> dict:
             if dim in weights:
                 weights[dim] = 0.90
 
-        # If we have a bitstring, compute per-qubit marginals
+        # If we have a bitstring, compute core-role activation weights.
         bitstring = result.get("bitstring")
         if bitstring and len(bitstring) >= 5:
-            qubit_dim = ["logic", "emotion", "memory", "creativity", "vigilance"]
-            # bitstring is big-endian (qubit 6 first); reverse so rev[i] == qubit i
-            # (0=logic … 4=vigilance), matching quantum_soul's own parse_counts.
-            rev = bitstring.zfill(7)[::-1]
-            for i, dim in enumerate(qubit_dim):
-                bit = int(rev[i])
-                weights[dim] = 0.99 if bit == 0 else 0.70
+            # bitstring is big-endian; reverse so rev[i] == qubit i.
+            rev = bitstring.zfill(CORE_WIDTH)[::-1]
+            for i, bit_char in enumerate(rev[:CORE_WIDTH]):
+                if i >= len(PATHWAYS):
+                    continue
+                dim = DIMENSION_MAP.get(PATHWAYS[i])
+                if dim in weights:
+                    bit = int(bit_char)
+                    weights[dim] = max(weights[dim], 0.99 if bit == 1 else 0.62)
 
         result["weights"] = weights
         return result
@@ -161,6 +186,7 @@ async def get_current():
 async def get_bias():
     """Just routing weights for MoE integration."""
     return {
+        "architecture": _state.get("architecture"),
         "dominant": _state["dominant"],
         "weights": _state["weights"],
         "last_measurement": _state["last_measurement"],
@@ -173,6 +199,7 @@ async def health():
         "status": "ok",
         "service": "weaver-quantum-api",
         "port": PORT,
+        "architecture": _state.get("architecture"),
         "dominant_pathway": _state["dominant"],
     }
 

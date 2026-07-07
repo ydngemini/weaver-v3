@@ -16,11 +16,19 @@ from datetime import datetime
 
 import httpx
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
+from memory_manager import default_vault_dir
 
 PORT = int(os.environ.get("HEALTH_DASHBOARD_PORT", "9996"))
 
 app = FastAPI(title="Weaver Health Dashboard", version="2.1.0")
+
+WEAVER_LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Weaver logo">
+  <rect width="64" height="64" rx="14" fill="#07080c"/>
+  <path d="M32 6 56 24 47 53H17L8 24 32 6Z" fill="#101624" stroke="#e6b84a" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M19 22 25 43 32 29 39 43 45 22" fill="none" stroke="#e6b84a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="4" fill="#34d4ff"/>
+</svg>"""
 
 _BOOT_TIME = time.time()
 _check_count = 0
@@ -40,7 +48,7 @@ LOBES = [
     ("n8n Workflow",     "http://127.0.0.1:5678/healthz",  "Workflow orchestrator"),
 ]
 
-VAULT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Nexus_Vault")
+VAULT_DIR = str(default_vault_dir())
 QUANTUM_STATE_FILE = os.path.join(VAULT_DIR, "quantum_state.txt")
 
 
@@ -230,6 +238,11 @@ async def gather_all_status() -> list:
     return results
 
 
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon_svg():
+    return Response(content=WEAVER_LOGO_SVG, media_type="image/svg+xml")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     """Render HTML dashboard with auto-refresh."""
@@ -294,6 +307,7 @@ async def dashboard():
 <html>
 <head>
     <title>Weaver v3 Health</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <meta http-equiv="refresh" content="5">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>

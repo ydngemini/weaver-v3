@@ -55,10 +55,67 @@ resource "aws_security_group" "this" {
   }
 }
 
+resource "aws_iam_role" "this" {
+  name = "${var.project_name}-brain-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy" "polly_tts" {
+  name = "${var.project_name}-polly-tts"
+  role = aws_iam_role.this.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "WeaverPollyTts"
+      Effect = "Allow"
+      Action = [
+        "polly:DescribeVoices",
+        "polly:SynthesizeSpeech"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "bedrock_runtime" {
+  name = "${var.project_name}-bedrock-runtime"
+  role = aws_iam_role.this.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "WeaverBedrockRuntime"
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:InvokeModelWithBidirectionalStream"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "this" {
+  name = "${var.project_name}-brain-profile"
+  role = aws_iam_role.this.name
+  tags = local.tags
+}
+
 resource "aws_instance" "this" {
   ami                    = data.aws_ami.ubuntu_arm64.id
   instance_type          = var.instance_type
   key_name               = aws_key_pair.this.key_name
+  iam_instance_profile   = aws_iam_instance_profile.this.name
   subnet_id              = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.this.id]
 
@@ -76,8 +133,8 @@ resource "aws_instance" "this" {
   tags = merge(local.tags, { Name = "${var.project_name}-brain" })
 }
 
-# Stable public IP so <EIP>.sslip.io + the Let's Encrypt cert survive reboots
-# (fixes Oracle's ephemeral-IP problem).
+# Stable public IP so weaverv3.com and the production subdomains survive reboots
+# (fixes Oracle's ephemeral-IP problem; sslip.io remains a temporary bootstrap fallback).
 resource "aws_eip" "this" {
   domain = "vpc"
   tags   = merge(local.tags, { Name = "${var.project_name}-eip" })

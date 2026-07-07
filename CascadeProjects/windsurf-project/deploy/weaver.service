@@ -10,6 +10,8 @@ User=ubuntu
 # Adjust if you cloned elsewhere:
 WorkingDirectory=/home/ubuntu/weaver/CascadeProjects/windsurf-project
 EnvironmentFile=/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env
+Environment=WEAVER_CODEBASE_ROOT=/home/ubuntu/weaver
+Environment=WEAVER_VAULT_DIR=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault
 ExecStart=/home/ubuntu/weaver/CascadeProjects/windsurf-project/venv/bin/python3 weaver.py --headless
 Restart=on-failure
 RestartSec=10
