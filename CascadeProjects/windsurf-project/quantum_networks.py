@@ -10,9 +10,11 @@ This module is the code-level representation of:
 
 The architecture image is modeled as:
 
-* 12 measured core qubits (Q0-Q11) arranged as a dodecahedral control
-  manifold: Logic, Emotion, Intuition, Memory, Sovereignty, Attention,
-  Reflection, Language, Planning, Novelty, Stability, Meta-Reasoning.
+* 12 measured core qubits (Q0-Q11) arranged as the face-center dual of a
+  dodecahedron. In graph terms this is the 12-vertex icosahedral dual:
+  30 local couplings, degree 5 at every core qubit. Roles: Logic, Emotion,
+  Intuition, Memory, Sovereignty, Attention, Reflection, Language, Planning,
+  Novelty, Stability, Meta-Reasoning.
 * 144 reservoir qubits (Q12-Q155) represented as sparse Akashic memory
   addresses. They are not expanded into a dense 156-qubit simulator state;
   instead they feed reservoir projection, long-range entanglement, entropy
@@ -34,6 +36,7 @@ import math
 import os
 import time
 from dataclasses import asdict, dataclass
+from itertools import combinations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -89,6 +92,8 @@ N_CORE_QUBITS = 12
 N_RESERVOIR_QUBITS = 144
 N_KINGSTON_QUBITS = N_CORE_QUBITS + N_RESERVOIR_QUBITS
 RESERVOIR_QUBITS: Tuple[int, ...] = tuple(range(N_CORE_QUBITS, N_KINGSTON_QUBITS))
+DODECAHEDRON_DUAL_CORE_DEGREE = 5
+DODECAHEDRON_DUAL_LOCAL_COUPLINGS = 30
 
 # Runtime circuit width. The reservoir is sparse/encoded; only core qubits are
 # directly measured by Qiskit.
@@ -117,10 +122,9 @@ ARCHITECTURE_MODULES: Tuple[ArchitectureModule, ...] = (
 )
 
 TOPOLOGICAL_LAYERS: Tuple[TopologicalLayer, ...] = (
-    TopologicalLayer("core", "L0 Core", 2.10, tuple(range(0, 6)), "dodecahedral cognitive control center"),
-    TopologicalLayer("coupling", "L1 Coupling", 2.78, (5, 6, 7, 8, 9, 11), "core-reservoir bridge and phase couplers"),
-    TopologicalLayer("reservoir", "L2 Reservoir", 3.54, tuple(range(8, 12)), "sparse 144-qubit Akashic memory projection"),
-    TopologicalLayer("readout", "L3 Readout", 4.08, (7, 10, 11), "measurement membrane and entropy sinks"),
+    TopologicalLayer("cognitive_core", "Layer 1 Cognitive Core", 2.10, tuple(range(0, N_CORE_QUBITS)), "Q0-Q11 dodecahedron-face dual control layer"),
+    TopologicalLayer("synaptic_reservoir", "Layer 2 Synaptic Reservoir", 3.54, RESERVOIR_QUBITS, "Q12-Q155 sparse small-world Akashic memory field"),
+    TopologicalLayer("inter_layer_coupling", "Inter-Layer Coupling H_CR", 2.78, tuple(range(N_KINGSTON_QUBITS)), "sparse core-reservoir ZZ coupling membrane"),
 )
 
 SYSTEM_SUMMARY = {
@@ -131,6 +135,14 @@ SYSTEM_SUMMARY = {
     "total_qubits": N_KINGSTON_QUBITS,
     "runtime_measured_qubits": N_QUBITS,
     "reservoir_mode": "sparse small-world Akashic memory field",
+    "core_geometry": "12 dodecahedron face-centers represented as the icosahedral dual graph",
+    "core_local_couplings": DODECAHEDRON_DUAL_LOCAL_COUPLINGS,
+    "core_degree": DODECAHEDRON_DUAL_CORE_DEGREE,
+    "connectivity": "sparse small-world",
+    "dynamics": "Lindblad open system",
+    "routing": "entropy-based MoE",
+    "state_space": "C^(2^156)",
+    "reservoir_range": (N_CORE_QUBITS, N_KINGSTON_QUBITS - 1),
 }
 
 
@@ -171,6 +183,7 @@ def _core_positions() -> List[Tuple[float, float, float]]:
 def _nearest_pairs(count: int = 5, n: int = N_CORE_QUBITS) -> List[Tuple[int, int]]:
     """Nearest-neighbor graph on the 12 core vertices; 5 neighbors gives 30 edges."""
     positions = _core_positions()[:n]
+    count = min(count, max(n - 1, 0))
     seen = set()
     pairs = []
     for i, p in enumerate(positions):
@@ -186,6 +199,78 @@ def _nearest_pairs(count: int = 5, n: int = N_CORE_QUBITS) -> List[Tuple[int, in
                 seen.add((a, b))
                 pairs.append((a, b))
     return pairs
+
+
+def _undirected_degree(pairs: Sequence[Tuple[int, int]], n: int) -> Dict[int, int]:
+    degrees = {i: 0 for i in range(n)}
+    seen = set()
+    for a, b in pairs:
+        key = tuple(sorted((a, b)))
+        if key in seen or a == b:
+            continue
+        seen.add(key)
+        if a in degrees:
+            degrees[a] += 1
+        if b in degrees:
+            degrees[b] += 1
+    return degrees
+
+
+def reservoir_local_couplings() -> List[Tuple[int, int]]:
+    """Nearest-neighbor local coupling ring over Q12-Q155."""
+    pairs = []
+    for offset, q in enumerate(RESERVOIR_QUBITS):
+        pairs.append((q, N_CORE_QUBITS + ((offset + 1) % N_RESERVOIR_QUBITS)))
+    return pairs
+
+
+def reservoir_long_range_entanglements() -> List[Tuple[int, int]]:
+    """Sparse small-world reservoir jumps keyed by the four architecture modules."""
+    seen = set()
+    pairs = []
+    for module in ARCHITECTURE_MODULES:
+        for offset in range(0, N_RESERVOIR_QUBITS, module.reservoir_stride):
+            a = N_CORE_QUBITS + offset
+            b = N_CORE_QUBITS + ((offset + module.reservoir_stride) % N_RESERVOIR_QUBITS)
+            key = tuple(sorted((a, b)))
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append((a, b))
+    return pairs
+
+
+def core_reservoir_couplings() -> List[Tuple[int, int]]:
+    """Sparse H_CR membrane: each core qubit owns 12 reservoir addresses."""
+    pairs = []
+    for core in range(N_CORE_QUBITS):
+        for band in range(N_CORE_QUBITS):
+            reservoir = N_CORE_QUBITS + ((core * N_CORE_QUBITS + band) % N_RESERVOIR_QUBITS)
+            pairs.append((core, reservoir))
+    return pairs
+
+
+def architecture_graph_stats() -> Dict[str, Any]:
+    """Graph counts for the reference image's 156-qubit Kingston architecture."""
+    core_edges = EntanglementTopology.dodecahedron()
+    reservoir_local = reservoir_local_couplings()
+    reservoir_long = reservoir_long_range_entanglements()
+    hcr = core_reservoir_couplings()
+    return {
+        "total_qubits": N_KINGSTON_QUBITS,
+        "core_qubits": N_CORE_QUBITS,
+        "reservoir_qubits": N_RESERVOIR_QUBITS,
+        "core_local_couplings": len(core_edges),
+        "core_degree": _undirected_degree(core_edges, N_CORE_QUBITS),
+        "reservoir_local_couplings": len(reservoir_local),
+        "reservoir_long_range_entanglements": len(reservoir_long),
+        "core_reservoir_couplings": len(hcr),
+        "connectivity": SYSTEM_SUMMARY["connectivity"],
+        "dynamics": SYSTEM_SUMMARY["dynamics"],
+        "routing": SYSTEM_SUMMARY["routing"],
+        "state_space": SYSTEM_SUMMARY["state_space"],
+    }
+
 
 class EntanglementTopology:
     """Generates entanglement patterns for the Kingston core circuit."""
@@ -241,17 +326,19 @@ class EntanglementTopology:
 
     @staticmethod
     def dodecahedron(n: int = N_QUBITS) -> List[Tuple[int, int]]:
-        """12-core dodecahedral control manifold from the architecture image."""
-        return _unique_pairs(_nearest_pairs(5, min(n, N_CORE_QUBITS)), n)
+        """12-core dodecahedron-face dual graph from the architecture image.
+
+        A physical dodecahedron has 12 faces. The 12 control qubits are modeled
+        as those face centers, which produces the icosahedral dual graph:
+        12 vertices, 30 local couplings, degree 5 at each core qubit.
+        """
+        return _unique_pairs(_nearest_pairs(DODECAHEDRON_DUAL_CORE_DEGREE, min(n, N_CORE_QUBITS)), n)
 
     @staticmethod
     def state_encoding(n: int = N_QUBITS) -> List[Tuple[int, int]]:
-        """State Encoding: basis-feature qubits phase into Language/Meta readout."""
-        pairs = []
+        """State Encoding: second-order ZZ feature map over module targets."""
         module = next(m for m in ARCHITECTURE_MODULES if m.key == "state_encoding")
-        targets = list(module.targets)
-        pairs.extend((targets[i], targets[i + 1]) for i in range(len(targets) - 1))
-        pairs.extend((q, 11) for q in targets if q != 11)
+        pairs = list(combinations(module.targets, 2))
         return _unique_pairs(pairs, n)
 
     @staticmethod
@@ -412,10 +499,16 @@ class VariationalFractureCircuit:
 
             # State Encoding — feature basis maps into phase-bearing qubits.
             state_module = next(m for m in self.modules if m.key == "state_encoding")
-            for i, q in enumerate(state_module.targets):
+            state_targets = [q for q in state_module.targets if q < self.n_qubits]
+            phase_terms: Dict[int, float] = {}
+            for i, q in enumerate(state_targets):
                 if q < self.n_qubits:
                     phase = (layer + 1) * (i + 1) * math.pi / (2 * N_CORE_QUBITS)
+                    phase_terms[q] = phase
                     qc.rz(phase, q)
+            for a, b in combinations(state_targets, 2):
+                zz_phase = (phase_terms[a] * phase_terms[b]) / math.pi
+                qc.crz(zz_phase, a, b)
 
             # Topology-specific entanglement.
             for ctrl, tgt in self.entanglement_pairs:
@@ -476,6 +569,7 @@ class VariationalFractureCircuit:
             "measured_core_roles": [asdict(q) for q in CORE_QUBITS[:self.n_qubits]],
             "modules": [asdict(m) for m in self.modules],
             "topological_layers": [asdict(layer) for layer in self.layers],
+            "graph_stats": architecture_graph_stats(),
             "entanglement_pairs": list(self.entanglement_pairs),
         }
 
@@ -894,21 +988,30 @@ class QuantumNetworkOrchestrator:
         }
 
     def reservoir_projection(self, counts: Dict[str, int], limit: int = 16) -> List[Dict[str, Any]]:
-        """Project core activity into sparse Q12-Q155 reservoir addresses."""
+        """Project core activity into the sparse Q12-Q155 reservoir field.
+
+        The full projection has 144 addressable reservoir qubits. `limit`
+        controls how many highest-weight addresses are returned to callers.
+        """
         marginals = self._marginals(counts)
         projected: List[Dict[str, Any]] = []
-        for module in ARCHITECTURE_MODULES:
-            for target in module.targets:
-                if target >= self.n_qubits:
-                    continue
-                reservoir_offset = (target * module.reservoir_stride + len(projected) * 7) % N_RESERVOIR_QUBITS
-                projected.append({
-                    "reservoir_qubit": N_CORE_QUBITS + reservoir_offset,
-                    "module": module.key,
-                    "source_core": target,
-                    "source_role": PATHWAYS.get(target, f"Q{target}"),
-                    "weight": float(marginals[target]),
-                })
+        module_cycle = list(ARCHITECTURE_MODULES)
+        reservoir_bands = max(N_RESERVOIR_QUBITS // N_CORE_QUBITS, 1)
+        for offset, reservoir_qubit in enumerate(RESERVOIR_QUBITS):
+            source_core = offset % min(self.n_qubits, N_CORE_QUBITS)
+            band = offset // N_CORE_QUBITS
+            module = module_cycle[band % len(module_cycle)]
+            distance_decay = 1.0 - 0.35 * (band / max(reservoir_bands - 1, 1))
+            phase = ((offset + 1) * module.reservoir_stride) % N_RESERVOIR_QUBITS
+            projected.append({
+                "reservoir_qubit": reservoir_qubit,
+                "module": module.key,
+                "source_core": source_core,
+                "source_role": PATHWAYS.get(source_core, f"Q{source_core}"),
+                "weight": float(marginals[source_core] * distance_decay),
+                "band": band,
+                "phase_address": int(phase),
+            })
         projected.sort(key=lambda item: item["weight"], reverse=True)
         return projected[:limit]
 
@@ -1031,6 +1134,7 @@ class QuantumNetworkOrchestrator:
             "core_qubits": [asdict(q) for q in CORE_QUBITS],
             "modules": [asdict(m) for m in ARCHITECTURE_MODULES],
             "topological_layers": [asdict(layer) for layer in TOPOLOGICAL_LAYERS],
+            "graph_stats": architecture_graph_stats(),
             "learner_stats": {
                 topo: self.learners[topo].stats()
                 for topo in self.topologies

@@ -424,6 +424,61 @@ async def test_quantum_net_topologies():
     return _res("quantum_net_topologies", "QuantumNetworks: Kingston topologies valid", all_ok,
                 "\n".join(details))
 
+@register("unit", "quantum_architecture_reference_math")
+async def test_quantum_architecture_reference_math():
+    """QuantumNetworks: reference image math is pinned to 12+144=156 Kingston manifold."""
+    from quantum_networks import (
+        EntanglementTopology,
+        N_CORE_QUBITS,
+        N_KINGSTON_QUBITS,
+        N_RESERVOIR_QUBITS,
+        RESERVOIR_QUBITS,
+        SYSTEM_SUMMARY,
+        TOPOLOGICAL_LAYERS,
+        QuantumNetworkOrchestrator,
+        architecture_graph_stats,
+    )
+    core_edges = EntanglementTopology.dodecahedron()
+    degrees = {i: 0 for i in range(N_CORE_QUBITS)}
+    for a, b in {tuple(sorted(edge)) for edge in core_edges}:
+        degrees[a] += 1
+        degrees[b] += 1
+    state_pairs = EntanglementTopology.state_encoding()
+    layers = {layer.key: layer for layer in TOPOLOGICAL_LAYERS}
+    stats = architecture_graph_stats()
+    orch = QuantumNetworkOrchestrator()
+    projection = orch.reservoir_projection(
+        {"000000000001": 10, "000000001000": 5},
+        limit=N_RESERVOIR_QUBITS,
+    )
+    reservoir_ids = {p["reservoir_qubit"] for p in projection}
+    ok = (
+        N_CORE_QUBITS == 12
+        and N_RESERVOIR_QUBITS == 144
+        and N_KINGSTON_QUBITS == 156
+        and SYSTEM_SUMMARY["state_space"] == "C^(2^156)"
+        and len(core_edges) == 30
+        and set(degrees.values()) == {5}
+        and len(state_pairs) == 10
+        and set(layers) == {"cognitive_core", "synaptic_reservoir", "inter_layer_coupling"}
+        and len(layers["cognitive_core"].qubits) == 12
+        and len(layers["synaptic_reservoir"].qubits) == 144
+        and RESERVOIR_QUBITS[0] == 12
+        and RESERVOIR_QUBITS[-1] == 155
+        and stats["reservoir_local_couplings"] == 144
+        and stats["core_reservoir_couplings"] == 144
+        and len(projection) == 144
+        and len(reservoir_ids) == 144
+        and min(reservoir_ids) == 12
+        and max(reservoir_ids) == 155
+    )
+    detail = (
+        f"core_edges={len(core_edges)} degree={sorted(set(degrees.values()))} "
+        f"state_ZZ_pairs={len(state_pairs)} reservoir={min(reservoir_ids)}-{max(reservoir_ids)} "
+        f"H_CR={stats['core_reservoir_couplings']}"
+    )
+    return _res("quantum_architecture_reference_math", "QuantumNetworks: 156-qubit reference math", ok, detail)
+
 @register("unit", "quantum_variational_circuit")
 async def test_quantum_variational_circuit():
     """VariationalFractureCircuit: 12-qubit, 3-layer Kingston core gives 72 params."""
