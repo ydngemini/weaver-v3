@@ -12,6 +12,7 @@ EnvironmentFile=-/etc/default/caddy
 Environment=AWS_REGION=us-east-1
 Environment=WEAVER_HEADLESS_ACTIVE=1
 Environment=WEAVER_DEFAULT_BRAIN_ALIAS=weaver-one
+Environment=WEAVER_VAULT_DIR=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault
 ExecStart=/home/ubuntu/weaver/CascadeProjects/windsurf-project/venv/bin/uvicorn bedrock_brain_api:app --host 127.0.0.1 --port 8093 --log-level warning
 Restart=on-failure
 RestartSec=8

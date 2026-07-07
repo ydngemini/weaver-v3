@@ -56,6 +56,7 @@ COPY weaver_fracture_1B_lora/ ./weaver_fracture_1B_lora/
 
 # Create persistent directories
 RUN mkdir -p /app/Nexus_Vault /root/Weaver_Vault
+ENV WEAVER_VAULT_DIR=/app/Nexus_Vault
 
 # Expose all service ports
 EXPOSE 8765 8899 9995 9996 9997 9998 9999

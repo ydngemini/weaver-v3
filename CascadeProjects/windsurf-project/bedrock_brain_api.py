@@ -13,8 +13,11 @@ Weaver remains active when no browser tab is open.
 from __future__ import annotations
 
 import asyncio
+import base64
+import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -24,7 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
+from memory_manager import MemoryManager, default_vault_dir
 
 
 @dataclass(frozen=True)
@@ -135,6 +139,22 @@ THOUGHT_SECONDS = float(os.environ.get("WEAVER_HEADLESS_THOUGHT_SECONDS", "45"))
 DREAM_SECONDS = float(os.environ.get("WEAVER_HEADLESS_DREAM_SECONDS", "360"))
 HEADLESS_THOUGHT_MODEL = os.environ.get("WEAVER_HEADLESS_THOUGHT_MODEL", "weaver-headless")
 HEADLESS_DREAM_MODEL = os.environ.get("WEAVER_HEADLESS_DREAM_MODEL", "weaver-headless")
+VOICE_MODEL_ID = os.environ.get("WEAVER_VOICE_MODEL", MODEL_ROUTES["weaver-voice"].model_id)
+VOICE_REGION = os.environ.get("WEAVER_VOICE_REGION", MODEL_ROUTES["weaver-voice"].region)
+VOICE_ID = os.environ.get("WEAVER_VOICE_ID", "tiffany")
+VOICE_INPUT_RATE = int(os.environ.get("WEAVER_VOICE_INPUT_RATE", "16000"))
+VOICE_OUTPUT_RATE = int(os.environ.get("WEAVER_VOICE_OUTPUT_RATE", "24000"))
+VOICE_MAX_FRAME_BYTES = int(os.environ.get("WEAVER_VOICE_MAX_FRAME_BYTES", str(VOICE_INPUT_RATE * 2)))
+VOICE_MAX_SESSION_SECONDS = min(float(os.environ.get("WEAVER_VOICE_MAX_SESSION_SECONDS", "455")), 470.0)
+VOICE_CONNECT_TIMEOUT_SECONDS = float(os.environ.get("WEAVER_VOICE_CONNECT_TIMEOUT_SECONDS", "25"))
+VOICE_STYLE_PROMPT = os.environ.get(
+    "WEAVER_VOICE_STYLE_PROMPT",
+    (
+        "Speak in a warm, feminine Southern cadence. Keep it natural, respectful, "
+        "and contemporary. Do not exaggerate dialect, perform stereotypes, or "
+        "claim a racial identity."
+    ),
+)
 
 app = FastAPI(title="Weaver AWS Brain API", version="1.0.0")
 _clients: dict[str, Any] = {}
@@ -142,25 +162,18 @@ _state_lock = asyncio.Lock()
 _memory_lock = asyncio.Lock()
 
 
-def _default_vault_dir() -> Path:
-    raw = os.environ.get("WEAVER_VAULT_DIR")
-    if raw:
-        p = Path(raw).expanduser()
-        return p if p.is_absolute() else (Path(__file__).resolve().parent / p).resolve()
-    return Path(__file__).resolve().parent / "Nexus_Vault"
-
-
-VAULT_DIR = _default_vault_dir()
-TRANSCRIPT_PATH = VAULT_DIR / "weaver_transcript.txt"
-PHONE_TRANSCRIPT_PATH = VAULT_DIR / "weaver_phone_transcript.txt"
-DREAM_LOG_PATH = VAULT_DIR / "weaver_dreams.md"
-THOUGHT_LOG_PATH = VAULT_DIR / "weaver_headless_thoughts.md"
-BROWSER_MEMORY_PATH = VAULT_DIR / "weaver_browser_memory.jsonl"
-MEMORY_EVENTS_PATH = VAULT_DIR / "weaver_memory_events.jsonl"
-PEOPLE_MEMORY_PATH = VAULT_DIR / "people_memory.md"
-VISION_MEMORY_PATH = VAULT_DIR / "cloud_vision_memory.md"
-QUANTUM_STATE_PATH = VAULT_DIR / "quantum_state.txt"
-AKASHIC_PERSIST_DIR = VAULT_DIR / "akashic_persist"
+_memory_manager = MemoryManager(default_vault_dir())
+VAULT_DIR = _memory_manager.vault_dir
+TRANSCRIPT_PATH = _memory_manager.paths["transcript"]
+PHONE_TRANSCRIPT_PATH = _memory_manager.paths["phone_transcript"]
+DREAM_LOG_PATH = _memory_manager.paths["dreams"]
+THOUGHT_LOG_PATH = _memory_manager.paths["thoughts"]
+BROWSER_MEMORY_PATH = _memory_manager.paths["browser"]
+MEMORY_EVENTS_PATH = _memory_manager.paths["events"]
+PEOPLE_MEMORY_PATH = _memory_manager.paths["people"]
+VISION_MEMORY_PATH = _memory_manager.paths["vision"]
+QUANTUM_STATE_PATH = _memory_manager.paths["quantum"]
+AKASHIC_PERSIST_DIR = _memory_manager.paths["akashic"]
 
 STATE: dict[str, Any] = {
     "active": HEADLESS_ACTIVE,
@@ -175,19 +188,22 @@ STATE: dict[str, Any] = {
     "last_dream": "",
     "last_error": "",
     "memory_events": 0,
-    "memory_sources": {
-        "vault": str(VAULT_DIR),
-        "transcript": str(TRANSCRIPT_PATH),
-        "dreams": str(DREAM_LOG_PATH),
-        "thoughts": str(THOUGHT_LOG_PATH),
-        "browser": str(BROWSER_MEMORY_PATH),
-        "events": str(MEMORY_EVENTS_PATH),
-        "akashic": str(AKASHIC_PERSIST_DIR),
-    },
+    "memory_sources": _memory_manager.sources(),
     "unified_model": UNIFIED_ALIAS,
     "headless_model": "weaver-headless",
     "headless_thought_model": HEADLESS_THOUGHT_MODEL,
     "headless_dream_model": HEADLESS_DREAM_MODEL,
+    "voice_realtime": {
+        "model_id": VOICE_MODEL_ID,
+        "region": VOICE_REGION,
+        "voice_id": VOICE_ID,
+        "input_sample_rate_hz": VOICE_INPUT_RATE,
+        "output_sample_rate_hz": VOICE_OUTPUT_RATE,
+        "style": "warm-southern-feminine",
+        "sessions_started": 0,
+        "last_started_at": None,
+        "last_error": "",
+    },
     "models": {
         **ORCHESTRATED_MODELS,
         **{alias: asdict(route) for alias, route in MODEL_ROUTES.items()},
@@ -300,77 +316,14 @@ def _text_vector(text: str, dim: int = 256):
 
 
 def _save_akashic_lobe(lobe_id: str, text: str, meta: dict[str, Any]) -> None:
-    import numpy as np
-
-    AKASHIC_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
-    state_path = AKASHIC_PERSIST_DIR / "akashic_state.npz"
-    meta_path = AKASHIC_PERSIST_DIR / "akashic_meta.json"
-    arrays: dict[str, Any] = {}
-    if state_path.exists():
-        try:
-            existing = np.load(state_path)
-            arrays.update({name: existing[name] for name in existing.files})
-        except Exception:
-            arrays = {}
-    arrays[lobe_id] = _text_vector(text)
-    np.savez_compressed(state_path, **arrays)
-
-    payload: dict[str, Any] = {"dim": 256, "trace_depth": 32, "timestamps": {}, "meta": {}}
-    if meta_path.exists():
-        try:
-            payload.update(json.loads(meta_path.read_text(encoding="utf-8")))
-        except Exception:
-            pass
-    payload.setdefault("timestamps", {})[lobe_id] = time.time()
-    payload.setdefault("meta", {})[lobe_id] = {
-        **payload.get("meta", {}).get(lobe_id, {}),
-        **_sanitize_payload(meta),
-        "source": "weaver-aws-brain-memory",
-        "preview": _redact_text(text, 240),
-    }
-    payload["saved_at"] = time.time()
-    meta_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    _memory_manager.akashic.write_text_lobe_sync(lobe_id, text, meta)
 
 
 def _persist_memory_event_sync(kind: str, content: str, *, source: str = "brain", speaker: str = "", meta: dict[str, Any] | None = None) -> None:
-    VAULT_DIR.mkdir(parents=True, exist_ok=True)
     content = _redact_text(content, 5000)
     if not content:
         return
-    ts = _utc_iso()
-    safe_meta = _sanitize_payload(meta or {})
-    event = {
-        "timestamp": ts,
-        "kind": _redact_text(kind, 80),
-        "source": _redact_text(source, 80),
-        "speaker": _redact_text(speaker, 80),
-        "content": content,
-        "meta": safe_meta,
-    }
-    with open(MEMORY_EVENTS_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
-
-    if kind == "conversation":
-        line = f"[{ts}] {speaker.upper() or source.upper()}: {content}\n"
-        with open(TRANSCRIPT_PATH, "a", encoding="utf-8") as f:
-            f.write(line)
-    elif kind == "thought":
-        with open(THOUGHT_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(f"\n- [{ts}] ({source}) {content}\n")
-    elif kind == "dream":
-        with open(DREAM_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(f"\n\n---\n### Headless Dream - {ts} ({source})\n{content}\n")
-    elif kind == "browser_memory":
-        with open(BROWSER_MEMORY_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
-
-    lobe_map = {
-        "conversation": "aws_brain_conversation_memory",
-        "thought": "aws_headless_thought_memory",
-        "dream": "aws_headless_dream_memory",
-        "browser_memory": "browser_evolution_memory",
-    }
-    _save_akashic_lobe(lobe_map.get(kind, "aws_brain_memory"), content, event)
+    _memory_manager.append_event_sync(kind, content, source=source, speaker=speaker, meta=meta)
 
 
 async def _persist_memory_event(kind: str, content: str, *, source: str = "brain", speaker: str = "", meta: dict[str, Any] | None = None) -> None:
@@ -382,47 +335,7 @@ async def _persist_memory_event(kind: str, content: str, *, source: str = "brain
 
 
 async def _memory_context(query: str = "") -> str:
-    def _build() -> str:
-        parts: list[str] = []
-        people = _tail_file(PEOPLE_MEMORY_PATH, 1600)
-        if people:
-            parts.append(f"People memory:\n{people[-1600:]}")
-        recent = _tail_file(TRANSCRIPT_PATH, 2600)
-        if recent:
-            parts.append(f"Recent transcript:\n{recent[-2600:]}")
-        phone = _tail_file(PHONE_TRANSCRIPT_PATH, 1000)
-        if phone:
-            parts.append(f"Recent phone memory:\n{phone[-1000:]}")
-        dreams = _tail_file(DREAM_LOG_PATH, 2200)
-        if dreams:
-            parts.append(f"Dream memory:\n{dreams[-2200:]}")
-        thoughts = _tail_file(THOUGHT_LOG_PATH, 1400)
-        if thoughts:
-            parts.append(f"Headless thought memory:\n{thoughts[-1400:]}")
-        browser = _tail_file(BROWSER_MEMORY_PATH, 1800)
-        if browser:
-            parts.append(f"Browser evolution memory:\n{browser[-1800:]}")
-        quantum = _tail_file(QUANTUM_STATE_PATH, 700)
-        if quantum:
-            parts.append(f"Quantum state memory:\n{quantum[-700:]}")
-        if re.search(r"(?i)\b(see|saw|visual|camera|face|screenshot|image|room|body|avatar)\b", query):
-            vision = _tail_file(VISION_MEMORY_PATH, 1200)
-            if vision:
-                parts.append(f"Visual memory:\n{vision[-1200:]}")
-        matches = "\n".join(
-            block for block in [
-                _search_file(TRANSCRIPT_PATH, query),
-                _search_file(DREAM_LOG_PATH, query),
-                _search_file(THOUGHT_LOG_PATH, query),
-                _search_file(BROWSER_MEMORY_PATH, query),
-            ] if block
-        )
-        if matches:
-            parts.append(f"Memory search hits:\n{matches[-1800:]}")
-        return "\n\n".join(parts)[-7200:]
-
-    text = await asyncio.to_thread(_build)
-    return _redact_text(text, 7200)
+    return _redact_text(await _memory_manager.memory_context(query, 7200), 7200)
 
 
 def _route_for(model: str | None) -> ModelRoute:
@@ -456,6 +369,386 @@ def _client(region: str):
     created = boto3.client("bedrock-runtime", region_name=region)
     _clients[region] = created
     return created
+
+
+def _voice_mode() -> str:
+    return os.environ.get("WEAVER_VOICE_REALTIME_MODE", "aws").strip().lower() or "aws"
+
+
+def _voice_route_state() -> dict[str, Any]:
+    voice_state = STATE.setdefault("voice_realtime", {})
+    if not isinstance(voice_state, dict):
+        voice_state = {}
+        STATE["voice_realtime"] = voice_state
+    return voice_state
+
+
+def _ws_requested_protocol(websocket: WebSocket, name: str) -> bool:
+    offered = websocket.headers.get("sec-websocket-protocol", "")
+    return any(part.strip() == name for part in offered.split(","))
+
+
+def _decode_ws_key(websocket: WebSocket) -> str:
+    offered = websocket.headers.get("sec-websocket-protocol", "")
+    for part in offered.split(","):
+        token = part.strip()
+        if not token.startswith("weaver-key."):
+            continue
+        raw = token.removeprefix("weaver-key.")
+        padding = "=" * (-len(raw) % 4)
+        try:
+            return base64.urlsafe_b64decode((raw + padding).encode("ascii")).decode("utf-8")
+        except Exception:
+            return ""
+    return ""
+
+
+async def _accept_voice_ws(websocket: WebSocket) -> bool:
+    if WEAVER_KEY and _decode_ws_key(websocket) != WEAVER_KEY:
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1008)
+        return False
+    subprotocol = "weaver-realtime" if _ws_requested_protocol(websocket, "weaver-realtime") else None
+    await websocket.accept(subprotocol=subprotocol)
+    return True
+
+
+def _voice_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {"event": {event: payload}}
+
+
+def _voice_prompt() -> str:
+    return (
+        "You are Weaver in live voice mode. The user and you are speaking in a natural, "
+        "real-time conversation. Keep responses short, emotionally present, and useful. "
+        "If you are unsure, say so plainly. "
+        f"{VOICE_STYLE_PROMPT}"
+    )
+
+
+class _RealtimeVoiceBridge:
+    """Relay browser PCM to Nova Sonic's bidirectional event stream."""
+
+    def __init__(self, output_queue: asyncio.Queue[dict[str, Any]]) -> None:
+        self.output_queue = output_queue
+        self.model_id = VOICE_MODEL_ID
+        self.region = VOICE_REGION
+        self.voice_id = VOICE_ID
+        self.prompt_name = f"weaver-{uuid.uuid4().hex}"
+        self.system_content_name = f"system-{uuid.uuid4().hex}"
+        self.audio_content_name = f"audio-{uuid.uuid4().hex}"
+        self.client: Any = None
+        self.stream: Any = None
+        self.response_task: asyncio.Task | None = None
+        self.is_active = False
+        self.audio_started = False
+        self.audio_ended = False
+        self.current_role = ""
+        self.display_assistant_text = True
+
+    async def _emit(self, message: dict[str, Any]) -> None:
+        try:
+            self.output_queue.put_nowait(message)
+        except asyncio.QueueFull:
+            if message.get("type") != "audio":
+                with contextlib.suppress(asyncio.QueueFull):
+                    self.output_queue.put_nowait(message)
+
+    def _initialize_client(self) -> None:
+        try:
+            from aws_sdk_bedrock_runtime.client import (
+                BedrockRuntimeClient,
+                InvokeModelWithBidirectionalStreamOperationInput,
+            )
+            from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
+            from smithy_aws_core.identity import StaticCredentialsResolver
+        except ImportError as exc:
+            raise RuntimeError(
+                "AWS Nova Sonic streaming SDK is not installed. "
+                "Install aws_sdk_bedrock_runtime and smithy-aws-core in the Weaver brain venv."
+            ) from exc
+
+        import boto3
+
+        credentials = boto3.Session(region_name=self.region).get_credentials()
+        if credentials is None:
+            raise RuntimeError("AWS credentials are unavailable for Nova Sonic streaming.")
+        frozen = credentials.get_frozen_credentials()
+
+        self._operation_input = InvokeModelWithBidirectionalStreamOperationInput
+        config = Config(
+            endpoint_uri=f"https://bedrock-runtime.{self.region}.amazonaws.com",
+            region=self.region,
+            aws_credentials_identity_resolver=StaticCredentialsResolver(),
+            aws_access_key_id=frozen.access_key,
+            aws_secret_access_key=frozen.secret_key,
+            aws_session_token=frozen.token,
+            auth_scheme_resolver=HTTPAuthSchemeResolver(),
+            auth_schemes={"aws.auth#sigv4": SigV4AuthScheme(service="bedrock")},
+        )
+        self.client = BedrockRuntimeClient(config=config)
+
+    async def _send_event(self, payload: dict[str, Any]) -> None:
+        from aws_sdk_bedrock_runtime.models import (
+            BidirectionalInputPayloadPart,
+            InvokeModelWithBidirectionalStreamInputChunk,
+        )
+
+        event = InvokeModelWithBidirectionalStreamInputChunk(
+            value=BidirectionalInputPayloadPart(
+                bytes_=json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            )
+        )
+        await self.stream.input_stream.send(event)
+
+    async def start(self) -> None:
+        if not self.client:
+            self._initialize_client()
+        self.stream = await self.client.invoke_model_with_bidirectional_stream(
+            self._operation_input(model_id=self.model_id)
+        )
+        self.is_active = True
+        await self._send_event(
+            _voice_event(
+                "sessionStart",
+                {
+                    "inferenceConfiguration": {
+                        "maxTokens": 1024,
+                        "topP": 0.9,
+                        "temperature": 0.7,
+                    },
+                    "turnDetectionConfiguration": {"endpointingSensitivity": "HIGH"},
+                },
+            )
+        )
+        await self._send_event(
+            _voice_event(
+                "promptStart",
+                {
+                    "promptName": self.prompt_name,
+                    "textOutputConfiguration": {"mediaType": "text/plain"},
+                    "audioOutputConfiguration": {
+                        "mediaType": "audio/lpcm",
+                        "sampleRateHertz": VOICE_OUTPUT_RATE,
+                        "sampleSizeBits": 16,
+                        "channelCount": 1,
+                        "voiceId": self.voice_id,
+                        "encoding": "base64",
+                        "audioType": "SPEECH",
+                    },
+                },
+            )
+        )
+        await self._send_event(
+            _voice_event(
+                "contentStart",
+                {
+                    "promptName": self.prompt_name,
+                    "contentName": self.system_content_name,
+                    "type": "TEXT",
+                    "interactive": True,
+                    "role": "SYSTEM",
+                    "textInputConfiguration": {"mediaType": "text/plain"},
+                },
+            )
+        )
+        await self._send_event(
+            _voice_event(
+                "textInput",
+                {
+                    "promptName": self.prompt_name,
+                    "contentName": self.system_content_name,
+                    "content": _voice_prompt(),
+                },
+            )
+        )
+        await self._send_event(
+            _voice_event(
+                "contentEnd",
+                {
+                    "promptName": self.prompt_name,
+                    "contentName": self.system_content_name,
+                },
+            )
+        )
+        await self._send_event(
+            _voice_event(
+                "contentStart",
+                {
+                    "promptName": self.prompt_name,
+                    "contentName": self.audio_content_name,
+                    "type": "AUDIO",
+                    "interactive": True,
+                    "role": "USER",
+                    "audioInputConfiguration": {
+                        "mediaType": "audio/lpcm",
+                        "sampleRateHertz": VOICE_INPUT_RATE,
+                        "sampleSizeBits": 16,
+                        "channelCount": 1,
+                        "audioType": "SPEECH",
+                        "encoding": "base64",
+                    },
+                },
+            )
+        )
+        self.audio_started = True
+        self.response_task = asyncio.create_task(self._process_responses())
+        await self._emit(
+            {
+                "type": "ready",
+                "mode": "aws",
+                "model": self.model_id,
+                "region": self.region,
+                "voiceId": self.voice_id,
+                "inputSampleRate": VOICE_INPUT_RATE,
+                "outputSampleRate": VOICE_OUTPUT_RATE,
+            }
+        )
+
+    async def send_audio_chunk(self, audio_bytes: bytes) -> None:
+        if not self.is_active or not audio_bytes:
+            return
+        await self._send_event(
+            _voice_event(
+                "audioInput",
+                {
+                    "promptName": self.prompt_name,
+                    "contentName": self.audio_content_name,
+                    "content": base64.b64encode(audio_bytes).decode("ascii"),
+                },
+            )
+        )
+
+    async def _process_responses(self) -> None:
+        try:
+            while self.is_active:
+                output = await self.stream.await_output()
+                result = await output[1].receive()
+                raw = getattr(getattr(result, "value", None), "bytes_", None)
+                if not raw:
+                    continue
+                payload = json.loads(raw.decode("utf-8"))
+                event = payload.get("event", {}) if isinstance(payload, dict) else {}
+                if "contentStart" in event:
+                    content_start = event["contentStart"]
+                    self.current_role = str(content_start.get("role", ""))
+                    extra = content_start.get("additionalModelFields")
+                    if extra:
+                        with contextlib.suppress(Exception):
+                            fields = json.loads(extra)
+                            self.display_assistant_text = fields.get("generationStage") == "SPECULATIVE"
+                    await self._emit({"type": "status", "status": f"{self.current_role.lower()} stream"})
+                elif "textOutput" in event:
+                    text = _clean_model_text(event["textOutput"].get("content", ""))
+                    if text:
+                        role = self.current_role.lower() or "assistant"
+                        await self._emit({"type": "transcript", "role": role, "text": text})
+                elif "audioOutput" in event:
+                    content = event["audioOutput"].get("content", "")
+                    if content:
+                        await self._emit(
+                            {
+                                "type": "audio",
+                                "audio": content,
+                                "sampleRate": VOICE_OUTPUT_RATE,
+                                "encoding": "pcm16",
+                            }
+                        )
+                elif "completionEnd" in event or "contentEnd" in event:
+                    await self._emit({"type": "status", "status": "turn complete"})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if self.is_active:
+                await self._emit({"type": "error", "error": _compact(exc, 420)})
+
+    async def end_session(self) -> None:
+        if not self.is_active:
+            return
+        self.is_active = False
+        if self.audio_started and not self.audio_ended:
+            self.audio_ended = True
+            with contextlib.suppress(Exception):
+                await self._send_event(
+                    _voice_event(
+                        "contentEnd",
+                        {
+                            "promptName": self.prompt_name,
+                            "contentName": self.audio_content_name,
+                        },
+                    )
+                )
+        with contextlib.suppress(Exception):
+            await self._send_event(_voice_event("promptEnd", {"promptName": self.prompt_name}))
+        with contextlib.suppress(Exception):
+            await self._send_event(_voice_event("sessionEnd", {}))
+        with contextlib.suppress(Exception):
+            await self.stream.input_stream.close()
+        if self.response_task and not self.response_task.done():
+            self.response_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.response_task
+
+
+class _MockRealtimeVoiceBridge:
+    def __init__(self, output_queue: asyncio.Queue[dict[str, Any]]) -> None:
+        self.output_queue = output_queue
+        self.is_active = False
+        self.chunks = 0
+        self.bytes_seen = 0
+        self.sent_audio = False
+
+    async def _emit(self, message: dict[str, Any]) -> None:
+        await self.output_queue.put(message)
+
+    async def start(self) -> None:
+        self.is_active = True
+        await self._emit(
+            {
+                "type": "ready",
+                "mode": "mock",
+                "model": VOICE_MODEL_ID,
+                "region": VOICE_REGION,
+                "voiceId": VOICE_ID,
+                "inputSampleRate": VOICE_INPUT_RATE,
+                "outputSampleRate": VOICE_OUTPUT_RATE,
+            }
+        )
+
+    async def send_audio_chunk(self, audio_bytes: bytes) -> None:
+        if not self.is_active:
+            return
+        self.chunks += 1
+        self.bytes_seen += len(audio_bytes)
+        if self.chunks == 1:
+            await self._emit({"type": "transcript", "role": "user", "text": "live audio detected"})
+        if not self.sent_audio and self.bytes_seen >= 2048:
+            self.sent_audio = True
+            await self._emit({"type": "transcript", "role": "assistant", "text": "I hear you live."})
+            await self._emit(
+                {
+                    "type": "audio",
+                    "audio": _mock_voice_pcm_b64(),
+                    "sampleRate": VOICE_OUTPUT_RATE,
+                    "encoding": "pcm16",
+                }
+            )
+
+    async def end_session(self) -> None:
+        self.is_active = False
+        await self._emit({"type": "status", "status": "mock session closed"})
+
+
+def _mock_voice_pcm_b64() -> str:
+    sample_rate = VOICE_OUTPUT_RATE
+    samples = int(sample_rate * 0.18)
+    data = bytearray()
+    for i in range(samples):
+        # Soft two-tone chirp, low amplitude so tests do not blast speakers.
+        phase = i / sample_rate
+        value = int(2200 * (0.55 * math.sin(2 * math.pi * 440 * phase)))
+        data.extend(int(value).to_bytes(2, "little", signed=True))
+    return base64.b64encode(bytes(data)).decode("ascii")
 
 
 def _content_text(content: Any) -> str:
@@ -800,6 +1093,12 @@ async def health() -> dict[str, Any]:
         "active": HEADLESS_ACTIVE,
         "default_model": DEFAULT_MODEL,
         "models": [UNIFIED_ALIAS, *MODEL_ROUTES],
+        "voice_realtime": {
+            "model_id": VOICE_MODEL_ID,
+            "region": VOICE_REGION,
+            "voice_id": VOICE_ID,
+            "mode": _voice_mode(),
+        },
     }
 
 
@@ -815,35 +1114,9 @@ async def state(request: Request) -> dict[str, Any]:
 @app.get("/memory/state")
 async def memory_state(request: Request) -> dict[str, Any]:
     _check_key(request)
-
-    def _count_lines(path: Path) -> int:
-        try:
-            if not path.exists():
-                return 0
-            with open(path, "r", encoding="utf-8") as f:
-                return sum(1 for _ in f)
-        except OSError:
-            return 0
-
-    return {
-        "status": "connected",
-        "vault": str(VAULT_DIR),
-        "sources": dict(STATE.get("memory_sources", {})),
-        "counts": {
-            "transcript_lines": await asyncio.to_thread(_count_lines, TRANSCRIPT_PATH),
-            "phone_lines": await asyncio.to_thread(_count_lines, PHONE_TRANSCRIPT_PATH),
-            "dream_lines": await asyncio.to_thread(_count_lines, DREAM_LOG_PATH),
-            "thought_lines": await asyncio.to_thread(_count_lines, THOUGHT_LOG_PATH),
-            "browser_memory_events": await asyncio.to_thread(_count_lines, BROWSER_MEMORY_PATH),
-            "memory_events": await asyncio.to_thread(_count_lines, MEMORY_EVENTS_PATH),
-        },
-        "recent": {
-            "transcript": _redact_text(await asyncio.to_thread(_tail_file, TRANSCRIPT_PATH, 1200), 1200),
-            "dream": _redact_text(await asyncio.to_thread(_tail_file, DREAM_LOG_PATH, 1200), 1200),
-            "thought": _redact_text(await asyncio.to_thread(_tail_file, THOUGHT_LOG_PATH, 900), 900),
-            "browser": _redact_text(await asyncio.to_thread(_tail_file, BROWSER_MEMORY_PATH, 900), 900),
-        },
-    }
+    state = await asyncio.to_thread(_memory_manager.state)
+    STATE["memory_sources"] = state.get("sources", {})
+    return state
 
 
 @app.get("/memory/recall")
@@ -965,6 +1238,143 @@ async def chat_completions(request: Request) -> dict[str, Any]:
             "latency_ms": meta.get("latency_ms"),
         },
     }
+
+
+@app.get("/realtime/voice/config")
+async def realtime_voice_config(request: Request) -> dict[str, Any]:
+    _check_key(request)
+    return {
+        "model": VOICE_MODEL_ID,
+        "region": VOICE_REGION,
+        "voiceId": VOICE_ID,
+        "inputSampleRate": VOICE_INPUT_RATE,
+        "outputSampleRate": VOICE_OUTPUT_RATE,
+        "maxSessionSeconds": VOICE_MAX_SESSION_SECONDS,
+        "style": "warm-southern-feminine",
+        "mode": _voice_mode(),
+    }
+
+
+@app.websocket("/realtime/voice")
+async def realtime_voice(websocket: WebSocket) -> None:
+    if not await _accept_voice_ws(websocket):
+        return
+
+    output_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=96)
+    bridge: _RealtimeVoiceBridge | _MockRealtimeVoiceBridge
+    bridge = _MockRealtimeVoiceBridge(output_queue) if _voice_mode() == "mock" else _RealtimeVoiceBridge(output_queue)
+    started = time.monotonic()
+    bytes_in = 0
+    frames_in = 0
+    max_total_bytes = int(VOICE_INPUT_RATE * 2 * VOICE_MAX_SESSION_SECONDS * 1.5)
+    close_code = 1000
+
+    async def _pump_output() -> None:
+        while True:
+            message = await output_queue.get()
+            await websocket.send_json(message)
+
+    pump_task = asyncio.create_task(_pump_output())
+    try:
+        async with _state_lock:
+            voice_state = _voice_route_state()
+            voice_state["sessions_started"] = int(voice_state.get("sessions_started", 0)) + 1
+            voice_state["last_started_at"] = _now()
+            voice_state["last_error"] = ""
+            voice_state["last_mode"] = _voice_mode()
+        await websocket.send_json({"type": "status", "status": "connecting voice"})
+        try:
+            await asyncio.wait_for(bridge.start(), timeout=VOICE_CONNECT_TIMEOUT_SECONDS)
+        except Exception as exc:
+            error = _compact(exc, 520)
+            await websocket.send_json({"type": "error", "error": error})
+            await _record_state(voice_realtime={**_voice_route_state(), "last_error": error})
+            close_code = 1011
+            return
+
+        while True:
+            if time.monotonic() - started > VOICE_MAX_SESSION_SECONDS:
+                await websocket.send_json({"type": "status", "status": "renew live voice"})
+                break
+            message = await asyncio.wait_for(websocket.receive(), timeout=45)
+            if message.get("type") == "websocket.disconnect":
+                break
+            chunk = message.get("bytes")
+            if chunk is not None:
+                if len(chunk) > VOICE_MAX_FRAME_BYTES:
+                    await websocket.send_json({"type": "error", "error": "audio frame too large"})
+                    continue
+                bytes_in += len(chunk)
+                frames_in += 1
+                if bytes_in > max_total_bytes:
+                    await websocket.send_json({"type": "error", "error": "voice session audio limit reached"})
+                    close_code = 1009
+                    break
+                await bridge.send_audio_chunk(chunk)
+                continue
+
+            text = message.get("text")
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "error": "invalid voice control message"})
+                continue
+            kind = str(payload.get("type", "")).lower()
+            if kind == "audio":
+                try:
+                    chunk = base64.b64decode(str(payload.get("audio", "")), validate=True)
+                except Exception:
+                    await websocket.send_json({"type": "error", "error": "invalid audio encoding"})
+                    continue
+                if len(chunk) > VOICE_MAX_FRAME_BYTES:
+                    await websocket.send_json({"type": "error", "error": "audio frame too large"})
+                    continue
+                bytes_in += len(chunk)
+                frames_in += 1
+                await bridge.send_audio_chunk(chunk)
+            elif kind == "start":
+                await websocket.send_json(
+                    {
+                        "type": "status",
+                        "status": "live voice ready",
+                        "model": VOICE_MODEL_ID,
+                        "voiceId": VOICE_ID,
+                    }
+                )
+            elif kind == "stop":
+                break
+            elif kind == "ping":
+                await websocket.send_json({"type": "pong", "t": payload.get("t")})
+            else:
+                await websocket.send_json({"type": "error", "error": "unknown voice control message"})
+    except asyncio.TimeoutError:
+        close_code = 1001
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "status", "status": "live voice idle"})
+    except Exception as exc:
+        close_code = 1011
+        error = _compact(exc, 520)
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "error", "error": error})
+        async with _state_lock:
+            voice_state = _voice_route_state()
+            voice_state["last_error"] = error
+    finally:
+        with contextlib.suppress(Exception):
+            await bridge.end_session()
+        pump_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pump_task
+        async with _state_lock:
+            voice_state = _voice_route_state()
+            voice_state["last_closed_at"] = _now()
+            voice_state["last_duration_seconds"] = round(time.monotonic() - started, 3)
+            voice_state["last_bytes_in"] = bytes_in
+            voice_state["last_frames_in"] = frames_in
+        with contextlib.suppress(Exception):
+            await websocket.close(code=close_code)
 
 
 @app.post("/trigger/thought")

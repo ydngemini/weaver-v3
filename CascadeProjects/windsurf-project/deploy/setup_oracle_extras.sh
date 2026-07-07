@@ -5,15 +5,21 @@
 # Caddy public TLS, and all systemd units.
 #
 # Required env:
-#   ORACLE_HOST          public hostname for TLS, e.g. <PUBLIC_IP>.sslip.io
+#   ORACLE_HOST          public hostname for TLS, e.g. weaverv3.com
 # Optional env:
 #   EXPERTS_GGUF_URL     override the experts model download URL
 #   CLOUD                aws|oracle (default oracle) — tunes the final firewall guidance
+#   WEAVER_HEADLESS_HOST headless UI hostname (default: headless.$ORACLE_HOST)
+#   WEAVER_DASH_HOST     live dashboard hostname (default: dash.$ORACLE_HOST)
+#   WEAVER_STATUS_HOST   health dashboard hostname (default: status.$ORACLE_HOST)
 set -euo pipefail
 
 WIN="$HOME/weaver/CascadeProjects/windsurf-project"
 ORA="$HOME/oracle"
-: "${ORACLE_HOST:?set ORACLE_HOST=<PUBLIC_IP>.sslip.io (or your domain) first}"
+: "${ORACLE_HOST:=weaverv3.com}"
+WEAVER_HEADLESS_HOST="${WEAVER_HEADLESS_HOST:-headless.$ORACLE_HOST}"
+WEAVER_DASH_HOST="${WEAVER_DASH_HOST:-dash.$ORACLE_HOST}"
+WEAVER_STATUS_HOST="${WEAVER_STATUS_HOST:-status.$ORACLE_HOST}"
 EXPERTS_GGUF_URL="${EXPERTS_GGUF_URL:-https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf}"
 CLOUD="${CLOUD:-oracle}"
 
@@ -64,8 +70,18 @@ if ! command -v caddy >/dev/null; then
     sudo apt-get install -y caddy
 fi
 sudo cp "$WIN/deploy/Caddyfile" /etc/caddy/Caddyfile
-echo "ORACLE_HOST=$ORACLE_HOST" | sudo tee /etc/default/caddy >/dev/null
-# The stock caddy.service doesn't read an env file — add a drop-in so {$ORACLE_HOST} resolves.
+tmp_caddy_env="$(mktemp)"
+sudo sh -c "grep -E '^(WEAVER_LLM_KEY|WEAVER_DASH_HASH)=' /etc/default/caddy 2>/dev/null || true" > "$tmp_caddy_env"
+cat >> "$tmp_caddy_env" <<EOF
+ORACLE_HOST=$ORACLE_HOST
+WEAVER_PUBLIC_URL=https://$ORACLE_HOST
+WEAVER_HEADLESS_URL=https://$WEAVER_HEADLESS_HOST
+WEAVER_DASH_URL=https://$WEAVER_DASH_HOST
+WEAVER_STATUS_URL=https://$WEAVER_STATUS_HOST
+EOF
+sudo install -m 0600 "$tmp_caddy_env" /etc/default/caddy
+rm -f "$tmp_caddy_env"
+# The stock caddy.service doesn't read an env file — add a drop-in so key/url vars resolve.
 sudo mkdir -p /etc/systemd/system/caddy.service.d
 printf '[Service]\nEnvironmentFile=/etc/default/caddy\n' \
     | sudo tee /etc/systemd/system/caddy.service.d/env.conf >/dev/null
@@ -88,6 +104,9 @@ Firewall: your Terraform Security Group already allows 80 + 443 (0.0.0.0/0) and 
 AWS Ubuntu AMIs ship no default iptables REJECT — there is nothing to open on this box.
 
 Then:  https://$ORACLE_HOST
+Headless: https://$WEAVER_HEADLESS_HOST
+Dash:     https://$WEAVER_DASH_HOST
+Status:   https://$WEAVER_STATUS_HOST
 Logs:  journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f
 EOF
 else
@@ -103,6 +122,9 @@ cat <<EOF
        sudo apt-get install -y iptables-persistent && sudo netfilter-persistent save
 
 Then:  https://$ORACLE_HOST
+Headless: https://$WEAVER_HEADLESS_HOST
+Dash:     https://$WEAVER_DASH_HOST
+Status:   https://$WEAVER_STATUS_HOST
 Logs:  journalctl -u weaver-llm -u weaver -u oracle-backend -u caddy -f
 EOF
 fi

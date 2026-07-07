@@ -4,56 +4,98 @@
 <meta charset="UTF-8" />
 <title>Weaver - Headless</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="weaver-logo.svg" type="image/svg+xml" />
 <style>
   :root {
     color-scheme: dark;
-    --bg: #06070a;
-    --panel: rgba(13, 15, 20, 0.72);
-    --line: rgba(225, 186, 88, 0.26);
-    --gold: #e1ba58;
-    --blue: #79a9ff;
+    --bg: #08090c;
+    --bg-2: #0c0e13;
+    --panel: rgba(17, 19, 25, 0.72);
+    --panel-2: rgba(22, 25, 34, 0.72);
+    --line: rgba(245, 196, 81, 0.24);
+    --hairline: rgba(255, 255, 255, 0.06);
+    --gold: #f5c451;
+    --gold-soft: #ffe39a;
+    --blue: #3daeff;
+    --electric-deep: #1d6fe0;
     --green: #67d487;
-    --text: #ece8dd;
-    --muted: #a8a396;
+    --rose: #ff6f99;
+    --text: #eef1f6;
+    --muted: #99a1b1;
   }
   * { box-sizing: border-box; }
   html, body { width: 100%; height: 100%; margin: 0; }
   body {
-    background: var(--bg);
+    background:
+      linear-gradient(var(--hairline) 1px, transparent 1px) 0 0 / 100% 46px,
+      linear-gradient(90deg, var(--hairline) 1px, transparent 1px) 0 0 / 46px 100%,
+      radial-gradient(900px 520px at 50% 36%, rgba(61, 174, 255, 0.10), transparent 68%),
+      var(--bg);
     color: var(--text);
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.045;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 0;
+  }
   .top {
     position: fixed; left: 16px; top: 16px; z-index: 2;
     width: min(410px, calc(100vw - 32px));
-    padding: 14px 16px;
-    background: var(--panel);
+    padding: 16px;
+    background: linear-gradient(180deg, rgba(22, 25, 34, 0.76), rgba(12, 14, 19, 0.66));
     border: 1px solid var(--line);
     border-radius: 8px;
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 22px 80px rgba(0, 0, 0, 0.32);
+  }
+  .top::before,
+  .voice::before,
+  .bar::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
   .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-  h1 { margin: 0; font-size: 13px; line-height: 1.1; letter-spacing: 0.18em; color: var(--gold); font-weight: 700; }
+  h1 { margin: 0; font-size: 13px; line-height: 1.1; letter-spacing: 0.18em; color: var(--gold); font-weight: 800; }
   .stamp { color: var(--muted); font-size: 11px; white-space: nowrap; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-top: 12px; }
   .stat { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+  .stat span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dot { width: 8px; height: 8px; border-radius: 999px; background: #4a4e55; flex: none; }
   .dot.on { background: var(--green); box-shadow: 0 0 12px rgba(103, 212, 135, 0.75); }
-  .dot.busy { background: var(--gold); box-shadow: 0 0 12px rgba(225, 186, 88, 0.75); }
+  .dot.busy { background: var(--gold); box-shadow: 0 0 12px rgba(245, 196, 81, 0.75); }
   .readout { margin-top: 12px; color: var(--text); font-size: 13px; line-height: 1.45; }
   .readout b { color: var(--blue); font-weight: 600; }
   .readout span { color: var(--gold); }
   .bar {
     position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 2;
-    display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 8px;
+    display: grid; grid-template-columns: auto auto auto 1fr auto auto; gap: 8px;
     align-items: center;
     padding: 10px;
-    background: var(--panel);
+    background: linear-gradient(180deg, rgba(22, 25, 34, 0.78), rgba(12, 14, 19, 0.70));
     border: 1px solid var(--line);
     border-radius: 8px;
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 22px 80px rgba(0, 0, 0, 0.34);
   }
   button, input {
     height: 42px;
@@ -62,21 +104,23 @@
     font: inherit;
   }
   button {
-    background: rgba(225, 186, 88, 0.12);
+    background: rgba(245, 196, 81, 0.11);
     color: var(--text);
     padding: 0 14px;
     cursor: pointer;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
   }
-  button.primary { background: var(--gold); color: #151109; border-color: transparent; font-weight: 700; }
+  button:hover { transform: translateY(-1px); border-color: rgba(245, 196, 81, 0.42); }
+  button.primary { background: var(--gold); color: #151109; border-color: transparent; font-weight: 800; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   input {
     min-width: 0;
-    background: rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.055);
     color: var(--text);
     padding: 0 12px;
     outline: none;
   }
-  input:focus, button:focus-visible { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(225,186,88,0.2); }
+  input:focus, button:focus-visible { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(245,196,81,0.2); }
   .voice {
     position: fixed; right: 16px; top: 16px; z-index: 2;
     width: min(360px, calc(100vw - 32px));
@@ -84,15 +128,27 @@
     font-size: 12px;
     line-height: 1.45;
     padding: 12px 14px;
-    border: 1px solid rgba(121,169,255,0.22);
+    border: 1px solid rgba(61,174,255,0.25);
     border-radius: 8px;
-    background: rgba(8, 12, 18, 0.62);
-    backdrop-filter: blur(10px);
+    background: linear-gradient(180deg, rgba(12, 18, 26, 0.70), rgba(8, 10, 14, 0.62));
+    backdrop-filter: blur(14px);
+    box-shadow: 0 22px 80px rgba(0, 0, 0, 0.32);
+  }
+  @media (min-width: 761px) and (max-width: 900px) {
+    .voice { width: min(360px, calc(100vw - 458px)); }
   }
   @media (max-width: 760px) {
-    .voice { top: auto; bottom: 82px; right: 12px; left: 12px; width: auto; }
+    .voice { top: auto; bottom: 126px; right: 12px; left: 12px; width: auto; }
     .top { left: 12px; top: 12px; width: calc(100vw - 24px); }
-    .bar { left: 12px; right: 12px; bottom: 12px; grid-template-columns: auto auto 1fr auto; }
+    .bar {
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .bar button { width: 100%; padding: 0 8px; }
+    #text { grid-column: 1 / span 2; }
+    #send { grid-column: 3; }
     #dream { display: none; }
     h1 { letter-spacing: 0.14em; }
   }
@@ -120,6 +176,7 @@
 </section>
 <form id="bar" class="bar">
   <button id="wake" type="button" class="primary">Wake</button>
+  <button id="live" type="button" aria-pressed="false">Live</button>
   <button id="mic" type="button">Mic</button>
   <input id="text" autocomplete="off" placeholder="Talk to Weaver" aria-label="Talk to Weaver" />
   <button id="send" type="submit" class="primary">Send</button>
@@ -128,7 +185,7 @@
 <audio id="audio" playsinline></audio>
 <script>
 const canvas = document.getElementById('field');
-const ctx = canvas.getContext('2d', { alpha: false });
+let ctx = null;
 const audio = document.getElementById('audio');
 audio.preload = 'auto';
 audio.playsInline = true;
@@ -148,6 +205,7 @@ const ui = {
   thoughtDot: document.getElementById('thoughtDot'),
   dreamDot: document.getElementById('dreamDot'),
   wake: document.getElementById('wake'),
+  live: document.getElementById('live'),
   mic: document.getElementById('mic'),
   send: document.getElementById('send'),
   dream: document.getElementById('dream'),
@@ -165,13 +223,138 @@ const state = {
   audioError: '',
   wakeSpoken: false,
   speaking: false,
+  voiceMode: 'locked',
+  speechRun: 0,
+  voiceAbort: null,
+  playReject: null,
+  pendingVoiceUrl: '',
+  pendingVoiceText: '',
+  lastVoiceText: '',
+  lastVoiceError: '',
+  lastTtsStatus: 0,
+  lastTtsContentType: '',
+  lastPlaybackAt: 0,
+  reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+  lowPower: false,
+  targetFps: 60,
+  lastFrame: 0,
+  raf: 0,
   particles: [],
+  scene3d: null,
+  visualMode: 'boot',
+  pointerX: 0,
+  pointerY: 0,
+  targetPointerX: 0,
+  targetPointerY: 0,
+  visualEnergy: 0,
   lastState: null,
+  realtime: {
+    ws: null,
+    stream: null,
+    source: null,
+    processor: null,
+    inputRate: 0,
+    outputRate: 24000,
+    playHead: 0,
+    live: false,
+    connecting: false,
+    startedAt: 0,
+    bytesSent: 0,
+    bytesReceived: 0,
+    framesSent: 0,
+    framesReceived: 0,
+    droppedFrames: 0,
+    reconnects: 0,
+    lastError: '',
+    lastStatus: '',
+    lastHeard: '',
+    lastSaid: '',
+    lastAudioAt: 0,
+    model: 'amazon.nova-2-sonic-v1:0',
+    voiceId: 'tiffany',
+    mode: '',
+    stopTimer: 0,
+    runId: 0,
+  },
 };
 const HEADLESS_MODEL = 'weaver-headless';
 const HEADLESS_MODEL_LABEL = 'Nova Pro headless';
+const THREE_MODULE_URL = '/vendor/three.module.js';
+const CORE_QUBITS = [
+  { id: 'Q0', role: 'Logic', color: 0x9b5cff },
+  { id: 'Q1', role: 'Emotion', color: 0x7c5cff },
+  { id: 'Q2', role: 'Intuition', color: 0x4f72ff },
+  { id: 'Q3', role: 'Memory', color: 0x3daeff },
+  { id: 'Q4', role: 'Sovereignty', color: 0x56d7ff },
+  { id: 'Q5', role: 'Attention', color: 0x78d88b },
+  { id: 'Q6', role: 'Reflection', color: 0xd8d65f },
+  { id: 'Q7', role: 'Language', color: 0xffcf4f },
+  { id: 'Q8', role: 'Planning', color: 0xffa24a },
+  { id: 'Q9', role: 'Novelty', color: 0xffd76a },
+  { id: 'Q10', role: 'Stability', color: 0xff914d },
+  { id: 'Q11', role: 'Meta-Reasoning', color: 0xd83cff },
+];
+const QUANTUM_ARCHITECTURE = {
+  summary: {
+    label: '156Q ARK',
+    detail: '12 core + 144 reservoir',
+    coreQubits: 12,
+    reservoirQubits: 144,
+    topology: 'dodecahedral core / akashic reservoir / readout membrane',
+  },
+  modules: [
+    {
+      key: 'encoding',
+      label: 'STATE ENCODING',
+      detail: 'basis -> phase',
+      color: 0x3daeff,
+      anchor: [-3.75, -2.42, 1.18],
+      labelAnchor: [-2.92, -1.35, 1.42],
+      targets: [0, 2, 3, 7, 11],
+    },
+    {
+      key: 'dynamics',
+      label: 'OPEN SYSTEM',
+      detail: 'drive + decay',
+      color: 0x78d88b,
+      anchor: [0, 3.84, -0.55],
+      labelAnchor: [0, 2.54, 0.28],
+      targets: [4, 5, 6, 10],
+    },
+    {
+      key: 'entropy',
+      label: 'ENTROPY ROUTING',
+      detail: 'heat -> sinks',
+      color: 0xffcf4f,
+      anchor: [3.76, -2.28, 1.05],
+      labelAnchor: [2.92, -1.34, 1.42],
+      targets: [4, 5, 6, 10],
+    },
+    {
+      key: 'readout',
+      label: 'MEASUREMENT',
+      detail: 'projection readout',
+      color: 0xeef1f6,
+      anchor: [0, -3.86, 2.2],
+      labelAnchor: [0, -2.44, 2.26],
+      targets: [0, 7, 8, 11],
+    },
+  ],
+  topologicalLayers: [
+    { key: 'core', label: 'L0 CORE', radius: 2.1, color: 0xb679ff, tilt: [0.42, 0.0, 0.0] },
+    { key: 'coupling', label: 'L1 COUPLING', radius: 2.78, color: 0xffe39a, tilt: [1.28, 0.18, 0.0] },
+    { key: 'reservoir', label: 'L2 RESERVOIR', radius: 3.54, color: 0x31cfff, tilt: [0.0, 0.52, 0.0] },
+    { key: 'readout', label: 'L3 READOUT', radius: 4.08, color: 0xeef1f6, tilt: [1.56, 0.0, 0.28] },
+  ],
+};
+const REALTIME_VOICE_INPUT_RATE = 16000;
+const REALTIME_VOICE_OUTPUT_RATE = 24000;
+const REALTIME_MAX_BUFFERED_BYTES = 256 * 1024;
 const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
+const TRAINED_VOICE_TIMEOUT_MS = 10000;
 let audioCtx = null;
+let pollTimer = 0;
+let resizeRaf = 0;
 function key() {
   if (!state.key) {
     state.key = prompt('Enter Weaver brain key:') || '';
@@ -187,14 +370,100 @@ function headers(json = false) {
 function compact(value, max = 280) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
+function configurePerformance() {
+  const cores = navigator.hardwareConcurrency || 4;
+  const memory = navigator.deviceMemory || 4;
+  state.lowPower = state.reducedMotion || cores <= 4 || memory <= 4 || innerWidth < 760;
+  state.targetFps = state.reducedMotion ? 18 : state.lowPower ? 30 : 60;
+}
 function dot(el, mode) {
   el.classList.toggle('on', mode === 'on');
   el.classList.toggle('busy', mode === 'busy');
+}
+function voiceStatus(text, mode = 'on') {
+  ui.voice.textContent = text;
+  dot(ui.voiceDot, mode);
+}
+function clearPendingVoice(revoke = true) {
+  if (state.pendingVoiceUrl && revoke) {
+    try { URL.revokeObjectURL(state.pendingVoiceUrl); } catch (e) {}
+  }
+  state.pendingVoiceUrl = '';
+  state.pendingVoiceText = '';
+}
+function setPendingVoice(url, text, error) {
+  clearPendingVoice();
+  state.pendingVoiceUrl = url || '';
+  state.pendingVoiceText = compact(text, 520);
+  state.lastVoiceError = error?.message || String(error || '');
+  voiceStatus('voice ready - tap Wake', 'busy');
+}
+function canUseBrowserSpeech() {
+  return 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+}
+function browserVoices() {
+  return canUseBrowserSpeech() ? speechSynthesis.getVoices() : [];
+}
+function voiceScore(voice) {
+  const haystack = `${voice.name} ${voice.voiceURI} ${voice.lang}`.toLowerCase();
+  let score = 0;
+  if (/^en[-_]/.test((voice.lang || '').toLowerCase())) score += 40;
+  if (/aria|jenny|samantha|ava|allison|susan|victoria|karen|zira/.test(haystack)) score += 35;
+  if (/google (us|uk) english|natural|neural|premium|enhanced/.test(haystack)) score += 25;
+  if (/female/.test(haystack)) score += 12;
+  if (/daniel|david|mark|george|male/.test(haystack)) score -= 12;
+  if (voice.localService === false) score += 4;
+  return score;
+}
+function pickBrowserVoice() {
+  return browserVoices()
+    .slice()
+    .sort((a, b) => voiceScore(b) - voiceScore(a) || a.name.localeCompare(b.name))[0] || null;
+}
+function waitForBrowserVoices() {
+  if (!canUseBrowserSpeech() || browserVoices().length) return Promise.resolve();
+  return new Promise(resolve => {
+    const done = () => {
+      speechSynthesis.removeEventListener?.('voiceschanged', done);
+      resolve();
+    };
+    speechSynthesis.addEventListener?.('voiceschanged', done, { once: true });
+    setTimeout(done, 800);
+  });
+}
+function unlockBrowserSpeech() {
+  if (!canUseBrowserSpeech()) return;
+  try {
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(' ');
+    utterance.volume = 0;
+    utterance.rate = 1;
+    speechSynthesis.speak(utterance);
+  } catch (e) {}
+}
+function silenceCurrentSpeech() {
+  if (state.voiceAbort) {
+    state.voiceAbort.abort();
+    state.voiceAbort = null;
+  }
+  if (state.playReject) {
+    state.playReject(new Error('stale speech'));
+    state.playReject = null;
+  }
+  try {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+  } catch (e) {}
+  if (canUseBrowserSpeech()) {
+    try { speechSynthesis.cancel(); } catch (e) {}
+  }
 }
 async function unlockAudio() {
   if (state.audioUnlocked) return true;
   let unlocked = false;
   state.audioError = '';
+  unlockBrowserSpeech();
   try {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     if (AudioContextCtor) {
@@ -233,18 +502,961 @@ async function unlockAudio() {
     audio.volume = 1;
   }
   state.audioUnlocked = unlocked;
-  state.voiceReady = unlocked;
-  ui.voice.textContent = unlocked ? 'voice ready' : `audio blocked: ${state.audioError || 'tap Wake again'}`;
-  dot(ui.voiceDot, unlocked ? 'on' : '');
+  state.voiceReady = unlocked || canUseBrowserSpeech();
+  state.voiceMode = unlocked ? 'trained-ready' : (canUseBrowserSpeech() ? 'browser-ready' : 'locked');
+  if (unlocked) voiceStatus('trained voice ready', 'on');
+  else if (canUseBrowserSpeech()) voiceStatus('browser voice ready', 'on');
+  else voiceStatus(`audio blocked: ${state.audioError || 'tap Wake again'}`, '');
   return unlocked;
+}
+async function replayPendingVoice() {
+  const runId = state.speechRun;
+  if (state.pendingVoiceUrl) {
+    const url = state.pendingVoiceUrl;
+    const text = state.pendingVoiceText;
+    state.pendingVoiceUrl = '';
+    state.pendingVoiceText = '';
+    state.speaking = true;
+    state.pulse = Math.max(state.pulse, 1);
+    state.voiceMode = 'trained-replay';
+    voiceStatus('playing voice', 'busy');
+    try {
+      await playVoiceUrl(url, runId, { revokeOnFailure: false });
+      state.speaking = false;
+      state.audioError = '';
+      state.lastVoiceError = '';
+      state.lastPlaybackAt = performance.now();
+      voiceStatus('voice ready', 'on');
+      return true;
+    } catch (e) {
+      state.speaking = false;
+      setPendingVoice(url, text, e);
+      return false;
+    }
+  }
+  if (state.pendingVoiceText) {
+    const text = state.pendingVoiceText;
+    clearPendingVoice();
+    if (canUseBrowserSpeech()) {
+      return browserSpeak(text, false, runId);
+    }
+    await speak(text);
+    return true;
+  }
+  return false;
 }
 async function brainFetch(path, options = {}) {
   const r = await fetch(path, { ...options, headers: { ...headers(Boolean(options.body)), ...(options.headers || {}) } });
   if (!r.ok) throw new Error(`${path} ${r.status}`);
   return r.json();
 }
+function updateRealtimeButton() {
+  ui.live.disabled = false;
+  ui.live.textContent = state.realtime.live ? 'Stop' : (state.realtime.connecting ? 'Live...' : 'Live');
+  ui.live.classList.toggle('primary', state.realtime.live);
+  ui.live.setAttribute('aria-pressed', state.realtime.live ? 'true' : 'false');
+}
+function setRealtimeStatus(text, mode = state.realtime.live ? 'busy' : '') {
+  state.realtime.lastStatus = compact(text, 180);
+  voiceStatus(state.realtime.lastStatus || 'live voice', mode);
+  updateRealtimeButton();
+}
+function base64UrlEncode(value) {
+  const bytes = new TextEncoder().encode(String(value || ''));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+function realtimeVoiceUrl() {
+  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${scheme}//${location.host}/brain/realtime/voice`;
+}
+function base64ToBytes(value) {
+  const binary = atob(value || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+function downsampleToPcm16(input, inputRate, outputRate) {
+  if (!input?.length || !inputRate || !outputRate) return new ArrayBuffer(0);
+  const ratio = inputRate / outputRate;
+  const length = Math.max(1, Math.floor(input.length / ratio));
+  const pcm = new Int16Array(length);
+  for (let i = 0; i < length; i++) {
+    const start = Math.floor(i * ratio);
+    const end = Math.min(input.length, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    let count = 0;
+    for (let j = start; j < end; j++) {
+      sum += input[j];
+      count++;
+    }
+    const sample = Math.max(-1, Math.min(1, count ? sum / count : input[start] || 0));
+    pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return pcm.buffer;
+}
+async function playRealtimePcm(audioBase64, sampleRate = REALTIME_VOICE_OUTPUT_RATE) {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) throw new Error('audio context unavailable');
+  audioCtx = audioCtx || new AudioContextCtor();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  const bytes = base64ToBytes(audioBase64);
+  const samples = Math.floor(bytes.byteLength / 2);
+  if (!samples) return;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, samples * 2);
+  const buffer = audioCtx.createBuffer(1, samples, sampleRate);
+  const out = buffer.getChannelData(0);
+  for (let i = 0; i < samples; i++) out[i] = view.getInt16(i * 2, true) / 32768;
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioCtx.destination);
+  const now = audioCtx.currentTime;
+  if (!state.realtime.playHead || state.realtime.playHead < now || state.realtime.playHead - now > 1.2) {
+    state.realtime.playHead = now + 0.035;
+  }
+  const startAt = state.realtime.playHead;
+  state.realtime.playHead += buffer.duration;
+  state.speaking = true;
+  state.pulse = Math.max(state.pulse, 1);
+  clearTimeout(state.realtime.stopTimer);
+  source.onended = () => {
+    state.realtime.stopTimer = setTimeout(() => {
+      if (audioCtx && audioCtx.currentTime >= state.realtime.playHead - 0.05) {
+        state.speaking = false;
+        if (state.realtime.live) setRealtimeStatus('live listening', 'on');
+      }
+    }, 90);
+  };
+  source.start(startAt);
+  state.realtime.lastAudioAt = performance.now();
+}
+function cleanupRealtimeCapture() {
+  if (state.realtime.processor) {
+    state.realtime.processor.onaudioprocess = null;
+    try { state.realtime.processor.disconnect(); } catch (e) {}
+  }
+  if (state.realtime.source) {
+    try { state.realtime.source.disconnect(); } catch (e) {}
+  }
+  if (state.realtime.stream) {
+    for (const track of state.realtime.stream.getTracks()) {
+      try { track.stop(); } catch (e) {}
+    }
+  }
+  state.realtime.processor = null;
+  state.realtime.source = null;
+  state.realtime.stream = null;
+}
+function attachRealtimeCapture(stream, ws) {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) throw new Error('audio context unavailable');
+  audioCtx = audioCtx || new AudioContextCtor();
+  state.realtime.stream = stream;
+  state.realtime.inputRate = audioCtx.sampleRate || 48000;
+  state.realtime.source = audioCtx.createMediaStreamSource(stream);
+  state.realtime.processor = audioCtx.createScriptProcessor(state.lowPower ? 4096 : 2048, 1, 1);
+  state.realtime.processor.onaudioprocess = event => {
+    if (!state.realtime.live || ws.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount > REALTIME_MAX_BUFFERED_BYTES) {
+      state.realtime.droppedFrames++;
+      return;
+    }
+    const input = event.inputBuffer.getChannelData(0);
+    const pcm = downsampleToPcm16(input, state.realtime.inputRate, REALTIME_VOICE_INPUT_RATE);
+    if (!pcm.byteLength) return;
+    ws.send(pcm);
+    state.realtime.bytesSent += pcm.byteLength;
+    state.realtime.framesSent++;
+  };
+  state.realtime.source.connect(state.realtime.processor);
+  state.realtime.processor.connect(audioCtx.destination);
+}
+async function handleRealtimeMessage(event) {
+  const data = typeof event.data === 'string' ? JSON.parse(event.data) : {};
+  if (data.type === 'ready') {
+    state.realtime.model = data.model || state.realtime.model;
+    state.realtime.voiceId = data.voiceId || state.realtime.voiceId;
+    state.realtime.outputRate = data.outputSampleRate || REALTIME_VOICE_OUTPUT_RATE;
+    state.realtime.mode = data.mode || '';
+    setRealtimeStatus(`live ${state.realtime.voiceId}`, 'on');
+  } else if (data.type === 'status') {
+    setRealtimeStatus(data.status || 'live voice', state.realtime.live ? 'busy' : '');
+  } else if (data.type === 'transcript') {
+    const text = compact(data.text, 360);
+    if ((data.role || '').toLowerCase() === 'user') {
+      state.realtime.lastHeard = text;
+      ui.heard.textContent = text || '-';
+    } else {
+      state.realtime.lastSaid = text;
+      ui.said.textContent = text || '-';
+    }
+  } else if (data.type === 'audio') {
+    state.realtime.framesReceived++;
+    state.realtime.bytesReceived += Math.floor((data.audio || '').length * 0.75);
+    await playRealtimePcm(data.audio, data.sampleRate || state.realtime.outputRate);
+    setRealtimeStatus('live speaking', 'busy');
+  } else if (data.type === 'error') {
+    state.realtime.lastError = compact(data.error || 'live voice error', 420);
+    setRealtimeStatus(state.realtime.lastError, '');
+  }
+}
+function stopRealtimeVoice(reason = 'live stopped') {
+  state.realtime.runId++;
+  const ws = state.realtime.ws;
+  state.realtime.live = false;
+  state.realtime.connecting = false;
+  cleanupRealtimeCapture();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify({ type: 'stop' })); } catch (e) {}
+    try { ws.close(1000, 'stop'); } catch (e) {}
+  }
+  state.realtime.ws = null;
+  clearTimeout(state.realtime.stopTimer);
+  updateRealtimeButton();
+  if (reason) setRealtimeStatus(reason, reason === 'live stopped' ? 'on' : '');
+}
+async function startRealtimeVoice() {
+  if (state.realtime.live || state.realtime.connecting) {
+    stopRealtimeVoice('live stopped');
+    return;
+  }
+  const runId = ++state.realtime.runId;
+  key();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setRealtimeStatus('mic unavailable', '');
+    return;
+  }
+  state.realtime.connecting = true;
+  state.realtime.lastError = '';
+  state.realtime.bytesSent = 0;
+  state.realtime.bytesReceived = 0;
+  state.realtime.framesSent = 0;
+  state.realtime.framesReceived = 0;
+  state.realtime.droppedFrames = 0;
+  state.realtime.playHead = 0;
+  updateRealtimeButton();
+  setRealtimeStatus('opening live voice', 'busy');
+  await unlockAudio();
+  silenceCurrentSpeech();
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      }
+    });
+    if (runId !== state.realtime.runId) {
+      for (const track of stream.getTracks()) track.stop();
+      return;
+    }
+    const ws = new WebSocket(realtimeVoiceUrl(), ['weaver-realtime', `weaver-key.${base64UrlEncode(state.key)}`]);
+    state.realtime.ws = ws;
+    state.realtime.startedAt = performance.now();
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = async () => {
+      try {
+        if (runId !== state.realtime.runId) {
+          try { ws.close(1000, 'stale'); } catch (e) {}
+          return;
+        }
+        if (audioCtx?.state === 'suspended') await audioCtx.resume();
+        state.realtime.live = true;
+        state.realtime.connecting = false;
+        attachRealtimeCapture(stream, ws);
+        ws.send(JSON.stringify({
+          type: 'start',
+          inputSampleRate: REALTIME_VOICE_INPUT_RATE,
+          outputSampleRate: REALTIME_VOICE_OUTPUT_RATE,
+        }));
+        setRealtimeStatus('live listening', 'on');
+      } catch (e) {
+        state.realtime.lastError = e.message || String(e);
+        stopRealtimeVoice(state.realtime.lastError);
+      }
+    };
+    ws.onmessage = event => {
+      if (runId !== state.realtime.runId) return;
+      handleRealtimeMessage(event).catch(e => {
+        if (runId !== state.realtime.runId) return;
+        state.realtime.lastError = e.message || String(e);
+        setRealtimeStatus(state.realtime.lastError, '');
+      });
+    };
+    ws.onerror = () => {
+      if (runId !== state.realtime.runId) return;
+      state.realtime.lastError = 'live socket error';
+      setRealtimeStatus(state.realtime.lastError, '');
+    };
+    ws.onclose = event => {
+      if (runId !== state.realtime.runId) return;
+      const wasLive = state.realtime.live || state.realtime.connecting;
+      cleanupRealtimeCapture();
+      state.realtime.live = false;
+      state.realtime.connecting = false;
+      state.realtime.ws = null;
+      updateRealtimeButton();
+      if (wasLive && event.code !== 1000) {
+        state.realtime.reconnects++;
+        setRealtimeStatus(state.realtime.lastError || `live closed ${event.code}`, '');
+      }
+    };
+  } catch (e) {
+    if (stream) for (const track of stream.getTracks()) track.stop();
+    state.realtime.connecting = false;
+    state.realtime.live = false;
+    state.realtime.lastError = e.message || String(e);
+    updateRealtimeButton();
+    setRealtimeStatus(state.realtime.lastError, '');
+  }
+}
+function canUseWebGL() {
+  try {
+    const probe = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext && (probe.getContext('webgl2') || probe.getContext('webgl')));
+  } catch (e) {
+    return false;
+  }
+}
+async function initReactiveField() {
+  configurePerformance();
+  if (state.reducedMotion || !canUseWebGL()) {
+    initFallbackField();
+    return;
+  }
+  state.visualMode = 'loading-3d';
+  try {
+    const THREE = await import(THREE_MODULE_URL);
+    createThreeField(THREE);
+    resize();
+    startDraw();
+  } catch (e) {
+    state.visualMode = 'fallback-2d';
+    state.lastVisualError = e.message || String(e);
+    initFallbackField();
+  }
+}
+function initFallbackField() {
+  if (!ctx) ctx = canvas.getContext('2d', { alpha: false });
+  state.visualMode = state.visualMode === 'fallback-2d' ? state.visualMode : '2d';
+  resize();
+  startDraw();
+}
+function createLightningLine(THREE, color, radius) {
+  const points = Array.from({ length: 14 }, () => new THREE.Vector3());
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const line = new THREE.Line(geometry, material);
+  line.userData = { points, radius, phase: Math.random() * 9, next: 0 };
+  return line;
+}
+function refreshLightningLine(line, THREE, t) {
+  const points = line.userData.points;
+  const radius = line.userData.radius || 5;
+  const angle = t * 0.17 + line.userData.phase;
+  const from = new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle * 0.81) * radius * 0.58, -1.2 + Math.sin(angle) * 1.2);
+  const to = new THREE.Vector3(0, 0, 0);
+  for (let i = 0; i < points.length; i++) {
+    const k = i / (points.length - 1);
+    const bend = Math.sin(k * Math.PI) * 0.32;
+    points[i].lerpVectors(from, to, k);
+    points[i].x += (Math.random() - 0.5) * bend;
+    points[i].y += (Math.random() - 0.5) * bend;
+    points[i].z += (Math.random() - 0.5) * bend;
+  }
+  line.geometry.setFromPoints(points);
+}
+function createSparkField(THREE, count, spread, color, size) {
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const r = spread * Math.pow(Math.random(), 0.72);
+    const a = Math.random() * Math.PI * 2;
+    const y = (Math.random() - 0.5) * spread * 0.92;
+    positions[i * 3] = Math.cos(a) * r;
+    positions[i * 3 + 1] = y;
+    positions[i * 3 + 2] = Math.sin(a) * r * 0.62;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color,
+    size,
+    transparent: true,
+    opacity: 0.68,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  return new THREE.Points(geometry, material);
+}
+function makeTextSprite(THREE, text, color) {
+  const c = document.createElement('canvas');
+  c.width = 192;
+  c.height = 96;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
+  g.font = '700 34px Inter, system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = `#${color.toString(16).padStart(6, '0')}`;
+  g.shadowBlur = 14;
+  g.fillStyle = '#eef1f6';
+  g.fillText(text, 96, 38);
+  g.font = '500 13px Inter, system-ui, sans-serif';
+  g.shadowBlur = 7;
+  g.fillStyle = 'rgba(238,241,246,0.70)';
+  g.fillText(CORE_QUBITS.find(q => q.id === text)?.role || '', 96, 65);
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.82,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.82, 0.41, 1);
+  return sprite;
+}
+function makePanelSprite(THREE, title, detail, color, width = 320, height = 112) {
+  const c = document.createElement('canvas');
+  c.width = width;
+  c.height = height;
+  const g = c.getContext('2d');
+  const hex = `#${color.toString(16).padStart(6, '0')}`;
+  g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = 'rgba(8,10,14,0.42)';
+  g.strokeStyle = hex;
+  g.lineWidth = 2;
+  g.beginPath();
+  g.roundRect(10, 10, c.width - 20, c.height - 20, 12);
+  g.fill();
+  g.stroke();
+  g.font = '800 24px Inter, system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = hex;
+  g.shadowBlur = 16;
+  g.fillStyle = '#eef1f6';
+  g.fillText(title, c.width / 2, 43);
+  g.font = '500 14px Inter, system-ui, sans-serif';
+  g.shadowBlur = 8;
+  g.fillStyle = 'rgba(238,241,246,0.68)';
+  g.fillText(detail, c.width / 2, 74);
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(width / 250, height / 250, 1);
+  return sprite;
+}
+function makeLineSegments(THREE, pairs, positions, color, opacity = 0.5, dashed = false) {
+  const points = [];
+  for (const [a, b] of pairs) {
+    points.push(positions[a].x, positions[a].y, positions[a].z, positions[b].x, positions[b].y, positions[b].z);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  const material = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const line = new THREE.LineSegments(geometry, material);
+  if (dashed) line.userData.dashed = true;
+  return line;
+}
+function nearestPairs(positions, count = 3, maxPairs = 0) {
+  const seen = new Set();
+  const pairs = [];
+  for (let i = 0; i < positions.length; i++) {
+    const nearest = positions
+      .map((p, j) => ({ j, d: i === j ? Infinity : positions[i].distanceToSquared(p) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, count);
+    for (const n of nearest) {
+      const a = Math.min(i, n.j);
+      const b = Math.max(i, n.j);
+      const key = `${a}:${b}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push([a, b]);
+      if (maxPairs && pairs.length >= maxPairs) return pairs;
+    }
+  }
+  return pairs;
+}
+function vectorFromArray(THREE, value) {
+  return new THREE.Vector3(value[0], value[1], value[2]);
+}
+function makeCurveLine(THREE, points, color, opacity = 0.34) {
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  return new THREE.Line(geometry, material);
+}
+function arkCurvePoints(THREE, start, end, lift = 0.72, segments = 28) {
+  const mid = start.clone().lerp(end, 0.5);
+  const outward = mid.lengthSq() > 0.001 ? mid.clone().normalize() : new THREE.Vector3(0, 0, 1);
+  const control = mid.add(outward.multiplyScalar(lift));
+  const curve = new THREE.QuadraticBezierCurve3(start, control, end);
+  return curve.getPoints(segments);
+}
+function createQuantumArchitectureOverlays(THREE, corePositions, reservoirPositions) {
+  const root = new THREE.Group();
+  const channelPulse = new Float32Array(CORE_QUBITS.length);
+  const modulePulse = {
+    encoding: 0,
+    dynamics: 0,
+    entropy: 0,
+    readout: 0,
+  };
+  const layerRings = [];
+  const arkRibs = [];
+  const encodingBeams = [];
+  const entropyRoutes = [];
+  const readoutRoutes = [];
+  const dynamicsRings = [];
+  const moduleLabels = [];
+  const layerLabels = [];
+
+  for (const layer of QUANTUM_ARCHITECTURE.topologicalLayers) {
+    const material = new THREE.MeshBasicMaterial({
+      color: layer.color,
+      transparent: true,
+      opacity: 0.045,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(layer.radius, 0.006, 6, state.lowPower ? 96 : 144),
+      material
+    );
+    ring.rotation.set(layer.tilt[0], layer.tilt[1], layer.tilt[2]);
+    ring.userData = { key: layer.key, baseOpacity: 0.038, rate: 0.00045 + layerRings.length * 0.00018 };
+    root.add(ring);
+    layerRings.push(ring);
+
+    const label = makePanelSprite(THREE, layer.label, layer.key, layer.color, 212, 78);
+    label.position.set(-4.18, 1.8 - layerLabels.length * 0.48, -0.36);
+    label.scale.set(0.58, 0.22, 1);
+    label.material.opacity = 0.34;
+    root.add(label);
+    layerLabels.push(label);
+  }
+
+  const ribCount = state.lowPower ? 5 : 8;
+  for (let i = 0; i < ribCount; i++) {
+    const angle = (i / ribCount) * Math.PI * 2;
+    const points = [];
+    for (let j = 0; j <= 42; j++) {
+      const u = (j / 42) * Math.PI;
+      const x = Math.cos(angle) * Math.sin(u) * 3.94;
+      const y = Math.cos(u) * 3.82;
+      const z = Math.sin(angle) * Math.sin(u) * 2.28;
+      points.push(new THREE.Vector3(x, y, z));
+    }
+    const rib = makeCurveLine(THREE, points, 0xffe39a, 0.105);
+    rib.userData = { baseOpacity: 0.075, phase: i * 0.8 };
+    root.add(rib);
+    arkRibs.push(rib);
+  }
+
+  const nodeMaterial = color => new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.72,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const anchorGeometry = new THREE.SphereGeometry(0.055, state.lowPower ? 12 : 18, state.lowPower ? 8 : 12);
+  for (const module of QUANTUM_ARCHITECTURE.modules) {
+    const anchor = vectorFromArray(THREE, module.anchor);
+    const anchorNode = new THREE.Mesh(anchorGeometry, nodeMaterial(module.color));
+    anchorNode.position.copy(anchor);
+    anchorNode.userData = { key: module.key, baseScale: 1 };
+    root.add(anchorNode);
+
+    const label = makePanelSprite(THREE, module.label, module.detail, module.color, 286, 92);
+    label.position.copy(module.labelAnchor ? vectorFromArray(THREE, module.labelAnchor) : anchor.clone().multiplyScalar(1.03));
+    label.position.z += module.key === 'readout' ? 0.34 : 0;
+    label.scale.set(0.82, 0.31, 1);
+    label.material.opacity = 0.42;
+    label.userData = { key: module.key };
+    root.add(label);
+    moduleLabels.push(label);
+
+    for (const target of module.targets) {
+      const end = corePositions[target].clone().multiplyScalar(module.key === 'readout' ? 1.22 : 0.96);
+      const line = makeCurveLine(THREE, arkCurvePoints(THREE, anchor, end, module.key === 'entropy' ? 0.98 : 0.66), module.color, 0.09);
+      line.userData = { key: module.key, target, baseOpacity: module.key === 'dynamics' ? 0.055 : 0.075 };
+      root.add(line);
+      if (module.key === 'encoding') encodingBeams.push(line);
+      if (module.key === 'entropy') entropyRoutes.push(line);
+      if (module.key === 'readout') readoutRoutes.push(line);
+    }
+  }
+
+  for (let i = 0; i < 3; i++) {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(2.38 + i * 0.42, 0.008, 6, state.lowPower ? 84 : 128),
+      new THREE.MeshBasicMaterial({
+        color: i === 1 ? 0x78d88b : 0x56d7ff,
+        transparent: true,
+        opacity: 0.055,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    ring.rotation.set(0.78 + i * 0.34, 0.48 - i * 0.18, i * 0.62);
+    ring.userData = { phase: i * 1.3, rate: 0.0012 + i * 0.00045 };
+    root.add(ring);
+    dynamicsRings.push(ring);
+  }
+
+  const readoutGate = new THREE.Mesh(
+    new THREE.TorusGeometry(0.58, 0.014, 8, state.lowPower ? 64 : 96),
+    new THREE.MeshBasicMaterial({
+      color: 0xeef1f6,
+      transparent: true,
+      opacity: 0.20,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  readoutGate.position.copy(vectorFromArray(THREE, QUANTUM_ARCHITECTURE.modules.find(m => m.key === 'readout').anchor));
+  readoutGate.rotation.x = Math.PI * 0.5;
+  root.add(readoutGate);
+
+  const summaryLabel = makePanelSprite(THREE, QUANTUM_ARCHITECTURE.summary.label, QUANTUM_ARCHITECTURE.summary.detail, 0xffe39a, 300, 92);
+  summaryLabel.position.set(0, 0.08, 3.08);
+  summaryLabel.scale.set(0.96, 0.34, 1);
+  summaryLabel.material.opacity = 0.54;
+  root.add(summaryLabel);
+
+  return {
+    root,
+    channelPulse,
+    modulePulse,
+    layerRings,
+    layerLabels,
+    arkRibs,
+    encodingBeams,
+    entropyRoutes,
+    readoutRoutes,
+    dynamicsRings,
+    moduleLabels,
+    readoutGate,
+    summaryLabel,
+  };
+}
+function createArchitectureManifold(THREE) {
+  const root = new THREE.Group();
+  const phi = (1 + Math.sqrt(5)) / 2;
+  const base = [
+    [-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0],
+    [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi],
+    [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1],
+  ];
+  const corePositions = base.map(([x, y, z]) => new THREE.Vector3(x, y, z).normalize().multiplyScalar(2.05));
+  const corePairs = nearestPairs(corePositions, 5);
+
+  const coreLines = makeLineSegments(THREE, corePairs, corePositions, 0xb679ff, 0.46);
+  root.add(coreLines);
+
+  const coreNodes = [];
+  const coreLights = [];
+  const coreLabels = [];
+  const nodeGeometry = new THREE.SphereGeometry(0.105, state.lowPower ? 14 : 24, state.lowPower ? 10 : 16);
+  for (let i = 0; i < CORE_QUBITS.length; i++) {
+    const q = CORE_QUBITS[i];
+    const mat = new THREE.MeshStandardMaterial({
+      color: q.color,
+      emissive: q.color,
+      emissiveIntensity: 0.42,
+      roughness: 0.28,
+      metalness: 0.22,
+    });
+    const node = new THREE.Mesh(nodeGeometry, mat);
+    node.position.copy(corePositions[i]);
+    node.userData = { index: i, baseScale: 1, role: q.role, id: q.id };
+    root.add(node);
+    coreNodes.push(node);
+
+    const light = new THREE.PointLight(q.color, 0.35, 4.2);
+    light.position.copy(corePositions[i]);
+    root.add(light);
+    coreLights.push(light);
+
+    const label = makeTextSprite(THREE, q.id, q.color);
+    label.position.copy(corePositions[i].clone().multiplyScalar(1.22));
+    root.add(label);
+    coreLabels.push(label);
+  }
+
+  const reservoirCount = 144;
+  const reservoirPositions = [];
+  const reservoirColors = new Float32Array(reservoirCount * 3);
+  const reservoirBase = [];
+  const reservoirPulse = new Float32Array(reservoirCount);
+  const colorA = new THREE.Color(0x36d9ff);
+  const colorB = new THREE.Color(0x6e4dff);
+  for (let i = 0; i < reservoirCount; i++) {
+    const k = i + 0.5;
+    const y = 1 - (k / reservoirCount) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const a = i * Math.PI * (3 - Math.sqrt(5));
+    const p = new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r).multiplyScalar(3.52);
+    reservoirPositions.push(p);
+    const mix = (p.x / 7.04) + 0.5;
+    const c = colorA.clone().lerp(colorB, Math.max(0, Math.min(1, 1 - mix)));
+    reservoirBase.push(c.clone());
+    reservoirColors[i * 3] = c.r;
+    reservoirColors[i * 3 + 1] = c.g;
+    reservoirColors[i * 3 + 2] = c.b;
+  }
+  const reservoirGeometry = new THREE.BufferGeometry();
+  reservoirGeometry.setAttribute('position', new THREE.Float32BufferAttribute(reservoirPositions.flatMap(p => [p.x, p.y, p.z]), 3));
+  reservoirGeometry.setAttribute('color', new THREE.BufferAttribute(reservoirColors, 3));
+  const reservoirMaterial = new THREE.PointsMaterial({
+    size: state.lowPower ? 0.032 : 0.046,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.76,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const reservoir = new THREE.Points(reservoirGeometry, reservoirMaterial);
+  root.add(reservoir);
+
+  const reservoirPairs = nearestPairs(reservoirPositions, 3, state.lowPower ? 170 : 260);
+  const localLines = makeLineSegments(THREE, reservoirPairs, reservoirPositions, 0x31cfff, 0.16);
+  root.add(localLines);
+
+  const longPairs = [];
+  for (let i = 0; i < (state.lowPower ? 20 : 42); i++) {
+    const a = (i * 23) % reservoirCount;
+    const b = (a + 53 + i * 7) % reservoirCount;
+    longPairs.push([a, b]);
+  }
+  const longLines = makeLineSegments(THREE, longPairs, reservoirPositions, 0xffffff, 0.10, true);
+  root.add(longLines);
+
+  const couplingPositions = corePositions.concat(reservoirPositions);
+  const couplingPairs = [];
+  for (let i = 0; i < corePositions.length; i++) {
+    const nearest = reservoirPositions
+      .map((p, j) => ({ j, d: corePositions[i].distanceToSquared(p) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 3);
+    for (const n of nearest) couplingPairs.push([i, corePositions.length + n.j]);
+  }
+  const couplingLines = makeLineSegments(THREE, couplingPairs, couplingPositions, 0xffe39a, 0.18);
+  root.add(couplingLines);
+
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(3.58, state.lowPower ? 32 : 64, state.lowPower ? 18 : 32),
+    new THREE.MeshBasicMaterial({
+      color: 0x2abfff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.055,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  root.add(halo);
+
+  const architecture = createQuantumArchitectureOverlays(THREE, corePositions, reservoirPositions);
+  root.add(architecture.root);
+
+  return {
+    root,
+    corePositions,
+    coreNodes,
+    coreLights,
+    coreLabels,
+    coreLines,
+    reservoir,
+    reservoirPositions,
+    reservoirColors,
+    reservoirBase,
+    reservoirPulse,
+    reservoirMaterial,
+    localLines,
+    longLines,
+    couplingLines,
+    halo,
+    architecture,
+    firingIndex: 0,
+    firingAt: 0,
+  };
+}
+function createThreeField(THREE) {
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: !state.lowPower,
+    alpha: false,
+    powerPreference: state.lowPower ? 'low-power' : 'high-performance',
+  });
+  renderer.setClearColor(0x08090c, 1);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x08090c, 0.045);
+
+  const camera = new THREE.PerspectiveCamera(42, Math.max(1, innerWidth / innerHeight), 0.1, 80);
+  camera.position.set(0, 0, 8.2);
+
+  const auroraUniforms = {
+    u_time: { value: 0 },
+    u_energy: { value: 0.15 },
+    u_mouse: { value: new THREE.Vector2(0.5, 0.5) },
+    u_resolution: { value: new THREE.Vector2(1, 1) },
+  };
+  const aurora = new THREE.Mesh(
+    new THREE.PlaneGeometry(28, 18),
+    new THREE.ShaderMaterial({
+      depthWrite: false,
+      depthTest: false,
+      uniforms: auroraUniforms,
+      vertexShader: `
+        varying vec2 v_uv;
+        void main() {
+          v_uv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 v_uv;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        uniform float u_energy;
+        uniform vec2 u_mouse;
+        float hash(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                     mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+        }
+        float fbm(vec2 p) {
+          float v = 0.0, a = 0.5;
+          mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+          for (int i = 0; i < 4; i++) { v += a * noise(p); p = m * p; a *= 0.5; }
+          return v;
+        }
+        void main() {
+          vec2 uv = v_uv;
+          vec2 p = uv;
+          p.x *= u_resolution.x / max(u_resolution.y, 1.0);
+          p += (u_mouse - 0.5) * (0.08 + u_energy * 0.08);
+          float t = u_time * 0.045;
+          vec2 q = vec2(fbm(p + vec2(0.0, t)), fbm(p + vec2(5.2, 1.3 - t)));
+          float band = fbm(p + 1.8 * q + vec2(t * 0.5, -t * 0.3));
+          vec3 dark = vec3(0.031, 0.035, 0.047);
+          vec3 gold = vec3(0.961, 0.769, 0.318);
+          vec3 electric = vec3(0.239, 0.682, 1.000);
+          vec3 rose = vec3(1.000, 0.420, 0.616);
+          vec3 col = dark;
+          col = mix(col, electric, smoothstep(0.48, 1.08, q.x + u_energy * 0.55) * 0.54);
+          col = mix(col, gold, smoothstep(0.44, 0.95, band + u_energy * 0.34) * 0.72);
+          col += rose * smoothstep(0.78, 1.15, q.y + u_energy * 0.32) * 0.12;
+          float md = distance(uv, u_mouse);
+          col += mix(gold, electric, 0.46) * smoothstep(0.42, 0.0, md) * (0.08 + u_energy * 0.10);
+          float vig = smoothstep(1.24, 0.22, length(uv - 0.5));
+          col = mix(dark, col, clamp(vig + 0.08, 0.0, 1.0));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    })
+  );
+  aurora.renderOrder = -10;
+  scene.add(aurora);
+
+  scene.add(new THREE.HemisphereLight(0xffe39a, 0x0a1226, 0.58));
+  const keyLight = new THREE.DirectionalLight(0xffd98a, 1.75);
+  keyLight.position.set(-4, 5, 5);
+  scene.add(keyLight);
+  const rimLight = new THREE.PointLight(0x3daeff, 1.6, 18);
+  rimLight.position.set(-5.5, 2.8, -3.6);
+  scene.add(rimLight);
+  const flashLight = new THREE.PointLight(0xffe39a, 0, 22);
+  flashLight.position.set(0, 0, 3.5);
+  scene.add(flashLight);
+
+  const manifold = createArchitectureManifold(THREE);
+  scene.add(manifold.root);
+
+  const dust = createSparkField(THREE, state.lowPower ? 220 : 520, 7.6, 0x3daeff, state.lowPower ? 0.018 : 0.024);
+  scene.add(dust);
+  const goldDust = createSparkField(THREE, state.lowPower ? 80 : 160, 5.0, 0xffe39a, state.lowPower ? 0.025 : 0.032);
+  scene.add(goldDust);
+
+  const bolts = [
+    createLightningLine(THREE, 0xbff7ff, 5.7),
+    createLightningLine(THREE, 0xffe39a, 4.9),
+    createLightningLine(THREE, 0x8ecfff, 6.4),
+  ];
+  for (const bolt of bolts) scene.add(bolt);
+
+  state.scene3d = {
+    THREE,
+    renderer,
+    scene,
+    camera,
+    auroraUniforms,
+    manifold,
+    dust,
+    goldDust,
+    bolts,
+    flashLight,
+    lastBoltAt: 0,
+  };
+  state.visualMode = 'three';
+}
+function resizeThreeField() {
+  const s = state.scene3d;
+  if (!s) return;
+  const dpr = Math.min(devicePixelRatio || 1, state.lowPower ? 1.05 : 1.55);
+  s.renderer.setPixelRatio(dpr);
+  s.renderer.setSize(innerWidth, innerHeight, false);
+  s.camera.aspect = Math.max(0.1, innerWidth / Math.max(1, innerHeight));
+  s.camera.updateProjectionMatrix();
+  s.auroraUniforms.u_resolution.value.set(Math.max(1, innerWidth * dpr), Math.max(1, innerHeight * dpr));
+}
 function resize() {
-  state.dpr = Math.min(devicePixelRatio || 1, 1.5);
+  configurePerformance();
+  if (state.scene3d) {
+    resizeThreeField();
+    return;
+  }
+  state.dpr = Math.min(devicePixelRatio || 1, state.lowPower ? 1.1 : 1.5);
   state.w = Math.floor(innerWidth * state.dpr);
   state.h = Math.floor(innerHeight * state.dpr);
   canvas.width = state.w;
@@ -252,7 +1464,11 @@ function resize() {
   seed();
 }
 function seed() {
-  const count = Math.min(140, Math.max(72, Math.floor((innerWidth * innerHeight) / 17000)));
+  const area = innerWidth * innerHeight;
+  const divisor = state.reducedMotion ? 52000 : state.lowPower ? 28000 : 17000;
+  const min = state.reducedMotion ? 24 : state.lowPower ? 44 : 72;
+  const max = state.reducedMotion ? 44 : state.lowPower ? 88 : 140;
+  const count = Math.min(max, Math.max(min, Math.floor(area / divisor)));
   state.particles = Array.from({ length: count }, (_, i) => ({
     a: (i / count) * Math.PI * 2,
     r: 0.12 + Math.random() * 0.48,
@@ -261,9 +1477,224 @@ function seed() {
     hue: Math.random() < 0.62 ? 42 : 214,
   }));
 }
-function draw() {
-  state.phase += 1 / 60;
-  state.pulse *= 0.985;
+function queueResize() {
+  if (resizeRaf) return;
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = 0;
+    resize();
+  });
+}
+function startDraw() {
+  if (!state.raf && !document.hidden) state.raf = requestAnimationFrame(draw);
+}
+function stopDraw() {
+  if (state.raf) cancelAnimationFrame(state.raf);
+  state.raf = 0;
+}
+function drawThree(now = 0) {
+  state.raf = 0;
+  if (document.hidden) return;
+  const frameMs = 1000 / state.targetFps;
+  if (state.lastFrame && now - state.lastFrame < frameMs) {
+    startDraw();
+    return;
+  }
+  const dt = Math.min(2, Math.max(0.35, (now - (state.lastFrame || now)) / 16.67 || 1));
+  state.lastFrame = now;
+  state.phase += dt / 60;
+  state.pulse *= Math.pow(0.982, dt);
+  state.pointerX += (state.targetPointerX - state.pointerX) * 0.055;
+  state.pointerY += (state.targetPointerY - state.pointerY) * 0.055;
+
+  const s = state.scene3d;
+  const t = now * 0.001;
+  const live = state.realtime.live || state.realtime.connecting ? 0.55 : 0;
+  const speaking = state.speaking ? 0.95 : 0;
+  const thinking = state.lastState?.last_thought ? 0.14 : 0;
+  const targetEnergy = Math.min(1.8, 0.12 + state.pulse * 0.75 + live + speaking + thinking);
+  state.visualEnergy += (targetEnergy - state.visualEnergy) * 0.075;
+  const energy = state.visualEnergy;
+
+  s.auroraUniforms.u_time.value = t;
+  s.auroraUniforms.u_energy.value = energy;
+  s.auroraUniforms.u_mouse.value.set(0.5 + state.pointerX * 0.28, 0.5 - state.pointerY * 0.28);
+
+  const m = s.manifold;
+  const narrow = innerWidth < 560;
+  const compact = innerWidth < 900;
+  const layoutScale = narrow ? 0.66 : compact ? 0.84 : 1;
+  const breathe = 1 + Math.sin(t * 1.45) * 0.018 + energy * 0.035;
+  m.root.scale.setScalar(layoutScale * breathe);
+  m.root.rotation.y += (0.0028 + energy * 0.0038) * dt;
+  m.root.rotation.x = Math.sin(t * 0.46) * 0.07 + state.pointerY * 0.10;
+  m.root.rotation.z = state.pointerX * 0.05;
+  m.halo.rotation.y -= (0.002 + energy * 0.0018) * dt;
+  m.halo.rotation.x += 0.001 * dt;
+  m.halo.material.opacity = Math.min(0.12, 0.045 + energy * 0.026);
+  m.coreLines.material.opacity = Math.min(0.72, 0.28 + energy * 0.18);
+  m.localLines.material.opacity = Math.min(0.30, 0.10 + energy * 0.07);
+  m.longLines.material.opacity = Math.min(0.24, 0.06 + energy * 0.09);
+  m.couplingLines.material.opacity = Math.min(0.42, 0.12 + energy * 0.15);
+
+  const shouldFire = now - m.firingAt > Math.max(90, state.speaking ? 115 : state.realtime.live ? 180 : 360);
+  if (shouldFire) {
+    m.firingAt = now;
+    m.firingIndex = (m.firingIndex + 1 + Math.floor(energy * 3)) % m.coreNodes.length;
+    const current = m.coreNodes[m.firingIndex];
+    current.userData.fire = 1.35 + energy * 0.6;
+    if (m.architecture) {
+      const arch = m.architecture;
+      const entropyTargets = QUANTUM_ARCHITECTURE.modules.find(module => module.key === 'entropy').targets;
+      const readoutTargets = QUANTUM_ARCHITECTURE.modules.find(module => module.key === 'readout').targets;
+      arch.channelPulse[m.firingIndex] = Math.max(arch.channelPulse[m.firingIndex], 1.18 + energy * 0.36);
+      arch.modulePulse.encoding = Math.max(arch.modulePulse.encoding, 0.62 + energy * 0.18);
+      arch.modulePulse.dynamics = Math.max(arch.modulePulse.dynamics, 0.42 + energy * 0.24);
+      if (entropyTargets.includes(m.firingIndex)) {
+        arch.modulePulse.entropy = Math.max(arch.modulePulse.entropy, 0.92 + energy * 0.26);
+      }
+      if (readoutTargets.includes(m.firingIndex) || state.speaking || state.realtime.live) {
+        arch.modulePulse.readout = Math.max(arch.modulePulse.readout, 0.82 + energy * 0.24);
+      }
+    }
+    for (let j = 0; j < 8 + Math.floor(energy * 12); j++) {
+      const idx = (m.firingIndex * 17 + j * 23 + Math.floor(t * 11)) % m.reservoirPulse.length;
+      m.reservoirPulse[idx] = Math.max(m.reservoirPulse[idx], 0.85 + energy * 0.28);
+    }
+  }
+  for (let i = 0; i < m.coreNodes.length; i++) {
+    const node = m.coreNodes[i];
+    const fire = node.userData.fire || 0;
+    node.userData.fire = Math.max(0, fire - 0.045 * dt);
+    const wave = 0.5 + 0.5 * Math.sin(t * 2.4 + i * 0.72);
+    const active = i === m.firingIndex ? 0.35 : 0;
+    const glow = Math.min(2.4, 0.32 + energy * 0.42 + fire * 1.15 + active);
+    node.scale.setScalar(1 + fire * 0.72 + energy * 0.08 + wave * 0.035);
+    node.material.emissiveIntensity = glow;
+    m.coreLights[i].intensity = Math.min(4.2, 0.18 + fire * 3.1 + energy * 0.65);
+    m.coreLights[i].distance = 3.4 + energy * 2.2;
+    if (m.coreLabels[i]) {
+      const labelScale = narrow ? 0.62 : compact ? 0.76 : 1;
+      m.coreLabels[i].scale.set(0.82 * labelScale, 0.41 * labelScale, 1);
+    }
+  }
+  if (m.architecture) {
+    const arch = m.architecture;
+    arch.modulePulse.dynamics = Math.max(arch.modulePulse.dynamics, energy * 0.16);
+    if (state.speaking || state.realtime.live) {
+      arch.modulePulse.readout = Math.max(arch.modulePulse.readout, 0.52 + energy * 0.18);
+    }
+    for (const key of Object.keys(arch.modulePulse)) {
+      arch.modulePulse[key] = Math.max(0, arch.modulePulse[key] - 0.025 * dt);
+    }
+    for (let i = 0; i < arch.channelPulse.length; i++) {
+      arch.channelPulse[i] = Math.max(0, arch.channelPulse[i] - 0.032 * dt);
+    }
+
+    arch.root.rotation.y = Math.sin(t * 0.18) * 0.04;
+    arch.summaryLabel.material.opacity = Math.min(0.86, 0.44 + energy * 0.16 + arch.modulePulse.readout * 0.16);
+    arch.summaryLabel.scale.set(0.96 + energy * 0.035, 0.34 + energy * 0.012, 1);
+    arch.readoutGate.material.opacity = Math.min(0.64, 0.16 + arch.modulePulse.readout * 0.36 + energy * 0.06);
+    arch.readoutGate.scale.setScalar(1 + arch.modulePulse.readout * 0.18 + Math.sin(t * 3.1) * 0.018);
+
+    for (let i = 0; i < arch.layerRings.length; i++) {
+      const ring = arch.layerRings[i];
+      ring.rotation.z += (ring.userData.rate + energy * 0.00045) * dt * (i % 2 ? -1 : 1);
+      ring.material.opacity = Math.min(0.16, ring.userData.baseOpacity + energy * 0.028 + arch.modulePulse.dynamics * 0.018);
+    }
+    for (let i = 0; i < arch.arkRibs.length; i++) {
+      const rib = arch.arkRibs[i];
+      const wave = Math.max(0, Math.sin(t * 1.7 + rib.userData.phase));
+      rib.material.opacity = Math.min(0.26, rib.userData.baseOpacity + energy * 0.045 + wave * 0.035);
+    }
+    for (const label of arch.layerLabels) {
+      label.material.opacity = narrow ? 0.12 : Math.min(0.42, 0.22 + energy * 0.08);
+    }
+    for (const label of arch.moduleLabels) {
+      const pulse = arch.modulePulse[label.userData.key] || 0;
+      label.material.opacity = Math.min(narrow ? 0.46 : 0.72, 0.30 + pulse * 0.32 + energy * 0.06);
+    }
+    for (const line of arch.encodingBeams) {
+      const pulse = arch.channelPulse[line.userData.target] || 0;
+      line.material.opacity = Math.min(0.52, line.userData.baseOpacity + pulse * 0.30 + arch.modulePulse.encoding * 0.10);
+    }
+    for (const line of arch.entropyRoutes) {
+      const pulse = arch.channelPulse[line.userData.target] || 0;
+      line.material.opacity = Math.min(0.58, line.userData.baseOpacity + pulse * 0.14 + arch.modulePulse.entropy * 0.34 + energy * 0.04);
+    }
+    for (const line of arch.readoutRoutes) {
+      const pulse = arch.channelPulse[line.userData.target] || 0;
+      line.material.opacity = Math.min(0.62, line.userData.baseOpacity + pulse * 0.12 + arch.modulePulse.readout * 0.38);
+    }
+    for (let i = 0; i < arch.dynamicsRings.length; i++) {
+      const ring = arch.dynamicsRings[i];
+      ring.rotation.x += ring.userData.rate * dt;
+      ring.rotation.z -= (ring.userData.rate * 1.6 + energy * 0.0008) * dt;
+      ring.material.opacity = Math.min(0.28, 0.04 + arch.modulePulse.dynamics * 0.11 + energy * 0.04);
+    }
+  }
+  const hot = new s.THREE.Color(0xffe39a);
+  const white = new s.THREE.Color(0xeef1f6);
+  let reservoirDirty = false;
+  for (let i = 0; i < m.reservoirPulse.length; i++) {
+    let pulse = m.reservoirPulse[i];
+    const periodic = Math.max(0, Math.sin(t * 2.2 + i * 0.37 + m.firingIndex * 0.8) - 0.94) * (0.25 + energy * 0.25);
+    pulse = Math.max(0, pulse - 0.028 * dt);
+    m.reservoirPulse[i] = pulse;
+    const c = m.reservoirBase[i].clone();
+    if (pulse > 0.01 || periodic > 0.01) {
+      const mix = Math.min(1, pulse + periodic);
+      c.lerp(mix > 0.72 ? white : hot, mix);
+      reservoirDirty = true;
+    }
+    m.reservoirColors[i * 3] = c.r;
+    m.reservoirColors[i * 3 + 1] = c.g;
+    m.reservoirColors[i * 3 + 2] = c.b;
+  }
+  if (reservoirDirty) m.reservoir.geometry.attributes.color.needsUpdate = true;
+  m.reservoirMaterial.size = (state.lowPower ? 0.032 : 0.046) * (1 + energy * 0.35);
+  s.dust.rotation.y += 0.0008 * dt;
+  s.dust.rotation.x = Math.sin(t * 0.21) * 0.06;
+  s.goldDust.rotation.y -= 0.0016 * dt;
+  s.dust.material.opacity = Math.min(0.78, 0.34 + energy * 0.16);
+  s.goldDust.material.opacity = Math.min(0.82, 0.38 + energy * 0.18);
+  s.flashLight.intensity += (energy * 1.8 - s.flashLight.intensity) * 0.06;
+
+  const boltDue = energy > 0.62 && now - s.lastBoltAt > (state.speaking ? 180 : 620);
+  if (boltDue || (!s.lastBoltAt && now > 300)) {
+    s.lastBoltAt = now;
+    const bolt = s.bolts[Math.floor(Math.random() * s.bolts.length)];
+    refreshLightningLine(bolt, s.THREE, t);
+    bolt.material.opacity = Math.min(0.72, 0.24 + energy * 0.28);
+  }
+  for (const bolt of s.bolts) {
+    bolt.material.opacity *= Math.pow(0.90, dt);
+  }
+
+  s.camera.position.x += (state.pointerX * 1.4 - s.camera.position.x) * 0.035;
+  s.camera.position.y += (-state.pointerY * 0.9 - s.camera.position.y) * 0.035;
+  const cameraZ = narrow ? 12.2 : compact ? 9.8 : state.lowPower ? 8.8 : 8.1;
+  s.camera.position.z += (cameraZ - s.camera.position.z) * 0.025;
+  s.camera.lookAt(0, 0, 0);
+  s.renderer.render(s.scene, s.camera);
+  startDraw();
+}
+function draw(now = 0) {
+  if (state.scene3d) {
+    drawThree(now);
+    return;
+  }
+  state.raf = 0;
+  if (document.hidden) return;
+  if (!ctx) return;
+  const frameMs = 1000 / state.targetFps;
+  if (state.lastFrame && now - state.lastFrame < frameMs) {
+    startDraw();
+    return;
+  }
+  const dt = Math.min(2, Math.max(0.5, (now - (state.lastFrame || now)) / 16.67 || 1));
+  state.lastFrame = now;
+  state.phase += dt / 60;
+  state.pulse *= Math.pow(0.985, dt);
   const w = state.w, h = state.h;
   ctx.fillStyle = '#06070a';
   ctx.fillRect(0, 0, w, h);
@@ -278,7 +1709,7 @@ function draw() {
   ctx.save();
   ctx.translate(cx, cy);
   for (const p of state.particles) {
-    p.a += p.s * (state.speaking ? 2.4 : 1);
+    p.a += p.s * dt * (state.speaking ? 2.4 : 1);
     const breath = Math.sin(state.phase * 0.8 + p.z * 5) * 0.04;
     const rr = Math.min(w, h) * (p.r + breath + state.pulse * 0.06);
     const x = Math.cos(p.a) * rr * (1.25 - p.z * 0.25);
@@ -291,14 +1722,15 @@ function draw() {
   }
   ctx.strokeStyle = `rgba(225,186,88,${0.12 + state.pulse * 0.18})`;
   ctx.lineWidth = 1 * state.dpr;
-  for (let i = 0; i < 4; i++) {
+  const rings = state.reducedMotion ? 1 : state.lowPower ? 2 : 4;
+  for (let i = 0; i < rings; i++) {
     const r = Math.min(w, h) * (0.16 + i * 0.095 + state.pulse * 0.03);
     ctx.beginPath();
     ctx.ellipse(0, 0, r * 1.75, r * 0.52, state.phase * 0.05 + i * 0.28, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.restore();
-  requestAnimationFrame(draw);
+  startDraw();
 }
 async function pollState() {
   try {
@@ -318,6 +1750,13 @@ async function pollState() {
     dot(ui.brainDot, '');
   }
 }
+function schedulePoll(delay = document.hidden ? 20000 : 5000) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    await pollState();
+    schedulePoll();
+  }, delay);
+}
 async function checkModels() {
   try {
     const m = await brainFetch('/brain/v1/models');
@@ -329,62 +1768,210 @@ async function checkModels() {
     dot(ui.brainDot, '');
   }
 }
-async function speak(text) {
-  if (!text) return;
-  if (!state.voiceReady && !(await unlockAudio())) {
-    ui.voice.textContent = 'tap Wake to unlock audio';
-    dot(ui.voiceDot, '');
-    return;
+async function browserSpeak(text, retried = false, runId = state.speechRun) {
+  if (!text || !canUseBrowserSpeech()) {
+    state.audioError = 'browser speech unavailable';
+    voiceStatus(state.audioError, '');
+    return false;
   }
-  state.speaking = true;
-  state.pulse = Math.max(state.pulse, 1);
-  dot(ui.voiceDot, 'busy');
-  ui.voice.textContent = 'trained voice';
-  let url = '';
-  try {
-    const r = await fetch('/tts/synth', {
-      method: 'POST',
-      headers: { ...headers(true), Accept: 'audio/wav,audio/*' },
-      body: JSON.stringify({ text: compact(text, 420) }),
-      signal: AbortSignal.timeout(60000),
-    });
-    if (!r.ok) {
-      if (r.status === 403) {
-        localStorage.removeItem('weaver_llm_key');
-        state.key = '';
-        throw new Error('voice key rejected - tap Wake and re-enter key');
+  await waitForBrowserVoices();
+  return new Promise(resolve => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voice = pickBrowserVoice();
+    let settled = false;
+    if (voice) utterance.voice = voice;
+    utterance.pitch = 1.04;
+    utterance.rate = 0.96;
+    utterance.volume = 1;
+    const finish = ok => {
+      if (settled) return;
+      settled = true;
+      if (runId !== state.speechRun) {
+        resolve(false);
+        return;
       }
-      throw new Error(`tts ${r.status}`);
+      state.speaking = false;
+      state.voiceReady = true;
+      state.voiceMode = 'browser';
+      voiceStatus(ok ? `browser voice${voice ? `: ${voice.name}` : ''}` : 'browser voice blocked', ok ? 'on' : '');
+      resolve(ok);
+    };
+    utterance.onstart = () => {
+      if (runId !== state.speechRun) return;
+      state.speaking = true;
+      state.pulse = Math.max(state.pulse, 1);
+      state.voiceMode = 'browser';
+      voiceStatus(`browser voice${voice ? `: ${voice.name}` : ''}`, 'busy');
+    };
+    utterance.onend = () => finish(true);
+    utterance.onerror = event => {
+      state.audioError = event.error || 'browser speech failed';
+      if (!retried) {
+        setTimeout(() => {
+          browserSpeak(text, true, runId).then(resolve);
+        }, 400);
+        return;
+      }
+      finish(false);
+    };
+    try {
+      speechSynthesis.cancel();
+      speechSynthesis.speak(utterance);
+      setTimeout(() => finish(true), Math.max(5000, text.length * 95));
+    } catch (e) {
+      state.audioError = e.message || String(e);
+      finish(false);
     }
-    const blob = await r.blob();
-    if (!/^audio\//i.test(blob.type || '')) throw new Error(`tts returned ${blob.type || 'non-audio'}`);
-    url = URL.createObjectURL(blob);
-    audio.onended = () => {
-      if (url) URL.revokeObjectURL(url);
-      state.speaking = false;
-      ui.voice.textContent = 'voice ready';
-      dot(ui.voiceDot, 'on');
+  });
+}
+function splitSentences(text) {
+  const raw = String(text || '').match(/[^.!?…]+[.!?…]+["')\]]*\s*|[^.!?…]+$/g) || [text];
+  const parts = [];
+  for (let part of raw) {
+    part = compact(part, 240);
+    if (!part) continue;
+    if (parts.length && (part.length < 18 || parts[parts.length - 1].length < 34)) {
+      parts[parts.length - 1] = `${parts[parts.length - 1]} ${part}`;
+    } else {
+      parts.push(part);
+    }
+  }
+  return parts.length ? parts.slice(0, 5) : [compact(text, 240)];
+}
+async function fetchVoiceUrl(text, runId) {
+  if (runId !== state.speechRun) throw new Error('stale speech');
+  const controller = new AbortController();
+  state.voiceAbort = controller;
+  const timeout = setTimeout(() => controller.abort(), TRAINED_VOICE_TIMEOUT_MS);
+  const r = await fetch('/tts/synth', {
+    method: 'POST',
+    headers: { ...headers(true), Accept: 'audio/mpeg,audio/wav,audio/*' },
+    body: JSON.stringify({ text: compact(text, 480) }),
+    signal: controller.signal,
+  }).finally(() => {
+    clearTimeout(timeout);
+    if (state.voiceAbort === controller) state.voiceAbort = null;
+  });
+  if (runId !== state.speechRun) throw new Error('stale speech');
+  if (!r.ok) {
+    state.lastTtsStatus = r.status;
+    if (r.status === 403) {
+      localStorage.removeItem('weaver_llm_key');
+      state.key = '';
+      throw new Error('voice key rejected - tap Wake and re-enter key');
+    }
+    throw new Error(`tts ${r.status}`);
+  }
+  const blob = await r.blob();
+  if (runId !== state.speechRun) throw new Error('stale speech');
+  if (!/^audio\//i.test(blob.type || '')) throw new Error(`tts returned ${blob.type || 'non-audio'}`);
+  state.lastTtsStatus = r.status;
+  state.lastTtsContentType = blob.type || r.headers.get('Content-Type') || '';
+  return URL.createObjectURL(blob);
+}
+function playVoiceUrl(url, runId, options = {}) {
+  const revokeOnFailure = options.revokeOnFailure !== false;
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (ok, error) => {
+      if (done) return;
+      done = true;
+      if (ok || revokeOnFailure || runId !== state.speechRun) {
+        URL.revokeObjectURL(url);
+      }
+      audio.onended = null;
+      audio.onerror = null;
+      if (state.playReject === reject) state.playReject = null;
+      if (runId !== state.speechRun) {
+        resolve();
+        return;
+      }
+      if (ok) {
+        state.audioError = '';
+        state.lastVoiceError = '';
+        state.lastPlaybackAt = performance.now();
+        resolve();
+      } else {
+        reject(error || new Error('audio playback failed'));
+      }
     };
-    audio.onerror = () => {
-      if (url) URL.revokeObjectURL(url);
-      state.speaking = false;
-      state.audioError = 'audio playback failed';
-      ui.voice.textContent = state.audioError;
-      dot(ui.voiceDot, '');
-    };
+    if (runId !== state.speechRun) {
+      finish(true);
+      return;
+    }
+    state.playReject = reject;
+    audio.onended = () => finish(true);
+    audio.onerror = () => finish(false);
     audio.src = url;
     audio.load();
     const p = audio.play();
-    if (p) await p;
-  } catch (e) {
-    if (url) URL.revokeObjectURL(url);
-    state.speaking = false;
-    state.audioError = e.message || String(e);
-    ui.voice.textContent = /notallowed|gesture|play/i.test(state.audioError)
-      ? 'tap Wake again to unlock audio'
-      : state.audioError;
-    dot(ui.voiceDot, '');
+    if (p) p.catch(error => finish(false, error));
+  });
+}
+async function speak(text) {
+  if (!text) return;
+  state.speechRun += 1;
+  const runId = state.speechRun;
+  silenceCurrentSpeech();
+  state.lastVoiceText = compact(text, 800);
+  state.lastVoiceError = '';
+  clearPendingVoice();
+  if (!state.voiceReady) await unlockAudio();
+  if (!state.audioUnlocked && !canUseBrowserSpeech()) {
+    voiceStatus('tap Wake to unlock audio', '');
+    return;
   }
+  const parts = splitSentences(text);
+  state.speaking = true;
+  state.pulse = Math.max(state.pulse, 1);
+  voiceStatus('voice starting', 'busy');
+  let nextUrl = fetchVoiceUrl(parts[0], runId);
+  for (let i = 0; i < parts.length; i++) {
+    let url = '';
+    try {
+      url = await nextUrl;
+      if (runId !== state.speechRun) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      nextUrl = (i + 1 < parts.length) ? fetchVoiceUrl(parts[i + 1], runId) : null;
+      state.voiceMode = 'trained';
+      voiceStatus(i === 0 ? 'speaking' : `speaking ${i + 1}/${parts.length}`, 'busy');
+      await playVoiceUrl(url, runId, { revokeOnFailure: false });
+      state.pulse = Math.max(state.pulse, 0.55);
+    } catch (e) {
+      if (runId !== state.speechRun || /stale speech/i.test(e.message || '')) return;
+      state.speaking = false;
+      state.audioError = e.message || String(e);
+      state.lastVoiceError = state.audioError;
+      if (url && /notallowed|gesture|play|interrupted|abort/i.test(state.audioError)) {
+        setPendingVoice(url, parts.slice(i).join(' ') || text, e);
+        return;
+      }
+      voiceStatus(
+        /notallowed|gesture|play/i.test(state.audioError)
+          ? 'audio element blocked, using browser voice'
+          : 'voice provider unavailable, using browser',
+        'busy'
+      );
+      const remaining = parts.slice(i).join(' ');
+      const spoke = await browserSpeak(remaining || text, false, runId);
+      if (!spoke) {
+        state.pendingVoiceText = compact(remaining || text, 520);
+        voiceStatus(
+          /notallowed|gesture|play/i.test(state.audioError)
+            ? 'tap Wake again to unlock audio'
+            : state.audioError || 'voice unavailable',
+          ''
+        );
+      }
+      return;
+    }
+  }
+  if (runId !== state.speechRun) return;
+  state.speaking = false;
+  state.voiceMode = 'trained';
+  voiceStatus('voice ready', 'on');
 }
 async function chat(text) {
   ui.heard.textContent = compact(text, 260);
@@ -438,6 +2025,7 @@ async function triggerDream() {
   }
 }
 function startMic() {
+  if (state.realtime.live || state.realtime.connecting) stopRealtimeVoice('live stopped');
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     ui.heard.textContent = 'speech recognition unavailable in this browser';
@@ -457,24 +2045,100 @@ function startMic() {
 ui.wake.addEventListener('click', async () => {
   key();
   const ok = await unlockAudio();
+  state.wakeSpoken = true;
+  if (await replayPendingVoice()) {
+    checkModels();
+    pollState();
+    return;
+  }
+  voiceStatus('testing voice', 'busy');
+  speak(state.lastVoiceText || "I'm here.");
   checkModels();
   pollState();
-  if (ok && !state.wakeSpoken) {
-    state.wakeSpoken = true;
-    ui.voice.textContent = 'testing trained voice';
-    setTimeout(() => speak("I'm here."), 180);
+  if (!ok && !canUseBrowserSpeech()) {
+    voiceStatus('audio blocked', '');
   }
 });
 globalThis.__weaverHeadlessAudioAudit = () => ({
   voiceReady: state.voiceReady,
+  voiceMode: state.voiceMode,
   audioUnlocked: state.audioUnlocked,
   audioError: state.audioError,
   wakeSpoken: state.wakeSpoken,
   audioPaused: audio.paused,
   audioSrc: audio.currentSrc || audio.src || '',
   speaking: state.speaking,
-  audioContextState: audioCtx?.state || ''
+  speechRun: state.speechRun,
+  pendingVoice: Boolean(state.pendingVoiceUrl || state.pendingVoiceText),
+  pendingVoiceUrl: Boolean(state.pendingVoiceUrl),
+  pendingVoiceText: state.pendingVoiceText,
+  lastVoiceText: state.lastVoiceText,
+  lastVoiceError: state.lastVoiceError,
+  lastTtsStatus: state.lastTtsStatus,
+  lastTtsContentType: state.lastTtsContentType,
+  lastPlaybackAt: state.lastPlaybackAt,
+  audioContextState: audioCtx?.state || '',
+  browserSpeech: canUseBrowserSpeech(),
+  browserVoice: pickBrowserVoice()?.name || '',
+  browserVoiceCount: browserVoices().length,
+  fps: state.targetFps,
+  particleCount: state.particles.length,
+  lowPower: state.lowPower,
+  reducedMotion: state.reducedMotion,
+  visualMode: state.visualMode,
+  threeReady: Boolean(state.scene3d),
+  visualEnergy: state.visualEnergy,
+  lastVisualError: state.lastVisualError || '',
+  realtime: globalThis.__weaverRealtimeVoiceAudit()
 });
+globalThis.__weaverHeadlessVisualAudit = () => ({
+  mode: state.visualMode,
+  threeReady: Boolean(state.scene3d),
+  fallback2d: Boolean(ctx),
+  width: canvas.width,
+  height: canvas.height,
+  fps: state.targetFps,
+  lowPower: state.lowPower,
+  reducedMotion: state.reducedMotion,
+  pulse: state.pulse,
+  energy: state.visualEnergy,
+  pointerX: state.pointerX,
+  pointerY: state.pointerY,
+  lastError: state.lastVisualError || '',
+  architecture: state.scene3d?.manifold?.architecture ? {
+    layers: state.scene3d.manifold.architecture.layerRings.length,
+    labels: state.scene3d.manifold.architecture.moduleLabels.length,
+    encodingBeams: state.scene3d.manifold.architecture.encodingBeams.length,
+    entropyRoutes: state.scene3d.manifold.architecture.entropyRoutes.length,
+    readoutRoutes: state.scene3d.manifold.architecture.readoutRoutes.length,
+    dynamicsRings: state.scene3d.manifold.architecture.dynamicsRings.length,
+    summary: QUANTUM_ARCHITECTURE.summary.label,
+  } : null,
+});
+globalThis.__weaverRealtimeVoiceAudit = () => ({
+  live: state.realtime.live,
+  connecting: state.realtime.connecting,
+  socketState: state.realtime.ws?.readyState ?? -1,
+  model: state.realtime.model,
+  voiceId: state.realtime.voiceId,
+  mode: state.realtime.mode,
+  inputRate: state.realtime.inputRate,
+  outputRate: state.realtime.outputRate,
+  bytesSent: state.realtime.bytesSent,
+  bytesReceived: state.realtime.bytesReceived,
+  framesSent: state.realtime.framesSent,
+  framesReceived: state.realtime.framesReceived,
+  droppedFrames: state.realtime.droppedFrames,
+  reconnects: state.realtime.reconnects,
+  runId: state.realtime.runId,
+  lastStatus: state.realtime.lastStatus,
+  lastError: state.realtime.lastError,
+  lastHeard: state.realtime.lastHeard,
+  lastSaid: state.realtime.lastSaid,
+  lastAudioAt: state.realtime.lastAudioAt,
+  playbackQueuedSeconds: audioCtx ? Math.max(0, state.realtime.playHead - audioCtx.currentTime) : 0,
+});
+ui.live.addEventListener('click', startRealtimeVoice);
 ui.mic.addEventListener('click', startMic);
 ui.dream.addEventListener('click', triggerDream);
 document.getElementById('bar').addEventListener('submit', (event) => {
@@ -484,12 +2148,25 @@ document.getElementById('bar').addEventListener('submit', (event) => {
   ui.text.value = '';
   chat(text);
 });
-addEventListener('resize', resize);
-resize();
-draw();
+addEventListener('resize', queueResize, { passive: true });
+addEventListener('pointermove', event => {
+  state.targetPointerX = (event.clientX / Math.max(1, innerWidth) - 0.5) * 2;
+  state.targetPointerY = (event.clientY / Math.max(1, innerHeight) - 0.5) * 2;
+}, { passive: true });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopDraw();
+    schedulePoll(20000);
+  } else {
+    state.lastFrame = 0;
+    startDraw();
+    schedulePoll(0);
+  }
+});
+initReactiveField();
 checkModels();
 pollState();
-setInterval(pollState, 5000);
+schedulePoll();
 </script>
 </body>
 </html>

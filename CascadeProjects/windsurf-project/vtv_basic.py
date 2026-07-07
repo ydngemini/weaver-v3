@@ -27,6 +27,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from memory_manager import default_vault_dir
 
 DRIVE_FOLDER_ID = '1ccTAqsrDq2lEtweYQwAeZmzCQrdM8pt3'
 DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -225,7 +226,7 @@ async def run_vtv(heartbeat: bool = True) -> None:
 
     # --- INITIATE THE NEXUS VAULT (ABSOLUTE PATH LOCK) ---
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    vault_dir = os.path.join(base_dir, "Nexus_Vault")
+    vault_dir = str(default_vault_dir())
     os.makedirs(vault_dir, exist_ok=True)
     transcript_path = os.path.join(vault_dir, "weaver_transcript.txt")
     cloud_vision_memory_path = os.path.join(vault_dir, "cloud_vision_memory.md")

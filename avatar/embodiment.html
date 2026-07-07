@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <title>Weaver — She Sees You</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="weaver-logo.svg" type="image/svg+xml" />
 <style>
   :root { --gold: #e6b84a; color-scheme: dark; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -71,6 +72,7 @@
   <div class="row"><div id="d-hear" class="dot"></div><div>Hearing <span id="s-hear">off</span></div></div>
   <div class="row"><div id="d-brain" class="dot"></div><div>Brain <span id="s-brain">checking…</span></div></div>
   <div class="row"><div id="d-dream" class="dot"></div><div>Dream <span id="s-dream">idle</span></div></div>
+  <div class="row"><div id="d-walk" class="dot"></div><div>Walk <span id="s-walk">warming</span></div></div>
   <div id="heard">She heard: <span>—</span></div>
   <div id="said">She said: <span>—</span></div>
 </div>
@@ -1033,6 +1035,39 @@ const motion = {
   baseRotY: 0
 };
 const AVATAR_FLOOR_Y = 0.006;
+const WALK_KEY_ALIASES = {
+  w: [0, -1],
+  arrowup: [0, -1],
+  s: [0, 1],
+  arrowdown: [0, 1],
+  a: [-1, 0],
+  arrowleft: [-1, 0],
+  d: [1, 0],
+  arrowright: [1, 0]
+};
+const walkKeys = new Set();
+const walkState = {
+  enabled: true,
+  mode: 'loading',
+  phase: 0,
+  pathT: 0,
+  offsetX: 0,
+  offsetZ: 0,
+  targetX: 0,
+  targetZ: 0,
+  heading: 0,
+  desiredHeading: 0,
+  speed: 0,
+  targetSpeed: 0,
+  intensity: 0,
+  stride: 0,
+  distance: 0,
+  manualUntil: 0,
+  requestedUntil: 0,
+  lastUpdateSec: 0,
+  lastSampleMs: 0,
+  samples: []
+};
 const avatarGroundBox = new THREE.Box3();
 const avatarGrounding = {
   minY: null,
@@ -1173,6 +1208,10 @@ function setSkeletonControl(intent = {}) {
   };
   skeleton.seq += 1;
   skeleton.lastAppliedAt = performance.now();
+  if (Math.max(Math.abs(skeleton.target.leftStep), Math.abs(skeleton.target.rightStep), Math.abs(skeleton.target.lean)) > 0.34) {
+    walkState.requestedUntil = performance.now() + 9000;
+    walkState.enabled = true;
+  }
   motion.dreamPulse = Math.max(motion.dreamPulse, Math.abs(skeleton.target.presence) * 0.45);
   return skeletonAudit();
 }
@@ -1268,6 +1307,10 @@ globalThis.__weaverPose = () => model ? ({
   y: model.position.y,
   z: model.position.z,
   ry: model.rotation.y,
+  walkOffsetX: walkState.offsetX,
+  walkOffsetZ: walkState.offsetZ,
+  walkMode: walkState.mode,
+  walkSpeed: walkState.speed,
   cameraX: camera.position.x,
   cameraY: camera.position.y,
   cameraZ: camera.position.z,
@@ -1280,12 +1323,34 @@ globalThis.__weaverPose = () => model ? ({
 globalThis.__weaverGroundAudit = () => ({
   floorY: AVATAR_FLOOR_Y,
   minY: avatarGrounding.minY,
+  floorError: avatarGrounding.minY == null ? null : Number((avatarGrounding.minY - AVATAR_FLOOR_Y).toFixed(4)),
   correction: avatarGrounding.correction,
   frames: avatarGrounding.frames,
   boxChecks: avatarGrounding.boxChecks,
   contactShadow: avatarGrounding.contactShadow,
   modelY: model ? Number(model.position.y.toFixed(4)) : null
 });
+globalThis.__weaverWalkAudit = () => {
+  const floorError = avatarGrounding.minY == null ? null : avatarGrounding.minY - AVATAR_FLOOR_Y;
+  return {
+    modelLoaded: !!model,
+    enabled: walkState.enabled,
+    mode: walkState.mode,
+    speed: Number(walkState.speed.toFixed(4)),
+    targetSpeed: Number(walkState.targetSpeed.toFixed(4)),
+    intensity: Number(walkState.intensity.toFixed(4)),
+    phase: Number(walkState.phase.toFixed(4)),
+    stride: Number(walkState.stride.toFixed(4)),
+    distance: Number(walkState.distance.toFixed(4)),
+    offsetX: Number(walkState.offsetX.toFixed(4)),
+    offsetZ: Number(walkState.offsetZ.toFixed(4)),
+    heading: Number(walkState.heading.toFixed(4)),
+    grounded: floorError == null ? false : Math.abs(floorError) < 0.018,
+    floorError: floorError == null ? null : Number(floorError.toFixed(4)),
+    samples: walkState.samples.slice(-10),
+    keys: Array.from(walkKeys)
+  };
+};
 globalThis.__weaverSceneAudit = () => {
   const punctual = [];
   const cityOpacity = [];
@@ -1412,6 +1477,7 @@ globalThis.__weaverMotionAudit = () => ({
   modelLoaded: !!model,
   riggedBones: Object.values(rig).filter(Boolean).length,
   pose: globalThis.__weaverPose?.(),
+  walk: globalThis.__weaverWalkAudit?.(),
   fps: fpsMeter.measured,
   speaking,
   dreaming,
@@ -1525,11 +1591,119 @@ function makeAvatarContactShadow() {
   scene.add(mesh);
   return mesh;
 }
+function wrapAngleDelta(target, current) {
+  return Math.atan2(Math.sin(target - current), Math.cos(target - current));
+}
+function manualWalkVector() {
+  let x = 0;
+  let z = 0;
+  for (const key of walkKeys) {
+    const vector = WALK_KEY_ALIASES[key];
+    if (!vector) continue;
+    x += vector[0];
+    z += vector[1];
+  }
+  const len = Math.hypot(x, z);
+  return len > 0 ? { x: x / len, z: z / len, active: true } : { x: 0, z: 0, active: false };
+}
+function clampWalkPath() {
+  walkState.offsetX = THREE.MathUtils.clamp(walkState.offsetX, -0.74, 0.74);
+  walkState.offsetZ = THREE.MathUtils.clamp(walkState.offsetZ, -0.44, 0.22);
+}
+function updateWalkHud() {
+  const label = document.getElementById('s-walk');
+  const dot = document.getElementById('d-walk');
+  if (!label || !dot) return;
+  const grounded = avatarGrounding.minY == null
+    ? false
+    : Math.abs(avatarGrounding.minY - AVATAR_FLOOR_Y) < 0.018;
+  dot.className = 'dot' + (grounded && walkState.intensity > 0.08 ? ' on' : '');
+  label.textContent = model
+    ? `${walkState.mode} ${Math.round(walkState.speed * 100) / 100}m/s`
+    : 'loading';
+}
+function recordWalkSample(nowMs) {
+  if (nowMs - walkState.lastSampleMs < 220) return;
+  walkState.lastSampleMs = nowMs;
+  walkState.samples.push({
+    t: Number(motion.t.toFixed(2)),
+    x: Number((motion.baseX + walkState.offsetX).toFixed(3)),
+    z: Number((motion.baseZ + walkState.offsetZ).toFixed(3)),
+    speed: Number(walkState.speed.toFixed(3)),
+    phase: Number(walkState.phase.toFixed(3)),
+    grounded: avatarGrounding.minY == null ? null : Math.abs(avatarGrounding.minY - AVATAR_FLOOR_Y) < 0.018
+  });
+  if (walkState.samples.length > 24) walkState.samples.shift();
+}
+function updateWalkState(dt, t) {
+  if (walkState.lastUpdateSec) {
+    dt = Math.min(0.22, Math.max(dt, t - walkState.lastUpdateSec));
+  }
+  walkState.lastUpdateSec = t;
+  const nowMs = performance.now();
+  const manual = manualWalkVector();
+  const wasMoving = walkState.speed > 0.02;
+  let dx = 0;
+  let dz = 0;
+
+  if (manual.active) {
+    walkState.mode = 'manual';
+    walkState.manualUntil = nowMs + 1200;
+    const manualSpeed = 0.44;
+    dx = manual.x * manualSpeed * dt;
+    dz = manual.z * manualSpeed * dt;
+    walkState.offsetX += dx;
+    walkState.offsetZ += dz;
+    clampWalkPath();
+    walkState.desiredHeading = Math.atan2(manual.x, manual.z);
+    walkState.targetSpeed = manualSpeed;
+  } else {
+    const intentActive = nowMs < walkState.requestedUntil;
+    const resumePatrol = nowMs > walkState.manualUntil;
+    if (resumePatrol || intentActive || !wasMoving) {
+      walkState.mode = intentActive ? 'requested' : 'patrol';
+      const routeRate = intentActive ? 0.78 : 0.52;
+      const prevX = walkState.offsetX;
+      const prevZ = walkState.offsetZ;
+      walkState.pathT += dt * routeRate;
+      walkState.targetX = Math.sin(walkState.pathT) * 0.46;
+      walkState.targetZ = (Math.cos(walkState.pathT) - 1) * 0.18 - 0.04;
+      const follow = Math.min(1, dt * (intentActive ? 5.2 : 3.8));
+      walkState.offsetX += (walkState.targetX - walkState.offsetX) * follow;
+      walkState.offsetZ += (walkState.targetZ - walkState.offsetZ) * follow;
+      clampWalkPath();
+      dx = walkState.offsetX - prevX;
+      dz = walkState.offsetZ - prevZ;
+      const tangentX = Math.cos(walkState.pathT) * 0.46;
+      const tangentZ = -Math.sin(walkState.pathT) * 0.18;
+      walkState.desiredHeading = Math.atan2(tangentX, tangentZ);
+      walkState.targetSpeed = Math.hypot(dx, dz) / Math.max(dt, 0.001);
+    } else {
+      walkState.mode = 'settle';
+      walkState.targetSpeed = 0;
+      walkState.targetX = walkState.offsetX;
+      walkState.targetZ = walkState.offsetZ;
+    }
+  }
+
+  walkState.speed += (walkState.targetSpeed - walkState.speed) * Math.min(1, dt * 7.0);
+  walkState.speed = Math.max(0, walkState.speed);
+  walkState.distance += Math.hypot(dx, dz);
+  walkState.intensity += (THREE.MathUtils.clamp(walkState.speed / 0.32, 0, 1) - walkState.intensity) * Math.min(1, dt * 7.5);
+  if (walkState.intensity > 0.015) {
+    walkState.phase += dt * (5.2 + walkState.intensity * 2.7);
+  }
+  walkState.stride = 0.32 + walkState.intensity * 0.68;
+  walkState.heading += wrapAngleDelta(walkState.desiredHeading, walkState.heading) * Math.min(1, dt * 4.4);
+  recordWalkSample(nowMs);
+  updateWalkHud();
+  return walkState;
+}
 function updateAvatarGrounding(force = false) {
   if (!model) return;
   avatarGrounding.frames += 1;
   const now = performance.now();
-  const boxIntervalMs = renderPerf.degraded ? 320 : 160;
+  const boxIntervalMs = walkState.intensity > 0.08 ? 72 : (renderPerf.degraded ? 320 : 160);
   if (!force && avatarGrounding.lastCheckMs && now - avatarGrounding.lastCheckMs < boxIntervalMs) {
     if (avatarContactShadow) {
       const talkPulse = speaking ? 0.04 * Math.abs(Math.sin(motion.t * 8.0)) : 0;
@@ -1586,31 +1760,34 @@ function applyHumanMotion(dt, nowSec = performance.now() * 0.001) {
   const dreamDrift = Math.sin(t * 0.24 + 1.1) * dream;
   const speechBeat = Math.sin(t * 12.0) * talk;
   const gesture = Math.sin(t * 4.3) * talk;
-  const dance = t * (1.18 + talk * 1.10);
-  const step = Math.sin(dance);
-  const stepAbs = Math.abs(step);
-  const locomotion = 0.18 + talk * 0.42 + settle * 0.16;
-  const stepL = Math.max(0, step) * locomotion;
-  const stepR = Math.max(0, -step) * locomotion;
-  const weight = Math.sin(dance * 0.5 + 0.3);
-  const travel = Math.sin(t * 0.55);
+  const sk = skeleton.current;
+  const walk = updateWalkState(dt, t);
+  const gait = Math.sin(walk.phase);
+  const gaitCos = Math.cos(walk.phase);
+  const stepAbs = Math.abs(gait) * walk.intensity;
+  const walkLiftL = Math.max(0, gait) * walk.intensity;
+  const walkLiftR = Math.max(0, -gait) * walk.intensity;
+  const plantedL = Math.max(0, -gait) * walk.intensity;
+  const plantedR = Math.max(0, gait) * walk.intensity;
+  const stepL = walkLiftL * walk.stride + Math.max(0, sk.leftStep) * 0.86 + Math.max(0, -sk.rightStep) * 0.18;
+  const stepR = walkLiftR * walk.stride + Math.max(0, sk.rightStep) * 0.86 + Math.max(0, -sk.leftStep) * 0.18;
+  const weight = gaitCos * walk.intensity + Math.sin(t * 0.58) * (1 - walk.intensity) * 0.32;
   const turn = Math.sin(t * 0.72 + 0.4);
   const gazeX = THREE.MathUtils.clamp(gaze.has ? gaze.x : Math.sin(t * 0.21) * 0.35, -1, 1);
   const gazeY = THREE.MathUtils.clamp(gaze.has ? gaze.y : Math.sin(t * 0.17 + 1.6) * 0.22, -1, 1);
-  const sk = skeleton.current;
 
   setRigOffset('root',
-    -0.010 * stepAbs - 0.006 * breathe - 0.030 * sk.lean + 0.018 * sk.presence,
-    0.044 * turn + 0.085 * sk.turn,
-    -0.025 * weight + 0.030 * sk.hipShift);
+    -0.016 * stepAbs - 0.006 * breathe - 0.030 * sk.lean + 0.018 * sk.presence,
+    0.030 * turn + 0.060 * sk.turn + wrapAngleDelta(walk.heading, 0) * 0.018 * walk.intensity,
+    -0.052 * weight + 0.030 * sk.hipShift);
   setRigOffset('pelvisL',
-    0.044 * stepR + 0.055 * Math.max(0, sk.rightStep),
+    0.070 * stepR + 0.055 * Math.max(0, sk.rightStep),
     0.025 * weight + 0.020 * sk.hipShift,
-    -0.032 * weight + 0.025 * sk.leftStep);
+    -0.050 * weight + 0.025 * sk.leftStep);
   setRigOffset('pelvisR',
-    0.044 * stepL + 0.055 * Math.max(0, sk.leftStep),
+    0.070 * stepL + 0.055 * Math.max(0, sk.leftStep),
     -0.025 * weight - 0.020 * sk.hipShift,
-    -0.032 * weight + 0.025 * sk.rightStep);
+    -0.050 * weight + 0.025 * sk.rightStep);
   setRigOffset('spine1',
     -0.010 * breathe + 0.018 * settle + 0.052 * sk.lean + 0.020 * sk.presence,
     0.004 * sway + 0.025 * turn + 0.055 * sk.turn,
@@ -1636,27 +1813,27 @@ function applyHumanMotion(dt, nowSec = performance.now() * 0.001) {
 
   setRigOffset('clavicleL', -0.010 * breathe - talk * 0.025 + 0.045 * sk.openness, 0.006 * sway - 0.035 * sk.leftArm, 0.018 * gesture + 0.080 * sk.openness);
   setRigOffset('clavicleR', -0.010 * breathe - talk * 0.025 + 0.045 * sk.openness, -0.006 * sway + 0.035 * sk.rightArm, -0.018 * gesture - 0.080 * sk.openness);
-  setRigOffset('upperarmL', 0.010 * breathe - 0.720 * sk.leftArm + 0.070 * sk.openness, 0.005 * sway - 0.120 * sk.openness, 0.024 * gesture + 0.014 * talk + 0.360 * sk.leftArm);
-  setRigOffset('upperarmR', 0.010 * breathe - 0.720 * sk.rightArm + 0.070 * sk.openness, -0.005 * sway + 0.120 * sk.openness, -0.024 * gesture - 0.014 * talk - 0.360 * sk.rightArm);
-  setRigOffset('lowerarmL', 0.012 * Math.sin(t * 1.1 + 0.4) + 0.020 * talk + 0.420 * sk.leftForearm, 0, 0.012 * gesture + 0.180 * sk.leftArm);
-  setRigOffset('lowerarmR', 0.012 * Math.sin(t * 1.1 + 1.2) + 0.020 * talk + 0.420 * sk.rightForearm, 0, -0.012 * gesture - 0.180 * sk.rightArm);
+  setRigOffset('upperarmL', 0.010 * breathe - 0.720 * sk.leftArm + 0.070 * sk.openness + 0.155 * stepR - 0.070 * stepL, 0.005 * sway - 0.120 * sk.openness, 0.024 * gesture + 0.014 * talk + 0.360 * sk.leftArm);
+  setRigOffset('upperarmR', 0.010 * breathe - 0.720 * sk.rightArm + 0.070 * sk.openness + 0.155 * stepL - 0.070 * stepR, -0.005 * sway + 0.120 * sk.openness, -0.024 * gesture - 0.014 * talk - 0.360 * sk.rightArm);
+  setRigOffset('lowerarmL', 0.012 * Math.sin(t * 1.1 + 0.4) + 0.020 * talk + 0.420 * sk.leftForearm + 0.080 * stepR, 0, 0.012 * gesture + 0.180 * sk.leftArm);
+  setRigOffset('lowerarmR', 0.012 * Math.sin(t * 1.1 + 1.2) + 0.020 * talk + 0.420 * sk.rightForearm + 0.080 * stepL, 0, -0.012 * gesture - 0.180 * sk.rightArm);
   setRigOffset('wristL', 0.008 * Math.sin(t * 1.8), 0.012 * gesture + 0.220 * sk.leftHand, 0.080 * sk.leftHand);
   setRigOffset('wristR', 0.008 * Math.sin(t * 1.7 + 0.8), -0.012 * gesture - 0.220 * sk.rightHand, -0.080 * sk.rightHand);
 
-  setRigOffset('upperlegL', -0.040 * stepL + 0.015 * stepR - 0.180 * sk.leftStep, 0.010 * weight + 0.040 * sk.hipShift, 0.014 * weight + 0.045 * sk.leftStep);
-  setRigOffset('upperlegR', -0.040 * stepR + 0.015 * stepL - 0.180 * sk.rightStep, -0.010 * weight - 0.040 * sk.hipShift, -0.014 * weight - 0.045 * sk.rightStep);
-  setRigOffset('lowerlegL', 0.048 * stepL + 0.010 * stepAbs + 0.220 * Math.max(0, sk.leftStep), 0, -0.008 * weight);
-  setRigOffset('lowerlegR', 0.048 * stepR + 0.010 * stepAbs + 0.220 * Math.max(0, sk.rightStep), 0, 0.008 * weight);
-  setRigOffset('footL', -0.028 * stepL + 0.010 * stepR - 0.090 * sk.leftStep, 0, 0.012 * stepL);
-  setRigOffset('footR', -0.028 * stepR + 0.010 * stepL - 0.090 * sk.rightStep, 0, -0.012 * stepR);
-  setRigOffset('toeL', 0.055 * stepR + 0.070 * sk.leftStep, 0, 0);
-  setRigOffset('toeR', 0.055 * stepL + 0.070 * sk.rightStep, 0, 0);
+  setRigOffset('upperlegL', -0.260 * stepL + 0.095 * plantedL - 0.200 * sk.leftStep, 0.018 * weight + 0.040 * sk.hipShift, 0.028 * weight + 0.045 * sk.leftStep);
+  setRigOffset('upperlegR', -0.260 * stepR + 0.095 * plantedR - 0.200 * sk.rightStep, -0.018 * weight - 0.040 * sk.hipShift, -0.028 * weight - 0.045 * sk.rightStep);
+  setRigOffset('lowerlegL', 0.330 * walkLiftL + 0.090 * plantedL + 0.245 * Math.max(0, sk.leftStep), 0, -0.018 * weight);
+  setRigOffset('lowerlegR', 0.330 * walkLiftR + 0.090 * plantedR + 0.245 * Math.max(0, sk.rightStep), 0, 0.018 * weight);
+  setRigOffset('footL', -0.155 * walkLiftL + 0.055 * plantedL - 0.095 * sk.leftStep, 0, 0.050 * gait * walk.intensity);
+  setRigOffset('footR', -0.155 * walkLiftR + 0.055 * plantedR - 0.095 * sk.rightStep, 0, -0.050 * gait * walk.intensity);
+  setRigOffset('toeL', 0.125 * plantedL + 0.080 * sk.leftStep, 0, 0);
+  setRigOffset('toeR', 0.125 * plantedR + 0.080 * sk.rightStep, 0, 0);
   applyDirectBoneControls();
 
-  model.position.x = motion.baseX + Math.sin(t * 0.42) * 0.018 + travel * 0.026 + gazeX * 0.012 * settle + 0.035 * sk.hipShift;
-  model.position.y = motion.baseY + stepAbs * 0.007 + Math.sin(t * 1.2) * 0.006 + Math.max(0, breathe) * 0.004 + 0.006 * sk.presence + 0.010 * Math.max(sk.leftStep, sk.rightStep, 0);
-  model.position.z = motion.baseZ + Math.sin(t * 0.31 + 0.6) * 0.014 - talk * 0.010 - 0.030 * sk.lean;
-  model.rotation.y = motion.baseRotY + turn * 0.040 + gazeX * 0.026 * settle + 0.115 * sk.turn;
+  model.position.x = motion.baseX + walk.offsetX + Math.sin(t * 0.42) * 0.006 + gazeX * 0.008 * settle + 0.026 * sk.hipShift;
+  model.position.y = motion.baseY + 0.002 * Math.max(0, breathe) + 0.002 * sk.presence;
+  model.position.z = motion.baseZ + walk.offsetZ - talk * 0.006 - 0.022 * sk.lean;
+  model.rotation.y = motion.baseRotY + walk.heading * Math.min(1, walk.intensity + 0.18) + turn * 0.018 + gazeX * 0.020 * settle + 0.100 * sk.turn;
   updateAvatarGrounding();
 }
 
@@ -1763,6 +1940,15 @@ new GLTFLoader().load(`${ASSETS}/${AVATAR_ASSET}`, (g) => {
   motion.startSec = performance.now() * 0.001;
   motion.t = 0;
   motion.baseReady = true;
+  walkState.mode = 'patrol';
+  walkState.pathT = 0;
+  walkState.phase = 0;
+  walkState.offsetX = 0;
+  walkState.offsetZ = 0;
+  walkState.distance = 0;
+  walkState.lastUpdateSec = 0;
+  walkState.samples = [];
+  updateWalkHud();
   captureRig(model);
   const idle = g.animations.find(a => /idle/i.test(a.name)) || g.animations[0];
   if (idle && QUALITY.name !== 'performance' && !renderPerf.softwareRenderer) {
@@ -2009,10 +2195,21 @@ function shortcutBlocked(event) {
   );
 }
 const pressedKeys = new Set();
+function walkKeyFromEvent(event) {
+  const key = String(event.key || '').toLowerCase();
+  return WALK_KEY_ALIASES[key] ? key : '';
+}
 document.addEventListener('keydown', event => {
   if (shortcutBlocked(event)) return;
   const key = String(event.key || '').toLowerCase();
   pressedKeys.add(key);
+  const walkKey = walkKeyFromEvent(event);
+  if (walkKey) {
+    walkKeys.add(walkKey);
+    walkState.enabled = true;
+    walkState.manualUntil = performance.now() + 1500;
+    event.preventDefault();
+  }
   if (event.shiftKey && key === 's' && !event.repeat) {
     event.preventDefault();
     captureScreenshot();
@@ -2026,10 +2223,13 @@ document.addEventListener('keydown', event => {
 document.addEventListener('keyup', event => {
   const key = String(event.key || '').toLowerCase();
   pressedKeys.delete(key);
+  const walkKey = walkKeyFromEvent(event);
+  if (walkKey) walkKeys.delete(walkKey);
   if (!event.shiftKey || key === 'r' || key === 'e') captureState.comboArmed = false;
 });
 addEventListener('blur', () => {
   pressedKeys.clear();
+  walkKeys.clear();
   captureState.comboArmed = false;
 });
 globalThis.__weaverCaptureScreenshot = captureScreenshot;

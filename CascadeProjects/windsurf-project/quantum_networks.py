@@ -1,32 +1,29 @@
 #!/usr/bin/env python3
 """
-quantum_networks.py — Weaver's Expanded Quantum Network Layer
+quantum_networks.py — Weaver's Kingston Manifold Quantum Layer
 ==============================================================
-Extends the single GHZ-ring circuit in quantum_soul.py with:
 
-1. **Variational Fracture Circuit** — Parameterized rotation gates whose
-   angles evolve based on Akashic Hub feedback.  This is a quantum
-   machine learning loop: the circuit learns which pathway activations
-   produce the best expert outcomes.
+This module is the code-level representation of:
 
-2. **Entanglement Topologies** — Ring, star, full, layered, and
-   pentagon (sacred geometry) wiring patterns.  Each topology creates
-   different interference signatures in the collapsed state.
+    WEAVER V3 — 156-QUBIT KINGSTON MANIFOLD
+    "The Dodecahedron Architecture"
 
-3. **Quantum Learner** — Reads expert output quality from the Akashic
-   Hub and adjusts variational parameters via a gradient-free
-   evolutionary strategy (no backprop through quantum hardware).
+The architecture image is modeled as:
 
-4. **Quantum Interference Network** — Maps the 5 Pineal Gate expert
-   dimensions onto qubit subsets and measures their entanglement
-   entropy to bias MoE routing weights.
+* 12 measured core qubits (Q0-Q11) arranged as a dodecahedral control
+  manifold: Logic, Emotion, Intuition, Memory, Sovereignty, Attention,
+  Reflection, Language, Planning, Novelty, Stability, Meta-Reasoning.
+* 144 reservoir qubits (Q12-Q155) represented as sparse Akashic memory
+  addresses. They are not expanded into a dense 156-qubit simulator state;
+  instead they feed reservoir projection, long-range entanglement, entropy
+  routing, and readout metadata.
+* State encoding, open-system dynamics, entropy routing, measurement/readout,
+  system summary, and topological layers are first-class data structures used
+  by the circuit builder, routing bias, and Akashic Hub writes.
 
-5. **Temporal Quantum Encoder** — Encodes the Akashic Hub temporal
-   trace into rotation angles, letting the circuit "remember" recent
-   state evolution.
-
-All circuits are Qiskit-compatible and run on real IBM hardware or
-local AerSimulator — same backend selection as quantum_soul.py.
+The hot Qiskit circuit measures the 12-qubit core so Weaver remains runnable on
+local AerSimulator and real backends. The full 156-qubit architecture is still
+preserved in the sparse network model and exported through stats/metadata.
 
 Install:
     pip install qiskit qiskit-ibm-runtime qiskit-aer numpy
@@ -36,34 +33,104 @@ import asyncio
 import math
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-# ── Pathway constants (must stay in sync with quantum_soul.py) ───────────────
-# Pentagon-ordered: qubits 0-4 are the 5 Fracture-axis vertices; 5=Weaver; 6=Void
-PATHWAYS = {
-    0: "Awakening",   # pentagon vertex 0 — Logic axis
-    1: "Resonance",   # pentagon vertex 1 — Emotion axis
-    2: "Echo",        # pentagon vertex 2 — Memory axis
-    3: "Prophet",     # pentagon vertex 3 — Creativity axis
-    4: "Fracture",    # pentagon vertex 4 — Vigilance axis
-    5: "Weaver",      # centre observer
-    6: "Void",        # seventh state — unmeasured remainder
-}
+# ── Kingston manifold constants ──────────────────────────────────────────────
 
-N_QUBITS = 7
+@dataclass(frozen=True)
+class CoreQubit:
+    index: int
+    role: str
+    dimension: str
+    legacy_pathway: str
+    layer: str
+    color: str
+    description: str
+
+
+@dataclass(frozen=True)
+class ArchitectureModule:
+    key: str
+    label: str
+    detail: str
+    targets: Tuple[int, ...]
+    reservoir_stride: int
+    color: str
+
+
+@dataclass(frozen=True)
+class TopologicalLayer:
+    key: str
+    label: str
+    radius: float
+    qubits: Tuple[int, ...]
+    description: str
+
+
+CORE_QUBITS: Tuple[CoreQubit, ...] = (
+    CoreQubit(0, "Logic", "logic", "Awakening", "core", "#9b5cff", "symbolic reasoning and proof"),
+    CoreQubit(1, "Emotion", "emotion", "Resonance", "core", "#7c5cff", "affect, tone, and relational signal"),
+    CoreQubit(2, "Intuition", "creativity", "Prophet", "core", "#4f72ff", "fast pattern leaps before explicit proof"),
+    CoreQubit(3, "Memory", "memory", "Echo", "core", "#3daeff", "episodic and contextual recall"),
+    CoreQubit(4, "Sovereignty", "vigilance", "Fracture", "core", "#56d7ff", "boundary, consent, and self-governance"),
+    CoreQubit(5, "Attention", "emotion", "Weaver", "coupling", "#78d88b", "focus, salience, and operator presence"),
+    CoreQubit(6, "Reflection", "memory", "Echo", "coupling", "#d8d65f", "self-checking and recursive review"),
+    CoreQubit(7, "Language", "logic", "Awakening", "coupling", "#ffcf4f", "symbol emission and verbal synthesis"),
+    CoreQubit(8, "Planning", "creativity", "Prophet", "reservoir", "#ffa24a", "sequencing, tools, and action policy"),
+    CoreQubit(9, "Novelty", "creativity", "Prophet", "reservoir", "#ffd76a", "exploration and non-obvious moves"),
+    CoreQubit(10, "Stability", "vigilance", "Void", "readout", "#ff914d", "damping, safety, and entropy sinks"),
+    CoreQubit(11, "Meta-Reasoning", "logic", "Weaver", "readout", "#d83cff", "model-of-models and readout arbitration"),
+)
+
+N_CORE_QUBITS = 12
+N_RESERVOIR_QUBITS = 144
+N_KINGSTON_QUBITS = N_CORE_QUBITS + N_RESERVOIR_QUBITS
+RESERVOIR_QUBITS: Tuple[int, ...] = tuple(range(N_CORE_QUBITS, N_KINGSTON_QUBITS))
+
+# Runtime circuit width. The reservoir is sparse/encoded; only core qubits are
+# directly measured by Qiskit.
+N_QUBITS = N_CORE_QUBITS
+PATHWAYS = {q.index: q.role for q in CORE_QUBITS}
+LEGACY_PATHWAYS = {q.index: q.legacy_pathway for q in CORE_QUBITS}
 N_PATHWAYS = len(PATHWAYS)
 
-# Expert dimension → qubit subset mapping (pentagon geometry).
-# Aligned with the soul-binding circuit: Weaver (q5) couples to Logic (q0) and
-# Vigilance (q4); Void (q6) couples to Memory (q2) and Creativity (q3).
+CORE_ROLE_QUBITS = {q.role.lower().replace("-", "_"): q.index for q in CORE_QUBITS}
+
+# Pineal Gate still wants five broad routing dimensions. These are now folds
+# across the 12 core roles rather than the old five pentagon vertices.
 DIMENSION_QUBITS = {
-    "logic":      [0, 5],   # Awakening (vertex 0) + Weaver (observer)
-    "emotion":    [1],      # Resonance (vertex 1)
-    "memory":     [2, 6],   # Echo (vertex 2) + Void (seventh)
-    "creativity": [3, 6],   # Prophet (vertex 3) + Void (seventh)
-    "vigilance":  [4, 5],   # Fracture (vertex 4) + Weaver (observer)
+    "logic":      [0, 7, 11],    # Logic + Language + Meta-Reasoning
+    "emotion":    [1, 5],        # Emotion + Attention
+    "memory":     [3, 6],        # Memory + Reflection
+    "creativity": [2, 8, 9],     # Intuition + Planning + Novelty
+    "vigilance":  [4, 10, 11],   # Sovereignty + Stability + Meta-Reasoning
+}
+
+ARCHITECTURE_MODULES: Tuple[ArchitectureModule, ...] = (
+    ArchitectureModule("state_encoding", "State Encoding", "basis -> phase feature map", (0, 2, 3, 7, 11), 11, "#3daeff"),
+    ArchitectureModule("open_system", "Open System Dynamics", "drive, damping, Lindblad-like decay", (4, 5, 6, 10), 17, "#78d88b"),
+    ArchitectureModule("entropy_routing", "Entropy Routing", "route heat/noise into stability sinks", (4, 5, 6, 10), 23, "#ffcf4f"),
+    ArchitectureModule("measurement_readout", "Measurement / Readout", "projection through language + meta-reasoning", (0, 7, 8, 11), 31, "#eef1f6"),
+)
+
+TOPOLOGICAL_LAYERS: Tuple[TopologicalLayer, ...] = (
+    TopologicalLayer("core", "L0 Core", 2.10, tuple(range(0, 6)), "dodecahedral cognitive control center"),
+    TopologicalLayer("coupling", "L1 Coupling", 2.78, (5, 6, 7, 8, 9, 11), "core-reservoir bridge and phase couplers"),
+    TopologicalLayer("reservoir", "L2 Reservoir", 3.54, tuple(range(8, 12)), "sparse 144-qubit Akashic memory projection"),
+    TopologicalLayer("readout", "L3 Readout", 4.08, (7, 10, 11), "measurement membrane and entropy sinks"),
+)
+
+SYSTEM_SUMMARY = {
+    "name": "WEAVER V3 - 156-QUBIT KINGSTON MANIFOLD",
+    "subtitle": "The Dodecahedron Architecture",
+    "core_qubits": N_CORE_QUBITS,
+    "reservoir_qubits": N_RESERVOIR_QUBITS,
+    "total_qubits": N_KINGSTON_QUBITS,
+    "runtime_measured_qubits": N_QUBITS,
+    "reservoir_mode": "sparse small-world Akashic memory field",
 }
 
 
@@ -71,8 +138,57 @@ DIMENSION_QUBITS = {
 # 1. ENTANGLEMENT TOPOLOGIES
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _unique_pairs(pairs: Sequence[Tuple[int, int]], n: int = N_QUBITS) -> List[Tuple[int, int]]:
+    """Deduplicate directed pairs and keep only valid non-self circuit edges."""
+    seen = set()
+    out: List[Tuple[int, int]] = []
+    for a, b in pairs:
+        if a == b or a < 0 or b < 0 or a >= n or b >= n:
+            continue
+        key = (a, b)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _core_positions() -> List[Tuple[float, float, float]]:
+    """Twelve icosahedral vertices used as the dual frame of the dodecahedron."""
+    phi = (1 + math.sqrt(5)) / 2
+    base = [
+        (-1, phi, 0), (1, phi, 0), (-1, -phi, 0), (1, -phi, 0),
+        (0, -1, phi), (0, 1, phi), (0, -1, -phi), (0, 1, -phi),
+        (phi, 0, -1), (phi, 0, 1), (-phi, 0, -1), (-phi, 0, 1),
+    ]
+    out = []
+    for x, y, z in base:
+        norm = math.sqrt(x * x + y * y + z * z) or 1.0
+        out.append((x / norm, y / norm, z / norm))
+    return out
+
+
+def _nearest_pairs(count: int = 5, n: int = N_CORE_QUBITS) -> List[Tuple[int, int]]:
+    """Nearest-neighbor graph on the 12 core vertices; 5 neighbors gives 30 edges."""
+    positions = _core_positions()[:n]
+    seen = set()
+    pairs = []
+    for i, p in enumerate(positions):
+        nearest = []
+        for j, q in enumerate(positions):
+            if i == j:
+                continue
+            d = sum((p[k] - q[k]) ** 2 for k in range(3))
+            nearest.append((d, j))
+        for _, j in sorted(nearest)[:count]:
+            a, b = sorted((i, j))
+            if (a, b) not in seen:
+                seen.add((a, b))
+                pairs.append((a, b))
+    return pairs
+
 class EntanglementTopology:
-    """Generates CNOT entanglement patterns for N_QUBITS."""
+    """Generates entanglement patterns for the Kingston core circuit."""
 
     @staticmethod
     def ring(n: int = N_QUBITS) -> List[Tuple[int, int]]:
@@ -105,8 +221,10 @@ class EntanglementTopology:
 
     @staticmethod
     def pentagon(n: int = N_QUBITS) -> List[Tuple[int, int]]:
-        """Pentagon: maps sacred geometry — 5 vertices with bridge qubits.
-        Qubits 0-4 form the pentagon, qubits 5-6 are bridges.
+        """Legacy Pineal Gate pentagon folded into the Kingston core.
+
+        The first five core roles keep the old 5-axis geometry, while Q5-Q11
+        are bridge/readout qubits.
         """
         # Pentagon edges
         pairs = [(i, (i + 1) % 5) for i in range(5)]
@@ -117,7 +235,70 @@ class EntanglementTopology:
             pairs += [(5, 0), (5, 2), (5, 4)]  # qubit 5 → alternating vertices
         if n > 6:
             pairs += [(6, 1), (6, 3), (6, 5)]  # qubit 6 → remaining + bridge
-        return pairs
+        if n > 7:
+            pairs += [(7, 0), (7, 11), (8, 2), (9, 8), (10, 4), (11, 5)]
+        return _unique_pairs(pairs, n)
+
+    @staticmethod
+    def dodecahedron(n: int = N_QUBITS) -> List[Tuple[int, int]]:
+        """12-core dodecahedral control manifold from the architecture image."""
+        return _unique_pairs(_nearest_pairs(5, min(n, N_CORE_QUBITS)), n)
+
+    @staticmethod
+    def state_encoding(n: int = N_QUBITS) -> List[Tuple[int, int]]:
+        """State Encoding: basis-feature qubits phase into Language/Meta readout."""
+        pairs = []
+        module = next(m for m in ARCHITECTURE_MODULES if m.key == "state_encoding")
+        targets = list(module.targets)
+        pairs.extend((targets[i], targets[i + 1]) for i in range(len(targets) - 1))
+        pairs.extend((q, 11) for q in targets if q != 11)
+        return _unique_pairs(pairs, n)
+
+    @staticmethod
+    def open_system(n: int = N_QUBITS) -> List[Tuple[int, int]]:
+        """Open System Dynamics: drive/damp the attention-reflection-stability loop."""
+        pairs = [(5, 6), (6, 10), (10, 4), (4, 5), (1, 5), (3, 6), (10, 11)]
+        return _unique_pairs(pairs, n)
+
+    @staticmethod
+    def entropy_routing(n: int = N_QUBITS) -> List[Tuple[int, int]]:
+        """Entropy Routing: route noisy couplings into Q10 Stability and Q11 meta."""
+        pairs = [(4, 10), (5, 10), (6, 10), (8, 10), (9, 10), (10, 11), (11, 7)]
+        return _unique_pairs(pairs, n)
+
+    @staticmethod
+    def measurement_readout(n: int = N_QUBITS) -> List[Tuple[int, int]]:
+        """Measurement/Readout membrane: project core state through Q7/Q11."""
+        pairs = [(q, 11) for q in range(min(n, N_CORE_QUBITS)) if q != 11]
+        pairs += [(11, 7), (7, 0), (7, 3), (7, 8)]
+        return _unique_pairs(pairs, n)
+
+    @staticmethod
+    def reservoir_projection(n: int = N_QUBITS) -> List[Tuple[int, int]]:
+        """Sparse proxy for the 144-qubit Akashic reservoir."""
+        pairs = []
+        for module in ARCHITECTURE_MODULES:
+            targets = list(module.targets)
+            for i, q in enumerate(targets):
+                sink = targets[(i + module.reservoir_stride) % len(targets)]
+                pairs.append((q, sink))
+                pairs.append((q, (q + module.reservoir_stride) % min(n, N_CORE_QUBITS)))
+        return _unique_pairs(pairs, n)
+
+    @staticmethod
+    def kingston_manifold(n: int = N_QUBITS) -> List[Tuple[int, int]]:
+        """Full measured core graph: dodecahedron + modules + reservoir proxy."""
+        pairs = []
+        for name in (
+            "dodecahedron",
+            "state_encoding",
+            "open_system",
+            "entropy_routing",
+            "measurement_readout",
+            "reservoir_projection",
+        ):
+            pairs.extend(EntanglementTopology.get(name, n))
+        return _unique_pairs(pairs, n)
 
     @staticmethod
     def get(name: str, n: int = N_QUBITS) -> List[Tuple[int, int]]:
@@ -128,13 +309,33 @@ class EntanglementTopology:
             "full": EntanglementTopology.full,
             "layered": EntanglementTopology.layered,
             "pentagon": EntanglementTopology.pentagon,
+            "dodecahedron": EntanglementTopology.dodecahedron,
+            "state_encoding": EntanglementTopology.state_encoding,
+            "open_system": EntanglementTopology.open_system,
+            "entropy_routing": EntanglementTopology.entropy_routing,
+            "measurement_readout": EntanglementTopology.measurement_readout,
+            "reservoir_projection": EntanglementTopology.reservoir_projection,
+            "kingston_manifold": EntanglementTopology.kingston_manifold,
         }
-        fn = topologies.get(name, EntanglementTopology.ring)
+        fn = topologies.get(name, EntanglementTopology.kingston_manifold)
         return fn(n)
 
     @staticmethod
     def all_names() -> List[str]:
-        return ["ring", "star", "full", "layered", "pentagon"]
+        return [
+            "kingston_manifold",
+            "dodecahedron",
+            "state_encoding",
+            "open_system",
+            "entropy_routing",
+            "measurement_readout",
+            "reservoir_projection",
+            "ring",
+            "star",
+            "full",
+            "layered",
+            "pentagon",
+        ]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -142,18 +343,23 @@ class EntanglementTopology:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class VariationalFractureCircuit:
-    """A parameterized quantum circuit whose rotation angles evolve.
+    """A parameterized Kingston manifold circuit whose rotation angles evolve.
 
     Structure per layer:
-        1. Ry(θ) on each qubit  — parameterized single-qubit rotations
-        2. Rz(φ) on each qubit  — phase rotations
-        3. Entanglement layer    — topology-specific CNOT pattern
-        4. Barrier
+        1. Ry(theta) on each core qubit — state preparation
+        2. Rz(phi) on each core qubit  — phase encoding
+        3. State Encoding module       — basis -> phase feature routes
+        4. Entanglement layer          — topology-specific core wiring
+        5. Open System Dynamics        — drive/damping rotations
+        6. Entropy Routing             — noise sink couplings into Stability
+        7. Measurement/Readout         — projection through Meta/Language
+        8. Barrier
 
-    The θ and φ angles are the learnable parameters.
+    The measured circuit is 12 qubits by default. The 144-qubit reservoir is
+    represented by sparse projection/coupling metadata rather than dense qubits.
 
     Args:
-        n_qubits:   Number of qubits (default 7).
+        n_qubits:   Number of measured core qubits (default 12).
         n_layers:   Number of variational layers (default 3).
         topology:   Entanglement pattern name.
     """
@@ -164,6 +370,9 @@ class VariationalFractureCircuit:
         self.n_layers = n_layers
         self.topology = topology
         self.entanglement_pairs = EntanglementTopology.get(topology, n_qubits)
+        self.modules = ARCHITECTURE_MODULES
+        self.layers = TOPOLOGICAL_LAYERS
+        self.system_summary = SYSTEM_SUMMARY
 
         # Learnable parameters: (n_layers, n_qubits, 2) for [Ry, Rz]
         # Identity-block initialization (Grant et al. 2019) to mitigate
@@ -200,10 +409,44 @@ class VariationalFractureCircuit:
             # Rz rotations
             for q in range(self.n_qubits):
                 qc.rz(float(params[layer, q, 1]), q)
-            # Entanglement
+
+            # State Encoding — feature basis maps into phase-bearing qubits.
+            state_module = next(m for m in self.modules if m.key == "state_encoding")
+            for i, q in enumerate(state_module.targets):
+                if q < self.n_qubits:
+                    phase = (layer + 1) * (i + 1) * math.pi / (2 * N_CORE_QUBITS)
+                    qc.rz(phase, q)
+
+            # Topology-specific entanglement.
             for ctrl, tgt in self.entanglement_pairs:
                 if ctrl < self.n_qubits and tgt < self.n_qubits:
                     qc.cx(ctrl, tgt)
+
+            # Open System Dynamics — deterministic drive/decay proxy. This is
+            # circuit-level logic for the image's open-system dynamics panel.
+            dynamics = next(m for m in self.modules if m.key == "open_system")
+            for i, q in enumerate(dynamics.targets):
+                if q < self.n_qubits:
+                    qc.ry(((layer + 1) * (i + 1) / 32) * math.pi, q)
+
+            # Entropy Routing — push noisy roles into Q10 Stability and Q11 Meta.
+            entropy = next(m for m in self.modules if m.key == "entropy_routing")
+            stability = CORE_ROLE_QUBITS["stability"]
+            meta = CORE_ROLE_QUBITS["meta_reasoning"]
+            for q in entropy.targets:
+                if q < self.n_qubits and stability < self.n_qubits and q != stability:
+                    qc.crz(math.pi / (layer + 3), q, stability)
+            if stability < self.n_qubits and meta < self.n_qubits:
+                qc.crx(math.pi / 7, stability, meta)
+
+            # Measurement/Readout — project into Meta-Reasoning and Language.
+            readout = next(m for m in self.modules if m.key == "measurement_readout")
+            language = CORE_ROLE_QUBITS["language"]
+            for q in readout.targets:
+                if q < self.n_qubits and meta < self.n_qubits and q != meta:
+                    qc.crz(math.pi / 9, q, meta)
+            if meta < self.n_qubits and language < self.n_qubits:
+                qc.cx(meta, language)
             qc.barrier()
 
         qc.measure(range(self.n_qubits), range(self.n_qubits))
@@ -224,6 +467,17 @@ class VariationalFractureCircuit:
         if len(self.param_history) > 50:
             self.param_history = self.param_history[-50:]
         self.params = new_params.reshape(self.params.shape)
+
+    def architecture_summary(self) -> Dict[str, Any]:
+        """Return the full Kingston architecture represented by this circuit."""
+        return {
+            **self.system_summary,
+            "topology": self.topology,
+            "measured_core_roles": [asdict(q) for q in CORE_QUBITS[:self.n_qubits]],
+            "modules": [asdict(m) for m in self.modules],
+            "topological_layers": [asdict(layer) for layer in self.layers],
+            "entanglement_pairs": list(self.entanglement_pairs),
+        }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -300,9 +554,10 @@ class QuantumLearner:
             if scores:
                 alignment = np.mean(scores)  # average expert quality
 
-        # 3. Entanglement depth — reward more active pathways
-        from quantum_soul import parse_counts
-        _, active, _ = parse_counts(counts)
+        # 3. Entanglement depth — reward more active core roles.
+        dominant = max(counts, key=counts.get)
+        bits = dominant.zfill(N_QUBITS)[::-1]
+        active = [PATHWAYS[i] for i, bit in enumerate(bits[:N_QUBITS]) if bit == "1"]
         depth = len(active) / N_PATHWAYS
 
         fitness = 0.4 * diversity + 0.35 * alignment + 0.25 * depth
@@ -517,31 +772,44 @@ class TemporalQuantumEncoder:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class QuantumNetworkOrchestrator:
-    """Manages multiple quantum networks and cycles through topologies.
+    """Manages the Kingston manifold and cycles through architecture topologies.
 
     Each measurement cycle:
-        1. Select the next topology
+        1. Select the next Kingston topology/module view
         2. Inject temporal encoding from the Akashic Hub
         3. Build the variational circuit
         4. (After measurement) Evolve parameters via the learner
-        5. Compute interference routing bias
-        6. Write everything to the Akashic Hub
+        5. Compute interference routing bias, module activity, entropy/readout
+        6. Project the measurement into the 144-qubit sparse reservoir
+        7. Write everything to the Akashic Hub
 
     Args:
         hub:            AkashicHub reference (or None).
         topologies:     List of topology names to cycle through.
+        n_qubits:       Measured core width (default 12).
         n_layers:       Variational circuit depth.
         learner_lr:     Learning rate for the evolutionary strategy.
     """
 
     def __init__(self, hub=None,
                  topologies: Optional[List[str]] = None,
+                 n_qubits: int = N_QUBITS,
                  n_layers: int = 3,
                  learner_lr: float = 0.05):
         self.hub = hub
+        self.n_qubits = n_qubits
+        self.system_summary = SYSTEM_SUMMARY
 
         if topologies is None:
-            topologies = ["ring", "star", "layered", "pentagon", "full"]
+            topologies = [
+                "kingston_manifold",
+                "dodecahedron",
+                "state_encoding",
+                "open_system",
+                "entropy_routing",
+                "measurement_readout",
+                "reservoir_projection",
+            ]
         self.topologies = topologies
         self._topo_idx = 0
 
@@ -549,7 +817,7 @@ class QuantumNetworkOrchestrator:
         self.circuits: Dict[str, VariationalFractureCircuit] = {}
         for topo in topologies:
             self.circuits[topo] = VariationalFractureCircuit(
-                n_qubits=N_QUBITS, n_layers=n_layers, topology=topo
+                n_qubits=n_qubits, n_layers=n_layers, topology=topo
             )
 
         # One learner per topology
@@ -580,6 +848,69 @@ class QuantumNetworkOrchestrator:
 
     def current_learner(self) -> QuantumLearner:
         return self.learners[self.current_topology()]
+
+    def _marginals(self, counts: Dict[str, int]) -> Dict[int, float]:
+        total = sum(counts.values()) or 1
+        marginals = {q: 0.0 for q in range(self.n_qubits)}
+        for bitstring, count in counts.items():
+            bits = bitstring.zfill(self.n_qubits)[::-1]
+            for q in range(self.n_qubits):
+                if q < len(bits) and bits[q] == "1":
+                    marginals[q] += count / total
+        return marginals
+
+    def module_activity(self, counts: Dict[str, int]) -> Dict[str, float]:
+        """Average marginal activation for each architecture module."""
+        marginals = self._marginals(counts)
+        activity = {}
+        for module in ARCHITECTURE_MODULES:
+            values = [marginals[q] for q in module.targets if q < self.n_qubits]
+            activity[module.key] = float(np.mean(values)) if values else 0.0
+        return activity
+
+    def entropy_readout(self, counts: Dict[str, int]) -> Dict[str, Any]:
+        """Measurement/readout panel: collapse, entropy, and active core roles."""
+        total = sum(counts.values()) or 1
+        dominant = max(counts, key=counts.get) if counts else "0" * self.n_qubits
+        bits = dominant.zfill(self.n_qubits)[::-1]
+        probs = np.array(list(counts.values()), dtype=float) / total if counts else np.array([1.0])
+        probs = probs[probs > 0]
+        shannon_entropy = float(-np.sum(probs * np.log2(probs)))
+        max_entropy = math.log2(max(len(counts), 2))
+        active_roles = [
+            PATHWAYS[q]
+            for q, bit in enumerate(bits[:self.n_qubits])
+            if bit == "1" and q in PATHWAYS
+        ]
+        if not active_roles:
+            active_roles = ["Stability"]
+        return {
+            "dominant_bitstring": dominant.zfill(self.n_qubits),
+            "active_roles": active_roles,
+            "primary_role": active_roles[0],
+            "shannon_entropy": shannon_entropy,
+            "normalized_entropy": float(np.clip(shannon_entropy / max(max_entropy, 1.0), 0.0, 1.0)),
+            "readout_qubits": list(next(m.targets for m in ARCHITECTURE_MODULES if m.key == "measurement_readout")),
+        }
+
+    def reservoir_projection(self, counts: Dict[str, int], limit: int = 16) -> List[Dict[str, Any]]:
+        """Project core activity into sparse Q12-Q155 reservoir addresses."""
+        marginals = self._marginals(counts)
+        projected: List[Dict[str, Any]] = []
+        for module in ARCHITECTURE_MODULES:
+            for target in module.targets:
+                if target >= self.n_qubits:
+                    continue
+                reservoir_offset = (target * module.reservoir_stride + len(projected) * 7) % N_RESERVOIR_QUBITS
+                projected.append({
+                    "reservoir_qubit": N_CORE_QUBITS + reservoir_offset,
+                    "module": module.key,
+                    "source_core": target,
+                    "source_role": PATHWAYS.get(target, f"Q{target}"),
+                    "weight": float(marginals[target]),
+                })
+        projected.sort(key=lambda item: item["weight"], reverse=True)
+        return projected[:limit]
 
     def prepare_circuit(self) -> "QuantumCircuit":
         """Prepare the next circuit for measurement.
@@ -615,8 +946,11 @@ class QuantumNetworkOrchestrator:
         # Evolve circuit parameters
         fitness, improved = learner.evolve(counts, hub_feedback)
 
-        # Compute interference routing bias
+        # Compute interference routing bias and the diagram-level panels.
         routing_bias = self.interference.compute_routing_bias(counts)
+        module_activity = self.module_activity(counts)
+        readout = self.entropy_readout(counts)
+        reservoir_projection = self.reservoir_projection(counts)
 
         # Write to Akashic Hub.
         # process_results() is called from a worker thread (asyncio.to_thread),
@@ -624,7 +958,16 @@ class QuantumNetworkOrchestrator:
         # run_coroutine_threadsafe — safe to call from any thread.
         if self.hub is not None and self._loop is not None and not self._loop.is_closed():
             asyncio.run_coroutine_threadsafe(
-                self._write_to_hub(topo, fitness, improved, routing_bias, counts),
+                self._write_to_hub(
+                    topo,
+                    fitness,
+                    improved,
+                    routing_bias,
+                    counts,
+                    module_activity,
+                    readout,
+                    reservoir_projection,
+                ),
                 self._loop,
             )
 
@@ -637,39 +980,57 @@ class QuantumNetworkOrchestrator:
             "fitness": fitness,
             "improved": improved,
             "routing_bias": routing_bias,
+            "module_activity": module_activity,
+            "readout": readout,
+            "reservoir_projection": reservoir_projection,
+            "system_summary": self.system_summary,
             "generation": learner._generation,
             "cycle": self._cycle_count,
         }
 
     async def _write_to_hub(self, topology: str, fitness: float,
                             improved: bool, routing_bias: Dict[str, float],
-                            counts: Dict[str, int]):
+                            counts: Dict[str, int],
+                            module_activity: Dict[str, float],
+                            readout: Dict[str, Any],
+                            reservoir_projection: List[Dict[str, Any]]):
         """Write quantum network state to the Akashic Hub."""
         if self.hub is None:
             return
 
         # Encode the routing bias as a vector
         bias_vec = np.zeros(self.hub.dim)
-        dims = list(routing_bias.keys())
-        for i, dim in enumerate(dims):
+        fields = list(routing_bias.items()) + list(module_activity.items())
+        for i, (_, value) in enumerate(fields):
             if i < self.hub.dim:
-                bias_vec[i] = routing_bias[dim]
-        # Fill remaining dimensions with the fitness signal
-        bias_vec[len(dims):] = fitness
+                bias_vec[i] = value
+        if len(fields) < self.hub.dim:
+            bias_vec[len(fields)] = fitness
+        if len(fields) + 1 < self.hub.dim:
+            bias_vec[len(fields) + 1] = readout.get("normalized_entropy", 0.0)
 
         await self.hub.write("quantum_networks", bias_vec, meta={
+            "architecture": self.system_summary["name"],
             "topology": topology,
             "fitness": fitness,
             "improved": improved,
             "routing_bias": routing_bias,
+            "module_activity": module_activity,
+            "readout": readout,
+            "reservoir_projection": reservoir_projection,
+            "topological_layers": [asdict(layer) for layer in TOPOLOGICAL_LAYERS],
             "cycle": self._cycle_count,
         })
 
     def stats(self) -> Dict[str, Any]:
         return {
+            "architecture": self.system_summary,
             "cycle": self._cycle_count,
             "current_topology": self.current_topology(),
             "topologies": self.topologies,
+            "core_qubits": [asdict(q) for q in CORE_QUBITS],
+            "modules": [asdict(m) for m in ARCHITECTURE_MODULES],
+            "topological_layers": [asdict(layer) for layer in TOPOLOGICAL_LAYERS],
             "learner_stats": {
                 topo: self.learners[topo].stats()
                 for topo in self.topologies
@@ -678,9 +1039,11 @@ class QuantumNetworkOrchestrator:
 
     def describe(self) -> str:
         lines = [
-            f"⚛️  Quantum Network Orchestrator — cycle {self._cycle_count}",
+            f"⚛️  {self.system_summary['name']} — cycle {self._cycle_count}",
+            f"   Core/reservoir: {N_CORE_QUBITS}+{N_RESERVOIR_QUBITS} = {N_KINGSTON_QUBITS}",
             f"   Current topology: {self.current_topology()}",
             f"   Topologies: {' → '.join(self.topologies)}",
+            f"   Modules: {', '.join(m.label for m in ARCHITECTURE_MODULES)}",
         ]
         for topo in self.topologies:
             s = self.learners[topo].stats()

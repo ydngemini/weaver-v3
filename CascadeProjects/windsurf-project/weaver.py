@@ -4,7 +4,7 @@ weaver.py — Master Launcher
 ════════════════════════════
 Starts all Weaver modules together in a single process:
 
-  ⚡  Nexus Bus     — WebSocket pub/sub broker  (ws://localhost:9999)
+  ⚡  Nexus Bus     — WebSocket pub/sub broker  (ws://127.0.0.1:9999)
   🔮  Quantum Soul  — IBM quantum background loop (every 5 min)
   👁   VTV Core      — mic · vision · face ID · OpenAI Realtime
 
@@ -30,6 +30,9 @@ sys.path.insert(0, PROJ)
 
 from dotenv import load_dotenv
 load_dotenv()
+from memory_manager import default_vault_dir
+
+VAULT_DIR = default_vault_dir()
 
 BANNER = """
 ╔══════════════════════════════════════════════════╗
@@ -207,7 +210,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     akashic_hub = None
     if AkashicHub is not None:
         akashic_hub = AkashicHub(dim=256, trace_depth=32)
-        persist_path = os.path.join(PROJ, "Nexus_Vault", "akashic_persist")
+        persist_path = os.path.join(str(VAULT_DIR), "akashic_persist")
         if os.path.isdir(persist_path):
             try:
                 akashic_hub.load(persist_path)
@@ -277,7 +280,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
 
     # ── ProactivePulse + Dream State ─────────────────────────────────────
     NATE_PHONE = os.environ.get("NATE_PHONE_NUMBER", "")
-    PHONE_BRIDGE_URL = "http://localhost:8765"
+    PHONE_BRIDGE_URL = "http://127.0.0.1:8765"
     INTERFERENCE_THRESHOLD = float(os.environ.get("PROACTIVE_INTERFERENCE_THRESHOLD", "0.85"))
     DREAM_INTERVAL_HOURS = float(os.environ.get("DREAM_INTERVAL_HOURS", "3"))
     DREAM_IDLE_MINUTES = float(os.environ.get("DREAM_IDLE_MINUTES", "15"))
@@ -302,7 +305,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         )
         _pulse_httpx = None
         _pulse_hub = akashic_hub
-        _vault_dir = os.path.join(PROJ, "Nexus_Vault")
+        _vault_dir = str(VAULT_DIR)
         try:
             import httpx as _pulse_httpx
             _pulse_ready = True
@@ -450,7 +453,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
             n8n_url = (
                 os.environ.get("WEAVER_N8N_WEBHOOK_URL")
                 or os.environ.get("N8N_WEBHOOK_URL")
-                or "http://localhost:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
+                or "http://127.0.0.1:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
             )
             last_dream_at = 0.0
 
@@ -593,7 +596,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
             _supervised(nexus_main, "Nexus Bus", restart_on_crash=True),
             name="nexus_bus"
         ))
-        print("[WEAVER] Nexus Bus binding on ws://localhost:9999...", flush=True)
+        print("[WEAVER] Nexus Bus binding on ws://127.0.0.1:9999...", flush=True)
         await asyncio.sleep(1.2)   # let the bus bind before VTV connects
     else:
         print("[WEAVER] ⚠️  Nexus Bus skipped (import failed).", flush=True)
@@ -641,7 +644,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=10.0),
             name="lora_server"
         ))
-        print("[WEAVER] 🧠 LoRA Soul Voice server on http://localhost:8899...", flush=True)
+        print("[WEAVER] 🧠 LoRA Soul Voice server on http://127.0.0.1:8899...", flush=True)
     else:
         print("[WEAVER] ⚠️  LoRA Soul Voice skipped (import failed).", flush=True)
 
@@ -655,7 +658,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=10.0),
             name="qwen3b_server"
         ))
-        print("[WEAVER] 🧠 Qwen2 3B server on http://localhost:8898...", flush=True)
+        print("[WEAVER] 🧠 Qwen2 3B server on http://127.0.0.1:8898...", flush=True)
     else:
         print("[WEAVER] ⚠️  Qwen2 3B skipped (import failed).", flush=True)
 
@@ -666,7 +669,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="quantum_api"
         ))
-        print("[WEAVER] ⚛️  Quantum API on http://localhost:9997...", flush=True)
+        print("[WEAVER] ⚛️  Quantum API on http://127.0.0.1:9997...", flush=True)
     else:
         print("[WEAVER] ⚠️  Quantum API skipped (import failed).", flush=True)
 
@@ -677,7 +680,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="health_dashboard"
         ))
-        print("[WEAVER] 📊 Health Dashboard on http://localhost:9996...", flush=True)
+        print("[WEAVER] 📊 Health Dashboard on http://127.0.0.1:9996...", flush=True)
     else:
         print("[WEAVER] ⚠️  Health Dashboard skipped (import failed).", flush=True)
 
@@ -688,7 +691,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="live_dashboard"
         ))
-        print("[WEAVER] 🖥️  Live Dashboard on http://localhost:9990 (+ Cloudflare tunnel)...", flush=True)
+        print("[WEAVER] 🖥️  Live Dashboard on http://127.0.0.1:9990 (+ Cloudflare tunnel)...", flush=True)
     else:
         print("[WEAVER] ⚠️  Live Dashboard skipped (import failed).", flush=True)
 
@@ -713,7 +716,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="akashic_hub_api"
         ))
-        print("[WEAVER] 🌌 Akashic Hub API on http://localhost:9995...", flush=True)
+        print("[WEAVER] 🌌 Akashic Hub API on http://127.0.0.1:9995...", flush=True)
 
     # 2g. Phone Bridge — Twilio telephony with voice ID + LangChain cortex
     if phone_bridge_serve is not None:
@@ -722,7 +725,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=5.0),
             name="phone_bridge"
         ))
-        print("[WEAVER] 📞 Phone Bridge on http://localhost:8765...", flush=True)
+        print("[WEAVER] 📞 Phone Bridge on http://127.0.0.1:8765...", flush=True)
     else:
         print("[WEAVER] ⚠️  Phone Bridge skipped (import failed).", flush=True)
 
@@ -762,7 +765,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
                         restart_delay=10.0),
             name="discord_bridge"
         ))
-        print("[WEAVER] 🎮 Discord Bridge on http://localhost:8770...", flush=True)
+        print("[WEAVER] 🎮 Discord Bridge on http://127.0.0.1:8770...", flush=True)
 
     if not headless:
         # 3. VTV Core — restarts on crash AND clean exit so the stack stays alive
@@ -793,7 +796,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         # Persist Akashic Hub state to disk for crash recovery
         if akashic_hub is not None:
             try:
-                save_path = os.path.join(PROJ, "Nexus_Vault", "akashic_persist")
+                save_path = os.path.join(str(VAULT_DIR), "akashic_persist")
                 akashic_hub.save(save_path)
                 print(f"[WEAVER] 💾 Akashic Hub saved to {save_path}", flush=True)
             except Exception as e:

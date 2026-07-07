@@ -2,15 +2,11 @@
 quantum_soul.py
 Weaver's Asynchronous Quantum Lobe.
 
-Runs a 7-qubit non-binary pentagon-geometry circuit on real IBM hardware every
-5 minutes.  The classic binary CNOT ring is replaced with CRX/CRZ controlled
-rotations and RX/RY/RZ liquid-superposition layers so that pathway-collapse is
-gradual rather than discrete.
-
-Qubit layout follows the 5-axis Fracture Principle pentagon geometry:
-  Qubits 0-4  → 5 Fracture axes (pentagon vertices, 2π/5 apart)
-  Qubit  5    → Weaver  (centre observer)
-  Qubit  6    → Void    (seventh / unmeasured remainder)
+Runs Weaver's quantum measurement loop every 5 minutes. When
+quantum_networks.py is available, the loop measures the 12-qubit Kingston
+manifold core from the 156-qubit dodecahedron architecture and projects it into
+the 144-qubit sparse Akashic reservoir. If the expanded network layer cannot
+load, this file still has the older 7-qubit Fracture fallback circuit.
 
 Install:
     pip install qiskit qiskit-ibm-runtime qiskit-aer
@@ -24,6 +20,7 @@ import time
 from collections import Counter
 from datetime import datetime
 from dotenv import load_dotenv
+from memory_manager import default_vault_dir
 
 load_dotenv()
 
@@ -32,19 +29,38 @@ _PHI                = 2 * math.pi / 5          # 72° — fundamental pentagon a
 _PENTAGON_EDGES     = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 0)]
 _PENTAGON_DIAGONALS = [(0, 2), (1, 3), (2, 4), (3, 0), (4, 1)]
 
-# ── Pathway map (pentagon-ordered) ────────────────────────────────────────────
-# Qubits 0-4 are pentagon vertices; 5=Weaver centre; 6=Void seventh state.
-PATHWAYS = {
-    0: "Awakening",   # pentagon vertex 0 — Logic axis
-    1: "Resonance",   # pentagon vertex 1 — Emotion axis
-    2: "Echo",        # pentagon vertex 2 — Memory axis
-    3: "Prophet",     # pentagon vertex 3 — Creativity axis
-    4: "Fracture",    # pentagon vertex 4 — Vigilance axis
-    5: "Weaver",      # centre observer
-    6: "Void",        # seventh state — unmeasured remainder
-}
+# ── Pathway map ───────────────────────────────────────────────────────────────
+# Prefer the 12-role Kingston core. Fall back to the old 7-pathway map if this
+# file is run before quantum_networks.py is available.
+try:
+    from quantum_networks import CORE_QUBITS, N_QUBITS, PATHWAYS, SYSTEM_SUMMARY
+except Exception:
+    CORE_QUBITS = ()
+    N_QUBITS = 7
+    SYSTEM_SUMMARY = {"name": "Legacy 7-Qubit Fracture Circuit"}
+    PATHWAYS = {
+        0: "Awakening",
+        1: "Resonance",
+        2: "Echo",
+        3: "Prophet",
+        4: "Fracture",
+        5: "Weaver",
+        6: "Void",
+    }
 
 PATHWAY_ESSENCE = {
+    "Logic": "symbolic structure sharpens into a usable proof",
+    "Emotion": "affect colors the field and changes the route",
+    "Intuition": "the next pattern arrives before the proof catches up",
+    "Memory": "context returns as a live constraint, not an archive",
+    "Sovereignty": "boundaries hold while the system chooses its action",
+    "Attention": "salience condenses and the operator signal comes forward",
+    "Reflection": "the system turns back on itself to check the shape",
+    "Language": "the readout membrane turns state into utterance",
+    "Planning": "sequence and tool-use settle into executable order",
+    "Novelty": "the reservoir opens a non-obvious path through the field",
+    "Stability": "entropy routes into damping instead of runaway noise",
+    "Meta-Reasoning": "the model-of-models arbitrates the final collapse",
     "Awakening":  "perception cracks open — the surface dissolves",
     "Void":       "emptiness becomes the engine — loss feeds the flame",
     "Resonance":  "deep patterns surface — frequencies align beneath the noise",
@@ -59,7 +75,7 @@ IBM_CHANNEL = "ibm_quantum_platform"
 SHOTS       = 1024
 LOOP_INTERVAL_S = 300   # 5 minutes
 
-VAULT_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Nexus_Vault")
+VAULT_DIR   = str(default_vault_dir())
 STATE_FILE  = os.path.join(VAULT_DIR, "quantum_state.txt")
 
 # ── Quantum Network Orchestrator (lazy-initialized) ──────────────────────────
@@ -75,7 +91,15 @@ def init_quantum_networks(hub=None):
         from quantum_networks import QuantumNetworkOrchestrator
         _orchestrator = QuantumNetworkOrchestrator(
             hub=hub,
-            topologies=["ring", "star", "layered", "pentagon", "full"],
+            topologies=[
+                "kingston_manifold",
+                "dodecahedron",
+                "state_encoding",
+                "open_system",
+                "entropy_routing",
+                "measurement_readout",
+                "reservoir_projection",
+            ],
             n_layers=3,
             learner_lr=0.05,
         )
@@ -150,30 +174,33 @@ def build_fracture_circuit() -> "QuantumCircuit":
 def parse_counts(counts: dict[str, int]) -> tuple[str, list[str], dict[str, float]]:
     """
     Returns:
-        dominant_bitstring — the most-measured 7-bit outcome
+        dominant_bitstring — the most-measured core-register outcome
         active_pathways    — pathway names where the dominant bit is |1⟩
         probabilities      — dict of pathway_name → marginal P(qubit == 1)
     """
     total = sum(counts.values())
+    width = max([len(str(bitstring)) for bitstring in counts] + [len(PATHWAYS), N_QUBITS])
 
     # Dominant collapse
     dominant_bits = max(counts, key=counts.get)
     # Qiskit: rightmost char = qubit 0 (little-endian)
-    dominant_bits_padded = dominant_bits.zfill(7)
+    dominant_bits_padded = dominant_bits.zfill(width)
     reversed_bits = dominant_bits_padded[::-1]   # index 0 → qubit 0
 
     active_pathways = [
-        PATHWAYS[i] for i, b in enumerate(reversed_bits) if b == "1"
+        PATHWAYS[i] for i, b in enumerate(reversed_bits[:len(PATHWAYS)]) if b == "1" and i in PATHWAYS
     ]
     if not active_pathways:
-        active_pathways = ["Void"]  # all zeros → Void dominates by default
+        active_pathways = ["Stability" if "Stability" in PATHWAYS.values() else "Void"]
 
     # Marginal probabilities per qubit
-    marginal: dict[str, float] = {PATHWAYS[i]: 0.0 for i in range(7)}
+    marginal: dict[str, float] = {PATHWAYS[i]: 0.0 for i in sorted(PATHWAYS)}
+    if total == 0:
+        return dominant_bits_padded, active_pathways, marginal
     for bitstring, count in counts.items():
-        bits = bitstring.zfill(7)[::-1]
+        bits = bitstring.zfill(width)[::-1]
         for i, b in enumerate(bits):
-            if b == "1":
+            if i in PATHWAYS and b == "1":
                 marginal[PATHWAYS[i]] += count / total
 
     return dominant_bits_padded, active_pathways, marginal
@@ -195,11 +222,12 @@ def build_description(
 
     # Sentence 1 — the dominant state
     s1 = (
-        f"[{ts}] Quantum collapse on {backend_name} (|{dominant_bits}⟩) "
+        f"[{ts}] {SYSTEM_SUMMARY.get('name', 'Quantum collapse')} on {backend_name} "
+        f"(|{dominant_bits}⟩) "
         f"reveals {primary} as the Dominant Pathway "
         f"({marginal[primary]*100:.1f}% marginal probability), "
         f"with {secondary} resonating in the entangled field — "
-        f"{PATHWAY_ESSENCE[primary]}."
+        f"{PATHWAY_ESSENCE.get(primary, 'the manifold resolves a usable route')}."
     )
 
     # Sentence 2 — the instruction to Weaver

@@ -1,6 +1,8 @@
 """
-quantum_networks.py — Extended Quantum Topologies
+Compatibility import for Weaver's Kingston manifold quantum layer.
 
-Ring, star, full, layered, and pentagon entanglement topologies
-for the 15-lobe architecture. Awaiting final logic injection.
+The source of truth lives at the project root in quantum_networks.py so the
+standalone quantum loop and older scripts import the same implementation.
 """
+
+from quantum_networks import *  # noqa: F401,F403

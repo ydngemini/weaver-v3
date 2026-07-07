@@ -36,31 +36,45 @@ weaverv3.com {
 	encode zstd gzip
 
 	handle_path /llm/* {
-		@denied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		@denied {
+			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		}
 		respond @denied 403
 		reverse_proxy 127.0.0.1:8090
+	}
+
+	# Native browser WebSockets cannot attach X-Weaver-Key. The realtime voice
+	# endpoint authenticates its WebSocket subprotocol token inside bedrock_brain_api.py.
+	handle /brain/realtime/* {
+		uri strip_prefix /brain
+		reverse_proxy 127.0.0.1:8093
 	}
 
 	# unified AWS Bedrock cortex: weaver-one coordinates speed, dream, code,
 	# vision, and main reasoning routes through one OpenAI-compatible endpoint.
 	handle_path /brain/* {
-		@bdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		@bdenied {
+			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		}
 		respond @bdenied 403
 		reverse_proxy 127.0.0.1:8093
 	}
 
 	# read-only source-code context for Weaver's self-inspection. Same key gate as /llm.
 	handle_path /codebase/* {
-		@cdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		@cdenied {
+			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		}
 		respond @cdenied 403
 		reverse_proxy 127.0.0.1:8091
 	}
 
-	# her cloned voice — on-box OpenVoice v2 (127.0.0.1:8092). It is slower than
-	# GPU voice, but keeps the live site fully on the AWS box and still falls back
-	# to browser speech if synthesis fails.
+	# her voice — AWS Polly generative TTS behind the local tts_server.py
+	# (127.0.0.1:8092), with browser speech fallback if synthesis fails.
 	handle_path /tts/* {
-		@tdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		@tdenied {
+			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		}
 		respond @tdenied 403
 		reverse_proxy 127.0.0.1:8092
 	}
@@ -83,20 +97,31 @@ weaverv3.com {
 headless.weaverv3.com {
 	encode zstd gzip
 
+	handle /brain/realtime/* {
+		uri strip_prefix /brain
+		reverse_proxy 127.0.0.1:8093
+	}
+
 	handle_path /brain/* {
-		@hbdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		@hbdenied {
+			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		}
 		respond @hbdenied 403
 		reverse_proxy 127.0.0.1:8093
 	}
 
 	handle_path /tts/* {
-		@htdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		@htdenied {
+			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		}
 		respond @htdenied 403
 		reverse_proxy 127.0.0.1:8092
 	}
 
 	handle_path /codebase/* {
-		@hcdenied not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		@hcdenied {
+			not header X-Weaver-Key {$WEAVER_LLM_KEY}
+		}
 		respond @hcdenied 403
 		reverse_proxy 127.0.0.1:8091
 	}
@@ -108,14 +133,14 @@ headless.weaverv3.com {
 }
 
 dash.weaverv3.com {
-	basicauth {
+	basic_auth {
 		ydnop {$WEAVER_DASH_HASH}
 	}
 	reverse_proxy 127.0.0.1:9990
 }
 
 status.weaverv3.com {
-	basicauth {
+	basic_auth {
 		ydnop {$WEAVER_DASH_HASH}
 	}
 	reverse_proxy 127.0.0.1:9996

@@ -39,7 +39,7 @@ from fastapi.responses import Response
 from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from voice_recognition import VoiceRecognizer
-from memory_manager import MemoryManager
+from memory_manager import MemoryManager, default_vault_dir
 from weaver_tools import (
     WEAVER_TOOL_BELT, execute_weaver_tool,
     api_get, api_post, lora_rewrite, publish_to_nexus,
@@ -72,7 +72,7 @@ else:
     OPENAI_RT_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
 
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
-VAULT_DIR      = os.path.join(BASE_DIR, "Nexus_Vault")
+VAULT_DIR      = str(default_vault_dir())
 os.makedirs(VAULT_DIR, exist_ok=True)
 TRANSCRIPT_PATH = os.path.join(VAULT_DIR, "weaver_phone_transcript.txt")
 

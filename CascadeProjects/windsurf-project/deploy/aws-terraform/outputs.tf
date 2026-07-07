@@ -8,6 +8,21 @@ output "hostname" {
   value       = "${aws_eip.this.public_ip}.sslip.io"
 }
 
+output "public_urls" {
+  description = "Canonical Weaver production URLs."
+  value = {
+    embodiment         = "https://weaverv3.com"
+    headless           = "https://headless.weaverv3.com"
+    dashboard          = "https://dash.weaverv3.com"
+    status             = "https://status.weaverv3.com"
+    brain              = "https://weaverv3.com/brain"
+    realtime_voice     = "wss://weaverv3.com/brain/realtime/voice"
+    text_to_speech     = "https://weaverv3.com/tts"
+    readonly_codebase  = "https://weaverv3.com/codebase"
+    bootstrap_hostname = "https://${aws_eip.this.public_ip}.sslip.io"
+  }
+}
+
 output "ssh_command" {
   description = "SSH into the box."
   value       = "ssh ubuntu@${aws_eip.this.public_ip}"

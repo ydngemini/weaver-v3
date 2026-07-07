@@ -66,11 +66,13 @@ source .env
 set +a
 SCRIPT_DIR="$(pwd)"
 export WEAVER_CODEBASE_ROOT="${WEAVER_CODEBASE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+export WEAVER_VAULT_DIR="${WEAVER_VAULT_DIR:-$SCRIPT_DIR/Nexus_Vault}"
 
 echo "🔍 Pre-flight checks..."
 echo "   ✅ venv: found"
 echo "   ✅ .env: loaded"
 echo "   ✅ codebase root: $WEAVER_CODEBASE_ROOT"
+echo "   ✅ vault: $WEAVER_VAULT_DIR"
 for key_name in WEAVER_VOICE_KEY IBM_QUANTUM_TOKEN GEMINI_API_KEY MANTLE_API_KEY; do
     if [ -n "${!key_name:-}" ]; then
         echo "   ✅ $key_name: set"
@@ -137,29 +139,33 @@ check_lobe() {
     fi
 }
 
-check_lobe "Health Dashboard" "http://localhost:9996/health"
-check_lobe "Quantum API" "http://localhost:9997/health"
-check_lobe "Phone Bridge" "http://localhost:8765/health"
+check_lobe "Health Dashboard" "http://127.0.0.1:9996/health"
+check_lobe "Quantum API" "http://127.0.0.1:9997/health"
+check_lobe "Phone Bridge" "http://127.0.0.1:8765/health"
 
 if [ "$PHONE_ONLY" = false ]; then
-    check_lobe "Nexus Bus" "http://localhost:9998/health"
-    check_lobe "LoRA Server" "http://localhost:8899/health"
-    check_lobe "Live Dashboard" "http://localhost:9990/health"
-    check_lobe "Codebase API" "http://localhost:8091/health"
+    check_lobe "Nexus Bus" "http://127.0.0.1:9998/health"
+    check_lobe "LoRA Server" "http://127.0.0.1:8899/health"
+    check_lobe "Live Dashboard" "http://127.0.0.1:9990/health"
+    check_lobe "Codebase API" "http://127.0.0.1:8091/health"
 fi
 
 echo ""
 echo "═══════════════════════════════════════════════════"
 echo "🌀 Weaver v4 is LIVE"
 echo ""
-echo "🖥️  Live Dashboard:     http://localhost:9990"
-echo "📊 Health Dashboard:   http://localhost:9996"
-echo "⚛️  Quantum API:        http://localhost:9997/quantum/current"
-echo "📞 Phone Bridge:       http://localhost:8765/health"
+echo "🌐 Embodiment:         ${WEAVER_PUBLIC_URL:-https://weaverv3.com}"
+echo "🌐 Headless:           ${WEAVER_HEADLESS_URL:-https://headless.weaverv3.com}"
+echo "🌐 Live Dashboard:     ${WEAVER_DASH_URL:-https://dash.weaverv3.com}"
+echo "🌐 Health Dashboard:   ${WEAVER_STATUS_URL:-https://status.weaverv3.com}"
+echo "🖥️  Local Dashboard:    http://127.0.0.1:9990"
+echo "📊 Local Health:       http://127.0.0.1:9996"
+echo "⚛️  Quantum API:        http://127.0.0.1:9997/quantum/current"
+echo "📞 Phone Bridge:       http://127.0.0.1:8765/health"
 if [ "$PHONE_ONLY" = false ]; then
-echo "🔌 Nexus Bus:          ws://localhost:9999"
-echo "🧠 LoRA Server:        http://localhost:8899/health"
-echo "🧬 Codebase API:       http://localhost:8091/health"
+echo "🔌 Nexus Bus:          ws://127.0.0.1:9999"
+echo "🧠 LoRA Server:        http://127.0.0.1:8899/health"
+echo "🧬 Codebase API:       http://127.0.0.1:8091/health"
 fi
 echo ""
 echo "Press Ctrl+C to stop all services"

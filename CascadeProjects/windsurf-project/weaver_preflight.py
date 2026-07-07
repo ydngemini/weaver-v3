@@ -9,6 +9,7 @@ Called by: make preflight, weaver.py startup
 import os
 import socket
 import sys
+from memory_manager import default_vault_dir
 
 PROJ = os.path.dirname(os.path.abspath(__file__))
 
@@ -39,11 +40,6 @@ PORTS = [
     (8091, "Codebase API"),
     (5679, "Obsidian Bridge"),
     (5678, "n8n Workflow"),
-]
-
-VAULT_DIRS = [
-    "Nexus_Vault",
-    "Nexus_Vault/akashic_persist",
 ]
 
 CRITICAL_FILES = [
@@ -123,16 +119,20 @@ def preflight_check(verbose: bool = True) -> dict:
             results["warnings"].append(f"Port {port} ({svc}) already in use")
 
     # ── Vault directories ──
-    for d in VAULT_DIRS:
-        full = os.path.join(PROJ, d)
+    vault_dirs = [
+        default_vault_dir(),
+        default_vault_dir() / "akashic_persist",
+    ]
+    for d in vault_dirs:
+        full = str(d)
         if os.path.isdir(full):
-            results["ok"].append(f"{d}/ exists")
+            results["ok"].append(f"{full}/ exists")
         else:
             try:
                 os.makedirs(full, exist_ok=True)
-                results["ok"].append(f"{d}/ created")
+                results["ok"].append(f"{full}/ created")
             except OSError as e:
-                results["errors"].append(f"Cannot create {d}/: {e}")
+                results["errors"].append(f"Cannot create {full}/: {e}")
 
     # ── Critical files ──
     for f in CRITICAL_FILES:

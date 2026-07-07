@@ -23,6 +23,7 @@ The project is built around real services rather than static demos. The browser 
 Browser / iPhone
   -> weaverv3.com Caddy
       -> /llm       on-box OpenAI-compatible model endpoint
+      -> /brain     AWS Bedrock brain + Nova Sonic realtime voice
       -> /tts       on-box voice service
       -> /codebase  read-only codebase + public internet context API
       -> static     avatar, penthouse, vendor Three.js
@@ -40,6 +41,19 @@ Model strategy
   -> local on-box llama fallback for resilience
   -> local Soul Voice layer for Weaver's final tone/personality
 ```
+
+## Public URLs
+
+| URL | Purpose |
+|---|---|
+| `https://weaverv3.com` | embodied avatar UI |
+| `https://headless.weaverv3.com` | headless 3D quantum presence |
+| `https://dash.weaverv3.com` | protected live operator dashboard |
+| `https://status.weaverv3.com` | protected health dashboard |
+| `https://weaverv3.com/brain/*` | key-gated Bedrock brain API |
+| `wss://weaverv3.com/brain/realtime/voice` | Nova Sonic realtime voice |
+| `https://weaverv3.com/tts/*` | key-gated AWS Polly TTS |
+| `https://weaverv3.com/codebase/*` | key-gated read-only source context |
 
 ## Embodiment Features
 

@@ -42,6 +42,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 import httpx
 import numpy as np
+from memory_manager import default_vault_dir
 
 load_dotenv()
 
@@ -65,7 +66,7 @@ _AZURE_DEPLOY = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
 _AZURE_NANO_DEPLOY = os.environ.get("AZURE_OPENAI_NANO_DEPLOYMENT", "gpt-5.4-nano")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VAULT_DIR = os.path.join(BASE_DIR, "Nexus_Vault")
+VAULT_DIR = str(default_vault_dir())
 os.makedirs(VAULT_DIR, exist_ok=True)
 TRANSCRIPT_PATH = os.path.join(VAULT_DIR, "weaver_discord_transcript.txt")
 

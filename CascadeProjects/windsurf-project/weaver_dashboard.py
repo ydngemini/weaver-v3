@@ -31,19 +31,27 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from memory_manager import default_vault_dir
 
 PORT = int(os.environ.get("WEAVER_DASHBOARD_PORT", "9990"))
 PROJ = os.path.dirname(os.path.abspath(__file__))
-VAULT = os.path.join(PROJ, "Nexus_Vault")
+VAULT = str(default_vault_dir())
 N8N_WEBHOOK_URL = (
     os.environ.get("N8N_WEBHOOK_URL")
     or os.environ.get("WEAVER_N8N_WEBHOOK_URL")
-    or "http://localhost:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
+    or "http://127.0.0.1:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
 )
-BRAIN_API_URL = os.environ.get("WEAVER_BRAIN_API_URL", "http://localhost:8093").rstrip("/")
+BRAIN_API_URL = os.environ.get("WEAVER_BRAIN_API_URL", "http://127.0.0.1:8093").rstrip("/")
 
 app = FastAPI(title="Weaver Live Dashboard", version="1.0.0")
+
+WEAVER_LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Weaver logo">
+  <rect width="64" height="64" rx="14" fill="#07080c"/>
+  <path d="M32 6 56 24 47 53H17L8 24 32 6Z" fill="#101624" stroke="#e6b84a" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M19 22 25 43 32 29 39 43 45 22" fill="none" stroke="#e6b84a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="4" fill="#34d4ff"/>
+</svg>"""
 
 # ── State ────────────────────────────────────────────────────────────────────
 
@@ -57,23 +65,23 @@ _nexus_stats = {"msg_count": 0, "lobes_seen": set(), "topics_seen": set()}
 _sse_subscribers: list[asyncio.Queue] = []
 
 LOBES = [
-    ("Nexus Bus",       "http://localhost:9998/health",  9998, "WebSocket pub/sub broker"),
-    ("AWS Brain API",   "http://localhost:8093/health",  8093, "Bedrock/Nova unified cortex"),
-    ("Headless UI",     "http://localhost:8093/health",  8093, "Headless Nova presence"),
-    ("Trained Voice",   "http://localhost:8092/health",  8092, "OpenVoice cloned voice"),
-    ("Codebase API",    "http://localhost:8091/health",  8091, "Bounded self-inspection API"),
+    ("Nexus Bus",       "http://127.0.0.1:9998/health",  9998, "WebSocket pub/sub broker"),
+    ("AWS Brain API",   "http://127.0.0.1:8093/health",  8093, "Bedrock/Nova unified cortex"),
+    ("Headless UI",     "http://127.0.0.1:8093/health",  8093, "Headless Nova presence"),
+    ("Trained Voice",   "http://127.0.0.1:8092/health",  8092, "OpenVoice cloned voice"),
+    ("Codebase API",    "http://127.0.0.1:8091/health",  8091, "Bounded self-inspection API"),
     ("Quantum Soul",    None,                            None, "IBM Quantum 7-qubit loop"),
-    ("Quantum API",     "http://localhost:9997/health",  9997, "Quantum state HTTP server"),
-    ("Akashic Hub",     "http://localhost:9995/health",  9995, "Shared vector state"),
+    ("Quantum API",     "http://127.0.0.1:9997/health",  9997, "Quantum state HTTP server"),
+    ("Akashic Hub",     "http://127.0.0.1:9995/health",  9995, "Shared vector state"),
     ("Pineal Gate",     None,                            None, "Pentagon MoE router"),
-    ("LoRA Server",     "http://localhost:8899/health",  8899, "1B Llama Soul Voice"),
-    ("Qwen3B Branch",    "http://localhost:8898/health",  8898, "Local Qwen branch"),
-    ("Phone Bridge",    "http://localhost:8765/health",  8765, "Twilio telephony"),
-    ("Health Dashboard","http://localhost:9996/health",  9996, "Legacy traffic-light"),
+    ("LoRA Server",     "http://127.0.0.1:8899/health",  8899, "1B Llama Soul Voice"),
+    ("Qwen3B Branch",    "http://127.0.0.1:8898/health",  8898, "Local Qwen branch"),
+    ("Phone Bridge",    "http://127.0.0.1:8765/health",  8765, "Twilio telephony"),
+    ("Health Dashboard","http://127.0.0.1:9996/health",  9996, "Legacy traffic-light"),
     ("ProactivePulse",  None,                            None, "Quantum resonance monitor"),
     ("Dream State",     None,                            None, "Autonomous reflection"),
-    ("n8n Workflow",    "http://localhost:5678/healthz",  5678, "Workflow orchestrator"),
-    ("Discord Bridge", "http://localhost:8770/health",   8770, "Discord voice/vision"),
+    ("n8n Workflow",    "http://127.0.0.1:5678/healthz",  5678, "Workflow orchestrator"),
+    ("Discord Bridge", "http://127.0.0.1:8770/health",   8770, "Discord voice/vision"),
 ]
 
 
@@ -394,7 +402,7 @@ def read_memory_events(limit: int = 10) -> list[dict]:
 
 
 async def read_brain_snapshot() -> dict:
-    health, health_ms, health_err = await _fetch_json("http://localhost:8093/health", timeout=2.5)
+    health, health_ms, health_err = await _fetch_json("http://127.0.0.1:8093/health", timeout=2.5)
     key = _weaver_key()
     headers = {"X-Weaver-Key": key} if key else {}
     state: dict = {}
@@ -404,8 +412,8 @@ async def read_brain_snapshot() -> dict:
     state_err = ""
     models_err = ""
     if key:
-        state, state_ms, state_err = await _fetch_json("http://localhost:8093/state", headers=headers, timeout=3.0)
-        models, models_ms, models_err = await _fetch_json("http://localhost:8093/v1/models", headers=headers, timeout=3.0)
+        state, state_ms, state_err = await _fetch_json("http://127.0.0.1:8093/state", headers=headers, timeout=3.0)
+        models, models_ms, models_err = await _fetch_json("http://127.0.0.1:8093/v1/models", headers=headers, timeout=3.0)
     else:
         state_err = "missing WEAVER_LLM_KEY"
         models_err = state_err
@@ -454,7 +462,7 @@ async def read_brain_snapshot() -> dict:
 
 
 async def read_voice_snapshot() -> dict:
-    data, latency_ms, err = await _fetch_json("http://localhost:8092/health", timeout=4.0)
+    data, latency_ms, err = await _fetch_json("http://127.0.0.1:8092/health", timeout=4.0)
     status = "online" if data.get("status") in ("ok", "online") else "offline"
     if err:
         status = "offline"
@@ -469,7 +477,7 @@ async def read_voice_snapshot() -> dict:
 
 
 async def read_codebase_snapshot() -> dict:
-    data, latency_ms, err = await _fetch_json("http://localhost:8091/health", timeout=2.5)
+    data, latency_ms, err = await _fetch_json("http://127.0.0.1:8091/health", timeout=2.5)
     status = "online" if data.get("status") in ("ok", "online") else "offline"
     if err:
         status = "offline"
@@ -490,7 +498,7 @@ async def _nexus_listener():
     import websockets
     while True:
         try:
-            async with websockets.connect("ws://localhost:9999", ping_interval=20) as ws:
+            async with websockets.connect("ws://127.0.0.1:9999", ping_interval=20) as ws:
                 await ws.send(json.dumps({"action": "register", "lobe_id": "live_dashboard"}))
                 await ws.send(json.dumps({"action": "subscribe", "topics": [
                     "vision", "quantum_state", "identity", "manifested_response",
@@ -600,7 +608,7 @@ async def _start_tunnel():
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            cf, "tunnel", "--url", f"http://localhost:{PORT}",
+            cf, "tunnel", "--url", f"http://127.0.0.1:{PORT}",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -808,7 +816,7 @@ async def api_trigger_call(request: Request):
         return {"error": "missing 'to' number"}
     try:
         async with httpx.AsyncClient(timeout=15.0) as c:
-            resp = await c.post("http://localhost:8765/call", json={
+            resp = await c.post("http://127.0.0.1:8765/call", json={
                 "to": to_number,
                 "reason": reason,
             })
@@ -825,7 +833,7 @@ async def api_publish_nexus(request: Request):
     payload = body.get("payload", {})
     try:
         import websockets as _ws
-        async with _ws.connect("ws://localhost:9999") as conn:
+        async with _ws.connect("ws://127.0.0.1:9999") as conn:
             await conn.send(json.dumps({"topic": topic, "payload": payload, "source": "dashboard"}))
             return {"ok": True, "topic": topic}
     except Exception as e:
@@ -839,13 +847,18 @@ async def dashboard():
     return DASHBOARD_HTML
 
 
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon_svg():
+    return Response(content=WEAVER_LOGO_SVG, media_type="image/svg+xml")
+
+
 
 
 DASHBOARD_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌀</text></svg>">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WEAVER — Command Interface</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2281,5 +2294,5 @@ async def weaver_dashboard_serve():
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"Weaver Live Dashboard starting on http://localhost:{PORT}", flush=True)
+    print(f"Weaver Live Dashboard starting on http://127.0.0.1:{PORT}", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=PORT)
