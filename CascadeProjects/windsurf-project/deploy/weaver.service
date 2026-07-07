@@ -10,6 +10,7 @@ User=ubuntu
 # Adjust if you cloned elsewhere:
 WorkingDirectory=/home/ubuntu/weaver/CascadeProjects/windsurf-project
 EnvironmentFile=/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env
+EnvironmentFile=-/etc/default/caddy
 Environment=WEAVER_CODEBASE_ROOT=/home/ubuntu/weaver
 Environment=WEAVER_VAULT_DIR=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault
 Environment=WEAVER_LORA_BACKEND=gguf
