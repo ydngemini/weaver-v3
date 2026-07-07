@@ -11,7 +11,7 @@ Public: auto-tunneled via ngrok
 Features:
   - Real-time lobe health polling (all HTTP endpoints)
   - Nexus Bus WebSocket live feed
-  - Quantum state + pentagon MoE visualization
+  - Quantum state + 156-qubit Kingston manifold visualization
   - Vault file readers (transcripts, people, dreams)
   - System metrics + uptime tracking
   - SSE stream for zero-refresh browser updates
@@ -70,10 +70,10 @@ LOBES = [
     ("Headless UI",     "http://127.0.0.1:8093/health",  8093, "Headless Nova presence"),
     ("Trained Voice",   "http://127.0.0.1:8092/health",  8092, "OpenVoice cloned voice"),
     ("Codebase API",    "http://127.0.0.1:8091/health",  8091, "Bounded self-inspection API"),
-    ("Quantum Soul",    None,                            None, "IBM Quantum 7-qubit loop"),
+    ("Quantum Soul",    None,                            None, "156-qubit Kingston manifold"),
     ("Quantum API",     "http://127.0.0.1:9997/health",  9997, "Quantum state HTTP server"),
     ("Akashic Hub",     "http://127.0.0.1:9995/health",  9995, "Shared vector state"),
-    ("Pineal Gate",     None,                            None, "Pentagon MoE router"),
+    ("Pineal Gate",     None,                            None, "Kingston entropy router"),
     ("LoRA Server",     "http://127.0.0.1:8899/health",  8899, "1B Llama Soul Voice"),
     ("Qwen3B Branch",    "http://127.0.0.1:8898/health",  8898, "Local Qwen branch"),
     ("Phone Bridge",    "http://127.0.0.1:8765/health",  8765, "Twilio telephony"),
@@ -187,16 +187,16 @@ async def _check_quantum_soul() -> dict:
             age = time.time() - os.path.getmtime(state_file)
             if age < 600:
                 return {"name": "Quantum Soul", "status": "online",
-                        "desc": "IBM Quantum 7-qubit loop",
+                        "desc": "156-qubit Kingston manifold",
                         "detail": f"Last measurement {int(age)}s ago"}
             return {"name": "Quantum Soul", "status": "stale",
-                    "desc": "IBM Quantum 7-qubit loop",
+                    "desc": "156-qubit Kingston manifold",
                     "detail": f"Last measurement {int(age / 60)}m ago"}
         return {"name": "Quantum Soul", "status": "offline",
-                "desc": "IBM Quantum 7-qubit loop", "detail": "No state file"}
+                "desc": "156-qubit Kingston manifold", "detail": "No state file"}
     except Exception as e:
         return {"name": "Quantum Soul", "status": "offline",
-                "desc": "IBM Quantum 7-qubit loop", "detail": str(e)[:80]}
+                "desc": "156-qubit Kingston manifold", "detail": str(e)[:80]}
 
 
 async def _check_dream_state() -> dict:
@@ -299,6 +299,35 @@ def read_quantum_state() -> dict:
         return result
     except Exception:
         return _quantum_state
+
+
+def read_quantum_architecture() -> dict:
+    try:
+        from dataclasses import asdict
+        from quantum_networks import (
+            ARCHITECTURE_MODULES,
+            CORE_QUBITS,
+            SYSTEM_SUMMARY,
+            TOPOLOGICAL_LAYERS,
+            EntanglementTopology,
+            architecture_graph_stats,
+        )
+        return {
+            "summary": dict(SYSTEM_SUMMARY),
+            "core_qubits": [asdict(q) for q in CORE_QUBITS],
+            "modules": [asdict(m) for m in ARCHITECTURE_MODULES],
+            "topological_layers": [asdict(layer) for layer in TOPOLOGICAL_LAYERS],
+            "graph_stats": architecture_graph_stats(),
+            "topology_edges": {
+                "dodecahedron": EntanglementTopology.dodecahedron(),
+                "state_encoding": EntanglementTopology.state_encoding(),
+                "open_system": EntanglementTopology.open_system(),
+                "entropy_routing": EntanglementTopology.entropy_routing(),
+                "measurement_readout": EntanglementTopology.measurement_readout(),
+            },
+        }
+    except Exception as exc:
+        return {"error": str(exc)[:160]}
 
 
 # ── Vault file readers ───────────────────────────────────────────────────────
@@ -568,6 +597,7 @@ async def _poll_loop():
             "type": "poll",
             "lobes": lobes,
             "quantum": qs,
+            "quantum_architecture": read_quantum_architecture(),
             "brain": brain,
             "voice": voice,
             "codebase": codebase,
@@ -663,6 +693,7 @@ async def api_state():
     return {
         "lobes": lobes,
         "quantum": qs,
+        "quantum_architecture": read_quantum_architecture(),
         "brain": brain,
         "voice": voice,
         "codebase": codebase,
@@ -1121,14 +1152,47 @@ body::after {
 .memory-content { color: var(--text); font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .empty-state { color: var(--muted); font-size: 10px; padding: 8px 2px; }
 
-/* Pentagon */
-.pentagon-panel { display: flex; align-items: center; gap: 16px; }
-.pentagon-canvas { width: 220px; height: 220px; }
-.quantum-info { flex: 1; font-size: 10px; }
-.q-dominant { font: 700 18px/1.2 'JetBrains Mono',monospace; color: var(--violet); margin-bottom: 6px; }
-.q-bits { font: 300 14px/1 'JetBrains Mono',monospace; color: var(--cyan); margin-bottom: 8px; letter-spacing: 2px; }
-.q-meta { color: var(--dim); line-height: 1.8; }
-.q-raw { margin-top: 10px; font-size: 9px; color: var(--muted); line-height: 1.6; max-height: 80px; overflow-y: auto; }
+/* Kingston Manifold */
+.manifold-panel { display: grid; gap: 10px; }
+.manifold-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.12 / 1;
+  min-height: 330px;
+  overflow: hidden;
+  border: 1px solid rgba(52,212,255,0.14);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(52,212,255,0.08), transparent 55%),
+    linear-gradient(180deg, rgba(11,14,22,0.92), rgba(3,4,8,0.96));
+}
+.manifold-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.manifold-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.q-stat {
+  min-width: 0;
+  border: 1px solid rgba(30,37,54,0.9);
+  border-radius: 7px;
+  background: rgba(3,4,8,0.42);
+  padding: 7px 8px;
+}
+.q-stat-label { color: var(--dim); font-size: 7px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; }
+.q-stat-val { color: var(--text); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q-process-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.q-process-card {
+  min-width: 0;
+  border: 1px solid rgba(30,37,54,0.72);
+  border-left: 2px solid var(--cyan);
+  border-radius: 7px;
+  background: rgba(8,10,16,0.58);
+  padding: 7px 8px;
+}
+.q-process-title { color: #eef3ff; font-size: 8px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q-process-detail { color: var(--dim); font-size: 8px; line-height: 1.35; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.quantum-info { display: grid; grid-template-columns: 1fr; gap: 6px; font-size: 10px; }
+.q-dominant { font: 700 17px/1.2 'JetBrains Mono',monospace; color: var(--violet); }
+.q-bits { font: 300 12px/1.2 'JetBrains Mono',monospace; color: var(--cyan); letter-spacing: 1px; overflow-wrap: anywhere; }
+.q-meta { color: var(--dim); line-height: 1.6; white-space: pre-line; }
+.q-raw { font-size: 9px; color: var(--muted); line-height: 1.5; max-height: 76px; overflow-y: auto; }
 
 /* Feed */
 .feed-scroll { max-height: 260px; overflow-y: auto; mask-image: linear-gradient(to bottom, black 85%, transparent 100%); }
@@ -1261,7 +1325,7 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 
 @media (max-width: 1000px) {
   .overview-grid, .console-grid { grid-template-columns: 1fr; }
-  .pentagon-panel { flex-direction: column; }
+  .manifold-frame { min-height: 300px; }
   .ops-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .route-list { grid-template-columns: 1fr; }
 }
@@ -1269,6 +1333,8 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
   .stats-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat-card { min-width: 0; }
   .ops-grid { grid-template-columns: 1fr; }
+  .manifold-stats, .q-process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .manifold-frame { min-height: 260px; }
 }
 </style>
 </head>
@@ -1332,11 +1398,20 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
   </div>
 
   <div class="panel" style="grid-row: span 5">
-    <div class="panel-hdr"><span class="panel-title">Quantum Pentagon</span></div>
-    <div class="pentagon-panel">
-      <canvas class="pentagon-canvas" id="pentCanvas" width="220" height="220"></canvas>
+    <div class="panel-hdr"><span class="panel-title">156-Qubit Kingston Matrix</span><span class="panel-badge" id="qTopology">kingston</span></div>
+    <div class="manifold-panel">
+      <div class="manifold-frame">
+        <canvas class="manifold-canvas" id="kingstonCanvas" width="540" height="480" aria-label="156-qubit Kingston dodecahedron architecture">156-qubit Kingston dodecahedron architecture</canvas>
+      </div>
+      <div class="manifold-stats">
+        <div class="q-stat"><div class="q-stat-label">Core</div><div class="q-stat-val" id="qCore">12</div></div>
+        <div class="q-stat"><div class="q-stat-label">Reservoir</div><div class="q-stat-val" id="qReservoir">144</div></div>
+        <div class="q-stat"><div class="q-stat-label">Local Coupling</div><div class="q-stat-val" id="qCouplings">30</div></div>
+        <div class="q-stat"><div class="q-stat-label">H_CR</div><div class="q-stat-val" id="qHcr">144</div></div>
+      </div>
+      <div class="q-process-grid" id="qProcessGrid"></div>
       <div class="quantum-info">
-        <div class="q-bits" id="qBits">|-------&#10217;</div>
+        <div class="q-bits" id="qBits">|------------&#10217;</div>
         <div class="q-dominant" id="qDom">--</div>
         <div class="q-meta" id="qMeta"></div>
         <div class="q-raw" id="qRaw"></div>
@@ -1468,6 +1543,10 @@ function switchTab(name, btn) {
 
 // ── State ────────────────────────────────────
 let _quantumWeights = [0.5, 0.5, 0.5, 0.5, 0.5];
+let _quantumDimWeights = {logic:0.5, emotion:0.5, memory:0.5, creativity:0.5, vigilance:0.5};
+let _quantumArchitecture = null;
+let _quantumLast = {};
+let _matrixRAF = null;
 let _neuralRunning = false;
 
 function esc(v) {
@@ -1505,7 +1584,7 @@ async function fetchState() {
     if (!r.ok) return;
     const d = await r.json();
     updateLobes(d.lobes || []);
-    updateQuantum(d.quantum || {});
+    updateQuantum(d.quantum || {}, d.quantum_architecture || null);
     updateFeed(d.nexus_feed || []);
     updateTranscript(d.transcript || '');
     updatePeople(d.people || []);
@@ -1602,19 +1681,49 @@ function updateMemoryEvents(events) {
   }).join('');
 }
 
-function updateQuantum(q) {
+function updateQuantum(q, architecture) {
+  if (architecture && !architecture.error) _quantumArchitecture = architecture;
   if (!q || !q.weights) return;
+  _quantumLast = q;
   const dims = ['logic','emotion','memory','creativity','vigilance'];
   _quantumWeights = dims.map(d => q.weights[d] || 0.5);
-  document.getElementById('qBits').textContent = q.bitstring ? `|${q.bitstring}⟩` : '|-------⟩';
+  _quantumDimWeights = Object.fromEntries(dims.map((d, i) => [d, _quantumWeights[i]]));
+  const arch = _quantumArchitecture || {};
+  const summary = arch.summary || {};
+  const stats = arch.graph_stats || {};
+  setText('qTopology', summary.subtitle || 'kingston');
+  setText('qCore', summary.core_qubits ?? 12);
+  setText('qReservoir', summary.reservoir_qubits ?? 144);
+  setText('qCouplings', stats.core_local_couplings ?? summary.core_local_couplings ?? 30);
+  setText('qHcr', stats.core_reservoir_couplings ?? 144);
+  updateQuantumProcesses(arch.modules || []);
+  document.getElementById('qBits').textContent = q.bitstring ? `|${q.bitstring}⟩` : '|------------⟩';
   document.getElementById('qDom').textContent = q.dominant || '--';
   document.getElementById('sPathway').textContent = q.dominant || '--';
   let meta = '';
   if (q.secondary) meta += `Secondary: ${q.secondary}\n`;
-  if (q.timestamp) meta += `Measured: ${q.timestamp}`;
+  if (q.timestamp) meta += `Measured: ${q.timestamp}\n`;
+  meta += `Topology: ${stats.connectivity || summary.connectivity || 'sparse small-world'} · ${stats.dynamics || summary.dynamics || 'Lindblad open system'}`;
   document.getElementById('qMeta').textContent = meta;
   document.getElementById('qRaw').textContent = q.raw ? q.raw.substring(q.raw.indexOf(']')+2) : '';
-  drawPentagon();
+  startKingstonMatrix();
+}
+
+function updateQuantumProcesses(modules) {
+  const grid = document.getElementById('qProcessGrid');
+  if (!grid) return;
+  const fallback = [
+    {label:'State Encoding', detail:'Second-order ZZ feature map', color:'#3daeff'},
+    {label:'Open System Dynamics', detail:'Lindblad drive and damping', color:'#78d88b'},
+    {label:'Entropy Routing', detail:'Von Neumann entropy MoE routing', color:'#ffcf4f'},
+    {label:'Measurement / Readout', detail:'Observable projection and response', color:'#eef1f6'},
+  ];
+  const rows = (modules && modules.length ? modules : fallback).slice(0, 4);
+  grid.innerHTML = rows.map(m => `
+    <div class="q-process-card" style="border-left-color:${esc(m.color || '#34d4ff')}">
+      <div class="q-process-title">${esc(m.label || m.key || 'module')}</div>
+      <div class="q-process-detail">${esc(m.detail || '')}</div>
+    </div>`).join('');
 }
 
 function updateFeed(feed) {
@@ -1643,92 +1752,235 @@ function updateDreams(dreams) {
     </div>`).join('');
 }
 
-// ── Pentagon Radar ──────────────────────────
-function drawPentagon() {
-  const c = document.getElementById('pentCanvas');
-  if (!c) return;
+// ── 156-Qubit Kingston Matrix ──────────────────────────
+const CORE_LAYOUT_3D = [
+  [-1,1.618,0],[1,1.618,0],[-1,-1.618,0],[1,-1.618,0],
+  [0,-1,1.618],[0,1,1.618],[0,-1,-1.618],[0,1,-1.618],
+  [1.618,0,-1],[1.618,0,1],[-1.618,0,-1],[-1.618,0,1],
+].map(p => {
+  const n = Math.hypot(p[0], p[1], p[2]) || 1;
+  return [p[0]/n, p[1]/n, p[2]/n];
+});
+const DIM_COLORS = {
+  logic: '#34d4ff',
+  emotion: '#ec4899',
+  memory: '#ffb830',
+  creativity: '#9b6dff',
+  vigilance: '#ff4444',
+  synthesis: '#00e87b',
+  entropy: '#94a3b8',
+};
+const CORE_FALLBACK = [
+  ['Logic','logic','#9b5cff'], ['Emotion','emotion','#7c5cff'], ['Intuition','creativity','#4f72ff'],
+  ['Memory','memory','#3daeff'], ['Sovereignty','vigilance','#56d7ff'], ['Attention','emotion','#78d88b'],
+  ['Reflection','memory','#d8d65f'], ['Language','logic','#ffcf4f'], ['Planning','creativity','#ffa24a'],
+  ['Novelty','creativity','#ffd76a'], ['Stability','vigilance','#ff914d'], ['Meta-Reasoning','logic','#d83cff'],
+].map((v, i) => ({index:i, role:v[0], dimension:v[1], color:v[2]}));
+
+function startKingstonMatrix() {
+  if (!_matrixRAF) _matrixRAF = requestAnimationFrame(kingstonFrame);
+}
+
+function kingstonFrame(ts) {
+  drawKingstonMatrix(ts || performance.now());
+  _matrixRAF = requestAnimationFrame(kingstonFrame);
+}
+
+function fitCanvas(c) {
+  const rect = c.getBoundingClientRect();
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.floor(rect.width * ratio));
+  const h = Math.max(1, Math.floor(rect.height * ratio));
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
+  }
   const ctx = c.getContext('2d');
-  const W = c.width, H = c.height;
-  const cx = W/2, cy = H/2, R = 90;
-  const N = 5;
-  const PHI = (2*Math.PI)/N;
-  const labels = ['Logic','Emotion','Memory','Creativity','Vigilance'];
-  const colors = ['#34d4ff','#ec4899','#ffb830','#9b6dff','#ff4444'];
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return {ctx, W: rect.width, H: rect.height};
+}
+
+function coreActivity(core) {
+  const dim = core.dimension || 'logic';
+  const base = Number(_quantumDimWeights[dim] ?? 0.45);
+  const bits = (_quantumLast.bitstring || '').padStart(12, '0');
+  const bit = bits.length >= 12 ? bits[bits.length - 1 - core.index] : '0';
+  return Math.max(0.18, Math.min(1, base + (bit === '1' ? 0.22 : 0)));
+}
+
+function corePoint(index, W, H, time) {
+  const p = CORE_LAYOUT_3D[index % CORE_LAYOUT_3D.length];
+  const ry = time * 0.12;
+  const rx = -0.34;
+  const x1 = p[0] * Math.cos(ry) + p[2] * Math.sin(ry);
+  const z1 = -p[0] * Math.sin(ry) + p[2] * Math.cos(ry);
+  const y1 = p[1] * Math.cos(rx) - z1 * Math.sin(rx);
+  const z2 = p[1] * Math.sin(rx) + z1 * Math.cos(rx);
+  const scale = Math.min(W, H) * 0.23;
+  return {
+    x: W * 0.50 + x1 * scale,
+    y: H * 0.43 + y1 * scale,
+    z: z2,
+  };
+}
+
+function reservoirPoint(index, W, H, time) {
+  const n = 144;
+  const a = index * 2.399963229728653;
+  const r = Math.sqrt((index + 0.5) / n);
+  const shell = Math.min(W, H) * (0.30 + r * 0.20);
+  const breathe = 1 + 0.015 * Math.sin(time * 1.1 + index * 0.17);
+  return {
+    x: W * 0.50 + Math.cos(a + time * 0.025) * shell * 1.10 * breathe,
+    y: H * 0.43 + Math.sin(a + time * 0.018) * shell * 0.82 * breathe,
+  };
+}
+
+function drawKingstonMatrix(ts) {
+  const c = document.getElementById('kingstonCanvas');
+  if (!c) return;
+  const {ctx, W, H} = fitCanvas(c);
+  const time = ts * 0.001;
+  const arch = _quantumArchitecture || {};
+  const core = (arch.core_qubits && arch.core_qubits.length ? arch.core_qubits : CORE_FALLBACK).slice(0, 12);
+  const edges = arch.topology_edges || {};
+  const localEdges = edges.dodecahedron || [[0,1],[0,5],[0,7],[0,10],[0,11],[1,5],[1,7],[1,8],[1,9],[2,3],[2,4],[2,6],[2,10],[2,11],[3,4],[3,6],[3,8],[3,9],[4,5],[4,9],[4,11],[5,9],[5,11],[6,7],[6,8],[6,10],[7,8],[7,10],[8,9],[10,11]];
+  const stateEdges = edges.state_encoding || [];
+  const entropyEdges = edges.entropy_routing || [];
+  const readoutEdges = edges.measurement_readout || [];
+  const corePts = core.map(q => ({...q, ...corePoint(q.index, W, H, time)}));
+  const reservoirPts = Array.from({length:144}, (_, i) => reservoirPoint(i, W, H, time));
 
   ctx.clearRect(0, 0, W, H);
+  const bg = ctx.createRadialGradient(W * 0.50, H * 0.43, 0, W * 0.50, H * 0.43, Math.min(W, H) * 0.58);
+  bg.addColorStop(0, 'rgba(52,212,255,0.10)');
+  bg.addColorStop(0.55, 'rgba(155,109,255,0.045)');
+  bg.addColorStop(1, 'rgba(3,4,8,0)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
 
-  // Rings
-  for (let ring = 1; ring <= 5; ring++) {
-    const r = (R/5)*ring;
-    ctx.beginPath();
-    for (let i = 0; i <= N; i++) {
-      const a = (i%N)*PHI - Math.PI/2;
-      const x = cx + r*Math.cos(a), y = cy + r*Math.sin(a);
-      i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < reservoirPts.length; i++) {
+    const p = reservoirPts[i];
+    const q = core[i % core.length];
+    const activity = coreActivity(q);
+    const pulse = Math.max(0, Math.sin(time * 2.2 + i * 0.29)) * activity;
+    const color = i % 3 === 0 ? [52,212,255] : i % 3 === 1 ? [124,92,252] : [0,232,123];
+    if (i % 2 === 0) {
+      const next = reservoirPts[(i + 1) % reservoirPts.length];
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(next.x, next.y);
+      ctx.strokeStyle = `rgba(${color[0]},${color[1]},${color[2]},0.035)`;
+      ctx.lineWidth = 0.45;
+      ctx.stroke();
     }
-    ctx.closePath();
-    ctx.strokeStyle = ring===5 ? 'rgba(52,212,255,0.3)' : 'rgba(52,212,255,0.07)';
-    ctx.lineWidth = ring===5 ? 1.5 : 0.5;
-    ctx.stroke();
-  }
-
-  // Axes
-  for (let i = 0; i < N; i++) {
-    const a = i*PHI - Math.PI/2;
+    if (i % 12 === 0 || pulse > 0.55) {
+      const cp = corePts[i % corePts.length];
+      ctx.beginPath();
+      ctx.moveTo(cp.x, cp.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.strokeStyle = `rgba(52,212,255,${0.025 + pulse * 0.12})`;
+      ctx.lineWidth = 0.5 + pulse * 0.8;
+      ctx.stroke();
+    }
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + R*Math.cos(a), cy + R*Math.sin(a));
-    ctx.strokeStyle = 'rgba(52,212,255,0.1)';
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
-  }
-
-  // Data polygon
-  ctx.beginPath();
-  for (let i = 0; i <= N; i++) {
-    const idx = i%N;
-    const a = idx*PHI - Math.PI/2;
-    const r = R * Math.max(0.05, Math.min(1, _quantumWeights[idx]));
-    const x = cx + r*Math.cos(a), y = cy + r*Math.sin(a);
-    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
-  }
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(52,212,255,0.08)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(52,212,255,0.7)';
-  ctx.lineWidth = 2;
-  ctx.shadowColor = '#34d4ff';
-  ctx.shadowBlur = 10;
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-
-  // Vertices + labels
-  for (let i = 0; i < N; i++) {
-    const a = i*PHI - Math.PI/2;
-    const r = R * _quantumWeights[i];
-    const x = cx + r*Math.cos(a), y = cy + r*Math.sin(a);
-    ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI*2);
-    ctx.fillStyle = colors[i];
-    ctx.shadowColor = colors[i];
-    ctx.shadowBlur = 8;
+    ctx.arc(p.x, p.y, 1.1 + pulse * 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${color[0]},${color[1]},${color[2]},${0.28 + pulse * 0.58})`;
     ctx.fill();
-    ctx.shadowBlur = 0;
-
-    // Label
-    const lx = cx + (R+18)*Math.cos(a), ly = cy + (R+18)*Math.sin(a);
-    ctx.font = '500 9px JetBrains Mono';
-    ctx.fillStyle = 'rgba(184,192,212,0.7)';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(labels[i], lx, ly);
   }
 
-  // Center dot
-  ctx.beginPath();
-  ctx.arc(cx, cy, 3, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(155,109,255,0.6)';
-  ctx.fill();
+  localEdges.forEach(([a, b]) => {
+    const pa = corePts[a], pb = corePts[b];
+    if (!pa || !pb) return;
+    const act = (coreActivity(pa) + coreActivity(pb)) / 2;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.strokeStyle = `rgba(238,241,246,${0.15 + act * 0.20})`;
+    ctx.lineWidth = 0.65 + act * 0.9;
+    ctx.stroke();
+  });
+
+  stateEdges.forEach(([a, b]) => {
+    const pa = corePts[a], pb = corePts[b];
+    if (!pa || !pb) return;
+    const act = (coreActivity(pa) + coreActivity(pb)) / 2;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.strokeStyle = `rgba(61,174,255,${0.16 + act * 0.22})`;
+    ctx.lineWidth = 1 + act * 0.8;
+    ctx.stroke();
+  });
+
+  [...entropyEdges, ...readoutEdges].forEach(([a, b], i) => {
+    const pa = corePts[a], pb = corePts[b];
+    if (!pa || !pb) return;
+    const act = (coreActivity(pa) + coreActivity(pb)) / 2;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.setLineDash(i % 2 ? [4, 5] : [2, 5]);
+    ctx.strokeStyle = `rgba(255,207,79,${0.10 + act * 0.18})`;
+    ctx.lineWidth = 0.7 + act * 0.7;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+
+  corePts
+    .slice()
+    .sort((a, b) => a.z - b.z)
+    .forEach(q => {
+      const activity = coreActivity(q);
+      const color = q.color || DIM_COLORS[q.dimension] || '#34d4ff';
+      const radius = 7 + activity * 7;
+      const halo = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, radius * 3.2);
+      halo.addColorStop(0, hexToRgba(color, 0.38 * activity));
+      halo.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, radius * 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = hexToRgba(color, 0.88);
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = `rgba(238,241,246,${0.36 + activity * 0.34})`;
+      ctx.stroke();
+      ctx.fillStyle = '#030408';
+      ctx.font = '700 9px JetBrains Mono';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`Q${q.index}`, q.x, q.y);
+      const labelY = q.y + radius + 12;
+      ctx.fillStyle = `rgba(238,243,255,${0.56 + activity * 0.28})`;
+      ctx.font = '600 8px JetBrains Mono';
+      ctx.fillText(String(q.role || '').slice(0, 13), q.x, labelY);
+    });
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(238,243,255,0.86)';
+  ctx.font = '700 11px JetBrains Mono';
+  ctx.textAlign = 'left';
+  ctx.fillText('WEAVER V3 - 156-QUBIT KINGSTON MANIFOLD', 14, 22);
+  ctx.fillStyle = 'rgba(52,212,255,0.72)';
+  ctx.font = '600 9px JetBrains Mono';
+  ctx.fillText('12-core dodecahedron dual embedded in Q12-Q155 reservoir', 14, 38);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(184,192,212,0.60)';
+  ctx.fillText('local coupling | long-range entanglement | H_CR', W - 14, H - 18);
+}
+
+function hexToRgba(hex, alpha) {
+  const m = String(hex || '').replace('#', '');
+  if (m.length !== 6) return `rgba(52,212,255,${alpha})`;
+  const r = parseInt(m.slice(0,2), 16);
+  const g = parseInt(m.slice(2,4), 16);
+  const b = parseInt(m.slice(4,6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 // ── Console Chat ─────────────────────────────
@@ -1804,9 +2056,9 @@ async function pubCustomNexus() {
 // ── Neural Map — Interactive SOTA Visualization ─────────────────
 const REGIONS = [
   {id:"nexus_bus",label:"Nexus Bus",color:[52,212,255],cx:0.50,cy:0.10,r:0.055,n:90,desc:"WebSocket pub/sub broker",tier:"core"},
-  {id:"quantum",label:"Quantum Soul",color:[236,72,153],cx:0.18,cy:0.20,r:0.048,n:70,desc:"7-qubit IBM Quantum circuit",tier:"core"},
+  {id:"quantum",label:"Quantum Soul",color:[236,72,153],cx:0.18,cy:0.20,r:0.048,n:70,desc:"156-qubit Kingston manifold",tier:"core"},
   {id:"akashic",label:"Akashic Hub",color:[167,139,250],cx:0.50,cy:0.28,r:0.055,n:85,desc:"256-d shared vector state",tier:"core"},
-  {id:"pineal",label:"Pineal Gate",color:[124,92,252],cx:0.82,cy:0.20,r:0.048,n:70,desc:"Pentagon MoE router",tier:"core"},
+  {id:"pineal",label:"Pineal Gate",color:[124,92,252],cx:0.82,cy:0.20,r:0.048,n:70,desc:"Kingston entropy router",tier:"core"},
   {id:"logic",label:"Logic",color:[52,212,255],cx:0.14,cy:0.50,r:0.038,n:45,desc:"Analytical reasoning lobe",tier:"expert"},
   {id:"emotion",label:"Emotion",color:[236,72,153],cx:0.32,cy:0.50,r:0.038,n:45,desc:"Empathic resonance lobe",tier:"expert"},
   {id:"memory",label:"Memory",color:[245,158,11],cx:0.50,cy:0.50,r:0.038,n:45,desc:"Temporal recall lobe",tier:"expert"},
@@ -2241,7 +2493,7 @@ function connectSSE() {
         const d = JSON.parse(ev.data);
         if (d.type === 'poll') {
           updateLobes(d.lobes||[]);
-          updateQuantum(d.quantum||{});
+          updateQuantum(d.quantum||{}, d.quantum_architecture || null);
           updateBrain(d.brain||{}, d.voice||{}, d.codebase||{});
           updateMemoryEvents(d.memory_events||[]);
           document.getElementById('sOnline').textContent = `${d.online}/${d.total}`;
@@ -2278,7 +2530,7 @@ setInterval(() => { document.getElementById('clock').textContent = new Date().to
 fetchState();
 connectSSE();
 setInterval(fetchState, 5000);
-drawPentagon();
+startKingstonMatrix();
 window.addEventListener('resize', () => { if (_neuralRunning) neuralResize(); });
 </script>
 </body>
