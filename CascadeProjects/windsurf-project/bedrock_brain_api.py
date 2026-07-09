@@ -145,6 +145,12 @@ N8N_CHAT_TIMEOUT = float(os.environ.get("WEAVER_N8N_CHAT_TIMEOUT", "22"))
 N8N_BREAKER_FAILS = 3
 N8N_BREAKER_COOLDOWN = 60.0
 _n8n_breaker = {"fails": 0, "skip_until": 0.0}
+
+# Last-resort brain: the on-box llama.cpp server. Used when both the n8n
+# pipeline and every Bedrock route fail (e.g. account-level model-access loss)
+# so she never goes dark.
+LOCAL_LLM_URL = os.environ.get("WEAVER_LOCAL_LLM_URL", "http://127.0.0.1:8090/v1/chat/completions").strip()
+LOCAL_LLM_MODEL = os.environ.get("WEAVER_LOCAL_LLM_MODEL", "weaver-local").strip()
 HEADLESS_ACTIVE = os.environ.get("WEAVER_HEADLESS_ACTIVE", "1").lower() not in {"0", "false", "no"}
 THOUGHT_SECONDS = float(os.environ.get("WEAVER_HEADLESS_THOUGHT_SECONDS", "45"))
 DREAM_SECONDS = float(os.environ.get("WEAVER_HEADLESS_DREAM_SECONDS", "360"))
@@ -896,7 +902,7 @@ async def _state_summary(query: str = "") -> str:
     return "\n".join(parts)
 
 
-def _n8n_post_sync(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+def _json_post_sync(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -905,6 +911,15 @@ def _n8n_post_sync(url: str, payload: dict[str, Any], timeout: float) -> dict[st
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+async def _local_llama_chat(messages: list[dict[str, Any]], max_tokens: int = 220) -> str:
+    payload = {"model": LOCAL_LLM_MODEL, "max_tokens": int(max_tokens), "messages": messages}
+    data = await asyncio.to_thread(_json_post_sync, LOCAL_LLM_URL, payload, 25.0)
+    text = _clean_model_text(((data.get("choices") or [{}])[0].get("message") or {}).get("content"))
+    if not text:
+        raise RuntimeError("local llama returned empty text")
+    return text
 
 
 async def _n8n_moe_chat(user_text: str) -> tuple[str, dict[str, Any]] | None:
@@ -921,7 +936,7 @@ async def _n8n_moe_chat(user_text: str) -> tuple[str, dict[str, Any]] | None:
         return None
     try:
         data = await asyncio.to_thread(
-            _n8n_post_sync, N8N_WEBHOOK_URL, {"text": user_text}, N8N_CHAT_TIMEOUT
+            _json_post_sync, N8N_WEBHOOK_URL, {"text": user_text}, N8N_CHAT_TIMEOUT
         )
     except Exception as exc:
         _n8n_breaker["fails"] += 1
@@ -1053,14 +1068,24 @@ async def _cortex_chat(
             },
             {"role": "user", "content": f"{state_text}\n\n{reflex_text}\n\nUser turn:\n{user_text}"},
         ]
-        final_text, final_meta = await _bedrock_chat(
-            MODEL_ROUTES["weaver-speed"],
-            fallback_messages,
-            max_tokens=min(int(max_tokens or 180), 220),
-            temperature=0.35,
-        )
-        calls.append({"alias": selected_alias, "error": _compact(exc, 280)})
-        calls.append({"alias": "weaver-speed", "fallback": True, **final_meta})
+        try:
+            final_text, final_meta = await _bedrock_chat(
+                MODEL_ROUTES["weaver-speed"],
+                fallback_messages,
+                max_tokens=min(int(max_tokens or 180), 220),
+                temperature=0.35,
+            )
+            calls.append({"alias": selected_alias, "error": _compact(exc, 280)})
+            calls.append({"alias": "weaver-speed", "fallback": True, **final_meta})
+        except Exception as speed_exc:
+            # Bedrock is entirely unavailable (e.g. account model-access loss):
+            # answer from the on-box llama so she never goes dark.
+            final_text = await _local_llama_chat(
+                fallback_messages, max_tokens=min(int(max_tokens or 180), 220)
+            )
+            calls.append({"alias": selected_alias, "error": _compact(exc, 280)})
+            calls.append({"alias": "weaver-speed", "error": _compact(speed_exc, 200)})
+            calls.append({"alias": LOCAL_LLM_MODEL, "fallback": True, "local": True})
 
     total_latency = sum(int(call.get("latency_ms", 0) or 0) for call in calls)
     meta = {
