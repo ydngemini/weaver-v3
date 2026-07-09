@@ -112,7 +112,7 @@ curl -fsS -X POST http://127.0.0.1:5678/webhook/weaver-input \
 echo
 
 echo "── 5. end-to-end verification ──"
-KEY=$(grep -oP '^WEAVER_LLM_KEY=\K.*' /etc/default/caddy)
+KEY=$(sudo grep -oP '^WEAVER_LLM_KEY=\K.*' /etc/default/caddy)
 echo "  5a. weaver-one chat turn (full stack expected):"
 curl -fsS -m 60 -X POST http://127.0.0.1:8093/v1/chat/completions \
   -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
