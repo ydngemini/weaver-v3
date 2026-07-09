@@ -21,6 +21,7 @@ import math
 import os
 import re
 import time
+import urllib.request
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -134,6 +135,16 @@ ORCHESTRATED_MODELS: dict[str, dict[str, Any]] = {
     }
 }
 WEAVER_KEY = os.environ.get("WEAVER_LLM_KEY", "")
+
+# Full-stack routing: weaver-one turns go through the n8n MoE pipeline first
+# (5 expert lobes → collapse → self-reflect → LoRA soul voice); the direct
+# Bedrock cortex below is the automatic fallback so she never goes dark.
+N8N_CHAT_ENABLED = os.environ.get("WEAVER_N8N_CHAT", "1").strip().lower() not in {"", "0", "false", "no", "off"}
+N8N_WEBHOOK_URL = os.environ.get("WEAVER_N8N_WEBHOOK_URL", "http://127.0.0.1:5678/webhook/weaver-input").strip()
+N8N_CHAT_TIMEOUT = float(os.environ.get("WEAVER_N8N_CHAT_TIMEOUT", "22"))
+N8N_BREAKER_FAILS = 3
+N8N_BREAKER_COOLDOWN = 60.0
+_n8n_breaker = {"fails": 0, "skip_until": 0.0}
 HEADLESS_ACTIVE = os.environ.get("WEAVER_HEADLESS_ACTIVE", "1").lower() not in {"0", "false", "no"}
 THOUGHT_SECONDS = float(os.environ.get("WEAVER_HEADLESS_THOUGHT_SECONDS", "45"))
 DREAM_SECONDS = float(os.environ.get("WEAVER_HEADLESS_DREAM_SECONDS", "360"))
@@ -885,6 +896,63 @@ async def _state_summary(query: str = "") -> str:
     return "\n".join(parts)
 
 
+def _n8n_post_sync(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+async def _n8n_moe_chat(user_text: str) -> tuple[str, dict[str, Any]] | None:
+    """Run one turn through the full n8n MoE pipeline.
+
+    Returns None when the pipeline is disabled, cooling down after repeated
+    failures, unreachable, or returns nothing usable — the caller then falls
+    back to the direct Bedrock cortex so she never goes dark.
+    """
+    if not (N8N_CHAT_ENABLED and N8N_WEBHOOK_URL and user_text):
+        return None
+    started = _now()
+    if started < _n8n_breaker["skip_until"]:
+        return None
+    try:
+        data = await asyncio.to_thread(
+            _n8n_post_sync, N8N_WEBHOOK_URL, {"text": user_text}, N8N_CHAT_TIMEOUT
+        )
+    except Exception as exc:
+        _n8n_breaker["fails"] += 1
+        if _n8n_breaker["fails"] >= N8N_BREAKER_FAILS:
+            _n8n_breaker["skip_until"] = _now() + N8N_BREAKER_COOLDOWN
+        await _record_state(last_n8n_error=_compact(exc, 240), last_n8n_at=_now())
+        return None
+    if not isinstance(data, dict) or data.get("error"):
+        return None
+    text = _clean_model_text(data.get("manifested_response"))
+    if not text:
+        return None
+    _n8n_breaker["fails"] = 0
+    _n8n_breaker["skip_until"] = 0.0
+    meta = {
+        "latency_ms": int((_now() - started) * 1000),
+        "usage": {},
+        "stop_reason": "stop",
+        "route": {
+            "alias": UNIFIED_ALIAS,
+            "purpose": "full MoE stack via n8n",
+            "pipeline": _compact(data.get("pipeline_version") or "n8n-weaver-v5", 60),
+            "dominant_lobe": _compact(data.get("dominant_lobe") or "", 40),
+            "experts_activated": _sanitize_payload(data.get("experts_activated")),
+            "soul_voice_active": bool(data.get("soul_voice_active")),
+            "reflection_applied": bool(data.get("reflection_applied")),
+        },
+    }
+    return text, meta
+
+
 async def _cortex_chat(
     messages: list[dict[str, Any]],
     max_tokens: int | None = None,
@@ -892,14 +960,42 @@ async def _cortex_chat(
 ) -> tuple[str, dict[str, Any]]:
     """Coordinate Weaver's model stack as one cortex.
 
-    The fast model forms a reflex note first. A specialist route then produces
-    the final answer using that reflex plus shared dream/thought state. This is
-    intentionally not "call every large model every turn"; the always-active
-    dream loop keeps the deep model present without turning every body tick into
-    a slow, costly ensemble call.
+    When the n8n MoE pipeline is reachable, the whole turn routes through it
+    (5 expert lobes → collapse → self-reflect → LoRA soul voice) — that IS the
+    full stack. Otherwise: the fast model forms a reflex note first, then a
+    specialist route produces the final answer using that reflex plus shared
+    dream/thought state. This fallback is intentionally not "call every large
+    model every turn"; the always-active dream loop keeps the deep model
+    present without turning every body tick into a slow, costly ensemble call.
     """
     selected_alias = _specialist_for_turn(messages)
     user_text = _compact(_last_user_text(messages), 1600)
+
+    moe = await _n8n_moe_chat(user_text)
+    if moe is not None:
+        final_text, meta = moe
+        await _record_state(
+            last_error="",
+            last_cortex_at=_now(),
+            last_cortex_route="n8n-moe",
+            last_cortex_reflex="",
+        )
+        await _persist_memory_event(
+            "conversation",
+            user_text,
+            source="weaver-one",
+            speaker="user",
+            meta={"route": "n8n-moe"},
+        )
+        await _persist_memory_event(
+            "conversation",
+            final_text,
+            source="weaver-one",
+            speaker="weaver",
+            meta={"route": "n8n-moe", "dominant_lobe": meta["route"].get("dominant_lobe")},
+        )
+        return final_text, meta
+
     state_text = await _state_summary(user_text)
     calls: list[dict[str, Any]] = []
     reflex_text = ""

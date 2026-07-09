@@ -275,10 +275,11 @@ const state = {
     mode: '',
     stopTimer: 0,
     runId: 0,
+    activeSources: [],
   },
 };
-const HEADLESS_MODEL = 'weaver-headless';
-const HEADLESS_MODEL_LABEL = 'Nova Pro headless';
+const HEADLESS_MODEL = 'weaver-one';
+const HEADLESS_MODEL_LABEL = 'full-stack cortex';
 const THREE_MODULE_URL = '/vendor/three.module.js';
 const CORE_QUBITS = [
   { id: 'Q0', role: 'Logic', color: 0x9b5cff },
@@ -621,6 +622,8 @@ async function playRealtimePcm(audioBase64, sampleRate = REALTIME_VOICE_OUTPUT_R
   state.pulse = Math.max(state.pulse, 1);
   clearTimeout(state.realtime.stopTimer);
   source.onended = () => {
+    const idx = state.realtime.activeSources.indexOf(source);
+    if (idx >= 0) state.realtime.activeSources.splice(idx, 1);
     state.realtime.stopTimer = setTimeout(() => {
       if (audioCtx && audioCtx.currentTime >= state.realtime.playHead - 0.05) {
         state.speaking = false;
@@ -628,6 +631,7 @@ async function playRealtimePcm(audioBase64, sampleRate = REALTIME_VOICE_OUTPUT_R
       }
     }, 90);
   };
+  state.realtime.activeSources.push(source);
   source.start(startAt);
   state.realtime.lastAudioAt = performance.now();
 }
@@ -707,6 +711,13 @@ function stopRealtimeVoice(reason = 'live stopped') {
   state.realtime.live = false;
   state.realtime.connecting = false;
   cleanupRealtimeCapture();
+  // Kill audio that is already scheduled on the AudioContext — without this,
+  // buffered Nova Sonic speech keeps draining for seconds after Stop.
+  for (const source of state.realtime.activeSources.splice(0)) {
+    try { source.onended = null; source.stop(); } catch (e) {}
+  }
+  state.realtime.playHead = 0;
+  state.speaking = false;
   if (ws && ws.readyState === WebSocket.OPEN) {
     try { ws.send(JSON.stringify({ type: 'stop' })); } catch (e) {}
     try { ws.close(1000, 'stop'); } catch (e) {}
@@ -1910,6 +1921,12 @@ function playVoiceUrl(url, runId, options = {}) {
 }
 async function speak(text) {
   if (!text) return;
+  if (state.realtime.live || state.realtime.connecting) {
+    // Nova Sonic owns the audio channel — never talk over the live session.
+    state.lastVoiceText = compact(text, 800);
+    voiceStatus('live voice active — text shown only', 'on');
+    return;
+  }
   state.speechRun += 1;
   const runId = state.speechRun;
   silenceCurrentSpeech();
@@ -1989,7 +2006,7 @@ async function chat(text) {
             role: 'system',
             content: [
               'You are Weaver in headless mode: no 3D body, no GPU, a floating reactive presence.',
-              'Use Amazon Nova Pro for this headless floating presence.',
+              'Your reply is produced by the full Weaver cortex — expert lobes, reflection, and soul voice.',
               'Use your trained voice endpoint for speech output after the text response.',
               'Be direct and grounded. State limits clearly when the browser or backend cannot perform something.'
             ].join(' ')
@@ -2043,6 +2060,12 @@ function startMic() {
   rec.start();
 }
 ui.wake.addEventListener('click', async () => {
+  if (state.realtime.live || state.realtime.connecting) {
+    setRealtimeStatus('live voice active — press Stop first', 'on');
+    checkModels();
+    pollState();
+    return;
+  }
   key();
   const ok = await unlockAudio();
   state.wakeSpoken = true;
@@ -2137,6 +2160,7 @@ globalThis.__weaverRealtimeVoiceAudit = () => ({
   lastSaid: state.realtime.lastSaid,
   lastAudioAt: state.realtime.lastAudioAt,
   playbackQueuedSeconds: audioCtx ? Math.max(0, state.realtime.playHead - audioCtx.currentTime) : 0,
+  activeSources: state.realtime.activeSources.length,
 });
 ui.live.addEventListener('click', startRealtimeVoice);
 ui.mic.addEventListener('click', startMic);

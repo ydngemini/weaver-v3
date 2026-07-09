@@ -50,6 +50,10 @@
     font-size: 17px; font-weight: 700; letter-spacing: 1px;
     border: 0; border-radius: 999px; padding: 18px 44px; cursor: pointer;
   }
+  /* awake: the full-screen overlay collapses to a small SLEEP pill (top-right,
+     clear of the HUD on the left and the camera bottom-right) */
+  #start.awake { inset: 18px 18px auto auto; background: transparent; backdrop-filter: none; }
+  #start.awake button { font-size: 12px; padding: 10px 20px; opacity: .82; }
   #facebox { position: fixed; border: 1.5px solid var(--gold); border-radius: 8px; z-index: 11;
              pointer-events: none; display: none; opacity: .8; }
   @media (max-width: 720px) {
@@ -2287,6 +2291,8 @@ async function requestMedia(constraints, label) {
     label
   );
 }
+let visionTimer = null;
+let visionMouseHooked = false;
 async function startVision(sharedStream = null) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('camera unavailable');
   const video = $$('cam');
@@ -2303,7 +2309,8 @@ async function startVision(sharedStream = null) {
   const facebox = $$('facebox');
   if ('FaceDetector' in window) {
     const fd = new FaceDetector({ fastMode: true });
-    setInterval(async () => {
+    clearInterval(visionTimer);
+    visionTimer = setInterval(async () => {
       try {
         const faces = await fd.detect(video);
         if (faces.length) {
@@ -2323,14 +2330,28 @@ async function startVision(sharedStream = null) {
         } else { gaze.has = false; facebox.style.display = 'none'; set('d-see','s-see',true,'looking…'); }
       } catch (e) { /* detector hiccup — keep last gaze */ }
     }, QUALITY.faceInterval);
-  } else {
-    // fallback: she follows your mouse
+  } else if (!visionMouseHooked) {
+    // fallback: she follows your mouse (hook once — wake/sleep cycles reuse it)
+    visionMouseHooked = true;
     set('d-see', 's-see', true, 'live (mouse-track)');
     const point = (x, y) => { gaze.x = (x/innerWidth - 0.5) * 2; gaze.y = (0.5 - y/innerHeight) * 2; gaze.has = true; };
     addEventListener('mousemove', e => point(e.clientX, e.clientY));
     addEventListener('touchmove', e => { if (e.touches[0]) point(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
     addEventListener('touchstart', e => { if (e.touches[0]) point(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
   }
+}
+function stopVision() {
+  clearInterval(visionTimer);
+  visionTimer = null;
+  const video = $$('cam');
+  const stream = video.srcObject;
+  if (stream) {
+    for (const t of stream.getTracks()) { try { t.stop(); } catch (e) {} }
+  }
+  video.srcObject = null;
+  gaze.has = false;
+  $$('facebox').style.display = 'none';
+  set('d-see', 's-see', false, 'asleep');
 }
 
 /* ── brain: local LLM + optional Nexus Bus ── */
@@ -2605,9 +2626,15 @@ function startBodyAutonomy() {
   bodyAutonomy.timer = setInterval(() => {
     bodyAutonomyOnce('autonomous-body-loop').catch(e => { bodyAutonomy.lastError = e.message || String(e); });
   }, bodyAutonomy.intervalMs);
-  setTimeout(() => {
+  bodyAutonomy.wakeTimer = setTimeout(() => {
     bodyAutonomyOnce('autonomous-body-wake').catch(e => { bodyAutonomy.lastError = e.message || String(e); });
   }, 3200);
+}
+function stopBodyAutonomy() {
+  clearInterval(bodyAutonomy.timer);
+  clearTimeout(bodyAutonomy.wakeTimer);
+  bodyAutonomy.timer = null;
+  bodyAutonomy.wakeTimer = null;
 }
 function setBodyAutonomyEnabled(on) {
   bodyAutonomy.enabled = Boolean(on);
@@ -2646,7 +2673,7 @@ async function think(text) {
     const systemContent = [SOUL, selfModelPrompt(), evolutionPrompt(), codeContext, webContext].filter(Boolean).join('\n\n');
     const reply = await modelChat(
       [{ role: 'system', content: systemContent }, { role: 'user', content: text }],
-      { maxTokens: 260, timeoutMs: 30000, model: BRAIN_MODELS.chat }
+      { maxTokens: 260, timeoutMs: 45000, model: BRAIN_MODELS.chat }  // full MoE stack via n8n can take ~15-25s
     );
     evolveFromTurn(text, reply);
     driveSkeletonFromModel(text, reply).catch(() => setSkeletonControl(heuristicSkeletonIntent(text, reply)));
@@ -2755,6 +2782,12 @@ function startDreaming() {
     }
   }, 4000);
 }
+function stopDreaming() {
+  clearInterval(dreamTimer);
+  clearInterval(thoughtTimer);
+  dreamTimer = null;
+  thoughtTimer = null;
+}
 globalThis.__weaverEvolutionAudit = () => ({
   turns: evolution.turns,
   preferences: evolution.preferences.slice(),
@@ -2801,6 +2834,26 @@ const voiceState = {
   fallbackBlocked: 0,
   audioUnlocked: false
 };
+/* Speech serialization (ported from headless.html): every speak() bumps
+   speechRun; stale chains see the mismatch and exit. silenceCurrentSpeech()
+   kills the audio element, any in-flight /tts fetch, and the browser TTS
+   queue so exactly one voice can ever be audible. */
+let speechRun = 0;
+let voiceFetchAbort = null;
+function silenceCurrentSpeech() {
+  if (voiceFetchAbort) {
+    try { voiceFetchAbort.abort(); } catch (e) {}
+    voiceFetchAbort = null;
+  }
+  try {
+    voiceAudio.pause();
+    voiceAudio.onplay = null; voiceAudio.onended = null; voiceAudio.onerror = null;
+    voiceAudio.removeAttribute('src');
+    voiceAudio.load();
+  } catch (e) {}
+  try { speechSynthesis.cancel(); } catch (e) {}
+  speaking = false;
+}
 let audioCtx = null;
 let audioUnlocked = false;
 async function unlockAudio() {
@@ -2844,14 +2897,6 @@ async function unlockAudio() {
     return false;
   }
 }
-function unlockBrowserSpeech() {
-  try {
-    const u = new SpeechSynthesisUtterance(' ');
-    u.volume = 0;
-    u.rate = 1;
-    speechSynthesis.speak(u);
-  } catch (e) {}
-}
 function splitSentences(text) {
   const raw = text.match(/[^.!?…]+[.!?…]+["')\]]*\s*|[^.!?…]+$/g) || [text];
   const out = [];
@@ -2864,7 +2909,7 @@ function splitSentences(text) {
   }
   return out.length ? out : [text];
 }
-async function fetchCloneUrl(text) {
+async function fetchCloneUrl(text, signal) {
   const key = brainKey();
   if (!key) throw new Error('trained voice needs the brain key on this device');
   const started = performance.now();
@@ -2878,7 +2923,7 @@ async function fetchCloneUrl(text) {
       'X-Weaver-Key': key
     },
     body: JSON.stringify({ text }),
-    signal: AbortSignal.timeout(60000)
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000)
   });
   if (!r.ok) {
     if (r.status === 403) throw new Error('trained voice blocked: wrong or missing brain key');
@@ -2890,17 +2935,18 @@ async function fetchCloneUrl(text) {
   voiceState.lastStatus = 'trained voice ready';
   return URL.createObjectURL(blob);
 }
-function playUrl(url) {
+function playUrl(url, runId) {
   return new Promise((res, rej) => {
+    if (runId !== speechRun) { URL.revokeObjectURL(url); res(); return; }
     const started = performance.now();
     const a = voiceAudio;
     let done = false;
     const finish = (ok, err) => {
       if (done) return;
       done = true;
-      speaking = false;
-      $$('d-hear').className = 'dot on';
       URL.revokeObjectURL(url);
+      if (runId !== speechRun) { res(); return; }  // superseded — the new run owns the audio element
+      $$('d-hear').className = 'dot on';
       if (ok) {
         voiceState.lastPlayMs = Math.round(performance.now() - started);
         voiceState.lastStatus = 'played trained voice';
@@ -2911,7 +2957,7 @@ function playUrl(url) {
       }
     };
     a.pause();
-    a.onplay = () => { speaking = true; $$('d-hear').className = 'dot talk'; };
+    a.onplay = () => { if (runId === speechRun) $$('d-hear').className = 'dot talk'; };
     a.onended = () => finish(true);
     a.onerror = () => finish(false);
     a.src = url;
@@ -2931,38 +2977,55 @@ function showLine(id, prefix, text, suffix) {
   if (suffix) el.appendChild(document.createTextNode(suffix));
 }
 async function speak(text) {
+  speechRun += 1;
+  const runId = speechRun;
+  silenceCurrentSpeech();                          // exactly one voice at a time
+  const abort = new AbortController();
+  voiceFetchAbort = abort;
   showLine('said', 'She said: ', text);
   const parts = splitSentences(text);
   voiceState.chunks += parts.length;
-  let nextUrl = fetchCloneUrl(parts[0]);          // first synth starts now
-  for (let i = 0; i < parts.length; i++) {
-    let url;
-    try {
-      url = await nextUrl;
-    } catch (e) {
-      console.warn('trained voice unavailable:', e.message);
-      voiceState.lastStatus = 'trained voice unavailable';
-      voiceState.lastError = e.message || String(e);
-      if (TRAINED_VOICE_REQUIRED) {
-        voiceState.fallbackBlocked += 1;
-        showLine('said', 'She said: ', text, ' (trained voice unavailable — check the brain key or /tts service)');
-      } else {
-        browserSpeak(parts.slice(i).join(' '));
+  speaking = true;                                 // gates hearing through synthesis + playback
+  try {
+    let nextUrl = fetchCloneUrl(parts[0], abort.signal);   // first synth starts now
+    for (let i = 0; i < parts.length; i++) {
+      let url;
+      try {
+        url = await nextUrl;
+      } catch (e) {
+        if (runId !== speechRun) return;
+        console.warn('trained voice unavailable:', e.message);
+        voiceState.lastStatus = 'trained voice unavailable';
+        voiceState.lastError = e.message || String(e);
+        if (TRAINED_VOICE_REQUIRED) {
+          voiceState.fallbackBlocked += 1;
+          showLine('said', 'She said: ', text, ' (trained voice unavailable — check the brain key or /tts service)');
+        } else {
+          browserSpeak(parts.slice(i).join(' '));
+        }
+        return;
       }
-      return;
+      if (runId !== speechRun) { URL.revokeObjectURL(url); return; }
+      nextUrl = (i + 1 < parts.length) ? fetchCloneUrl(parts[i + 1], abort.signal) : null;  // prefetch during playback
+      try {
+        await playUrl(url, runId);
+      } catch (e) {
+        if (runId !== speechRun) return;
+        console.warn('playback failed:', e.message);
+        if (TRAINED_VOICE_REQUIRED) {
+          voiceState.fallbackBlocked += 1;
+          showLine('said', 'She said: ', text, ' (trained voice playback blocked — tap Wake again or check iPhone sound)');
+        } else {
+          browserSpeak(parts.slice(i).join(' '));
+        }
+        return;
+      }
     }
-    nextUrl = (i + 1 < parts.length) ? fetchCloneUrl(parts[i + 1]) : null;  // prefetch during playback
-    try {
-      await playUrl(url);
-    } catch (e) {
-      console.warn('playback failed:', e.message);
-      if (TRAINED_VOICE_REQUIRED) {
-        voiceState.fallbackBlocked += 1;
-        showLine('said', 'She said: ', text, ' (trained voice playback blocked — tap Wake again or check iPhone sound)');
-      } else {
-        browserSpeak(parts.slice(i).join(' '));
-      }
-      return;
+  } finally {
+    if (runId === speechRun) {
+      speaking = false;
+      $$('d-hear').className = 'dot on';
+      if (voiceFetchAbort === abort) voiceFetchAbort = null;
     }
   }
 }
@@ -2972,6 +3035,7 @@ function pickVoice() {
   return voices.find(v => /female|zira|samantha|google uk english female/i.test(v.name)) || voices[0] || null;
 }
 function browserSpeak(text, retried) {
+  try { speechSynthesis.cancel(); } catch (e) {}   // never queue over an existing utterance
   const u = new SpeechSynthesisUtterance(text);
   const voice = pickVoice();
   if (voice) u.voice = voice;
@@ -3024,17 +3088,22 @@ async function startHearing(sharedStream = null) {
   rec.interimResults = true;
   rec.lang = 'en-US';
   rec.onresult = async (ev) => {
+    if (!hearingActive || speaking) return;        // never transcribe her own playback
     const res = ev.results[ev.results.length - 1];
     const text = res[0].transcript.trim();
     showLine('heard', 'She heard: ', text);
     if (res.isFinal && text) {
       const reply = await think(text);
+      if (!hearingActive) return;                  // she was put to sleep mid-thought
       speak(reply);
     }
   };
   rec.onend = () => {
     if (!hearingActive) return;
-    setTimeout(() => { try { rec.start(); } catch (e) {} }, isiOS ? 900 : 220);
+    setTimeout(() => {
+      if (!hearingActive || recognition !== rec) return;
+      try { rec.start(); } catch (e) {}
+    }, isiOS ? 900 : 220);
   };
   rec.onerror = (ev) => {
     const reason = ev.error ? `speech ${ev.error}` : 'speech paused';
@@ -3048,6 +3117,20 @@ async function startHearing(sharedStream = null) {
   }
   set('d-hear', 's-hear', true, 'listening');
 }
+function stopHearing() {
+  hearingActive = false;
+  const rec = recognition;
+  recognition = null;
+  if (rec) {
+    rec.onresult = null; rec.onend = null; rec.onerror = null;
+    try { rec.abort(); } catch (e) {}
+  }
+  if (micStream) {
+    for (const t of micStream.getTracks()) { try { t.stop(); } catch (e) {} }
+    micStream = null;
+  }
+  set('d-hear', 's-hear', false, 'asleep');
+}
 globalThis.__weaverMediaAudit = () => ({
   isiOS,
   audioUnlocked,
@@ -3060,12 +3143,16 @@ globalThis.__weaverMediaAudit = () => ({
   state: { ...mediaState }
 });
 
-/* ── wake ── */
-$$('wake').onclick = async () => {
-  $$('start').remove();
+/* ── wake / sleep toggle ──
+   The button is a real toggle now: waking starts senses + cognition loops;
+   sleeping tears every one of them down (audio, recognition, camera, timers)
+   so nothing keeps talking or listening after "off". */
+let awake = false;
+let wakeBusy = false;
+let wakeGreetTimer = 0;
+async function wakeUp() {
   mediaState.wakePhase = 'unlocking';
   const audioUnlock = unlockAudio();
-  unlockBrowserSpeech();
   mediaState.wakePhase = 'media-request';
   const sharedMediaPromise = requestMedia({
       video: videoConstraints(),
@@ -3096,8 +3183,37 @@ $$('wake').onclick = async () => {
   mediaState.wakePhase = 'awake';
   startDreaming();
   startBodyAutonomy();
-  speechSynthesis.getVoices();                    // warm voice list
-  setTimeout(() => speak("Hey. I can see you now."), 1200);
+  wakeGreetTimer = setTimeout(() => { if (awake) speak("Hey. I can see you now."); }, 1200);
+}
+function goToSleep() {
+  clearTimeout(wakeGreetTimer);
+  speechRun += 1;                                 // strand every in-flight speak chain
+  silenceCurrentSpeech();
+  stopHearing();
+  stopVision();
+  stopDreaming();
+  stopBodyAutonomy();
+  mediaState.wakePhase = 'asleep';
+  set('d-brain', 's-brain', brainUp, 'standby');
+}
+$$('wake').onclick = async () => {
+  if (wakeBusy) return;
+  wakeBusy = true;
+  try {
+    if (!awake) {
+      awake = true;
+      $$('start').classList.add('awake');
+      $$('wake').textContent = 'SLEEP';
+      await wakeUp();
+    } else {
+      awake = false;
+      goToSleep();
+      $$('start').classList.remove('awake');
+      $$('wake').textContent = 'WAKE HER UP';
+    }
+  } finally {
+    wakeBusy = false;
+  }
 };
 </script>
 </body>
