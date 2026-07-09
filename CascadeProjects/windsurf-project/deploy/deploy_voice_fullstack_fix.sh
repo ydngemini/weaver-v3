@@ -42,10 +42,14 @@ set -euo pipefail
 echo "── 1. static pages ──"
 for pair in "embodiment.html:/var/www/weaver" "headless.html:/var/www/weaver-headless"; do
   src="/tmp/${pair%%:*}"; root="${pair##*:}"
-  # Caddy uses plain file_server: the page is index.html unless a named copy exists.
-  if sudo test -f "$root/${pair%%:*}"; then dest="$root/${pair%%:*}"; else dest="$root/index.html"; fi
-  sudo cp "$src" "$dest"
-  echo "  $src -> $dest"
+  # Caddy file_server serves / from index.html — always update it. A named
+  # copy (e.g. embodiment.html) may also exist; keep it in sync too.
+  sudo cp "$src" "$root/index.html"
+  echo "  $src -> $root/index.html"
+  if sudo test -f "$root/${pair%%:*}"; then
+    sudo cp "$src" "$root/${pair%%:*}"
+    echo "  $src -> $root/${pair%%:*}"
+  fi
 done
 
 echo "── 2. brain api ──"
@@ -86,19 +90,42 @@ cred = [{
 }]
 open("/tmp/n8n_cred.json", "w").write(json.dumps(cred))
 PY
-  docker cp /tmp/n8n_cred.json n8n:/tmp/n8n_cred.json
-  docker exec -u node n8n n8n import:credentials --input=/tmp/n8n_cred.json
+  sudo docker cp /tmp/n8n_cred.json n8n:/tmp/n8n_cred.json
+  sudo docker exec -u node n8n n8n import:credentials --input=/tmp/n8n_cred.json
   rm -f /tmp/n8n_cred.json
 else
   echo "  credential azure-openai-header present"
 fi
 # 4b. import + publish the v5 workflow, then repair the production webhook row.
-docker cp /tmp/n8n_weaver_v5.json n8n:/tmp/wf.json
-docker exec -u node n8n n8n import:workflow --input=/tmp/wf.json
-docker exec -u node n8n n8n publish:workflow --id=weaverv5soulbind || \
-  docker exec -u node n8n n8n update:workflow --id=weaverv5soulbind --active=true
-sudo python3 /tmp/repair_n8n_weaver_webhook.py --no-container-restart
-sudo systemctl restart n8n
+sudo docker cp /tmp/n8n_weaver_v5.json n8n:/tmp/wf.json
+sudo docker exec -u node n8n n8n import:workflow --input=/tmp/wf.json
+sudo docker exec -u node n8n n8n publish:workflow --id=weaverv5soulbind || \
+  sudo docker exec -u node n8n n8n update:workflow --id=weaverv5soulbind --active=true
+# Register the production webhook row. The n8n CLI publish does not create it
+# (observed on n8n 2.28.5: workflow activates but /webhook/* 404s), so write
+# the row while n8n is stopped: the dedicated repair script first (normalizes
+# an existing row + takes a timestamped DB backup), then an explicit upsert to
+# guarantee the row exists.
+sudo systemctl stop n8n
+sudo python3 /tmp/repair_n8n_weaver_webhook.py --no-container-restart || true
+sudo python3 - <<'PY'
+import sqlite3
+DB = "/var/lib/docker/volumes/n8n_data/_data/database.sqlite"
+db = sqlite3.connect(DB)
+cols = [r[1] for r in db.execute("PRAGMA table_info(webhook_entity)")]
+row = {"workflowId": "weaverv5soulbind", "webhookPath": "weaver-input", "method": "POST", "node": "1. Input Gateway"}
+if "webhookId" in cols:
+    row["webhookId"] = "weaver-input"
+use = {k: v for k, v in row.items() if k in cols}
+db.execute("DELETE FROM webhook_entity WHERE webhookPath=? AND method=?", ("weaver-input", "POST"))
+db.execute(
+    f"INSERT INTO webhook_entity ({','.join(use)}) VALUES ({','.join('?' * len(use))})",
+    list(use.values()),
+)
+db.commit()
+print("  webhook row upserted:", sorted(use))
+PY
+sudo systemctl start n8n
 echo "  waiting for n8n to come back"
 for i in $(seq 1 30); do
   sleep 2
