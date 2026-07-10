@@ -78,7 +78,8 @@ cleanup() {
   trap - EXIT
   set +e
   rm -f /tmp/n8n_cred.json /tmp/webhook.json /tmp/brain.json /tmp/synthcheck.bin /tmp/tts.headers \
-    /tmp/public-synthcheck.bin /tmp/public-tts.headers /tmp/existing-creds.json
+    /tmp/public-synthcheck.bin /tmp/public-tts.headers
+  sudo rm -f /tmp/existing-creds.json
   sudo docker exec -u root n8n rm -f /tmp/n8n_cred.json /tmp/existing-creds.json /tmp/wf.json >/dev/null 2>&1 || true
   if (( rc != 0 )) && [ -n "$DB_ROLLBACK" ] && sudo test -f "$DB_ROLLBACK"; then
     echo "── restoring pre-import n8n database backup ──"
@@ -114,13 +115,13 @@ cleanup() {
     sudo tar -xzf "$BACKUP/web.tgz" -C /var/www || true
     sudo systemctl daemon-reload || true
   fi
-  if (( N8N_STOPPED )); then
+  if (( rc != 0 && BACKUP_READY )); then
+    sudo systemctl restart n8n weaver-brain weaver-tts weaver || true
+    N8N_STOPPED=0
+  elif (( N8N_STOPPED )); then
     echo "cleanup: restarting n8n"
     sudo systemctl start n8n || rc=1
     N8N_STOPPED=0
-  fi
-  if (( rc != 0 && BACKUP_READY )); then
-    sudo systemctl restart n8n weaver-brain weaver-tts weaver || true
   fi
   rm -rf "$STAGE" "$RELEASE"
   sudo rm -rf "$BACKUP"
@@ -321,16 +322,13 @@ if [ -f /tmp/n8n_cred.json ]; then
   rm -f /tmp/n8n_cred.json
   echo "  Mantle credential refreshed from deployment environment"
 else
-  sudo docker exec -u node n8n n8n export:credentials --all --output=/tmp/existing-creds.json
-  sudo docker cp n8n:/tmp/existing-creds.json /tmp/existing-creds.json
-  python3 - <<'PY'
-import json
-data=json.load(open("/tmp/existing-creds.json", encoding="utf-8"))
-matches=[item for item in data if item.get("id") == "azure-openai-header" and item.get("name") == "Azure OpenAI Header Auth"]
-assert matches, "existing encrypted Mantle credential is missing"
+  sudo python3 - <<'PY'
+import sqlite3
+db=sqlite3.connect("file:/var/lib/docker/volumes/n8n_data/_data/database.sqlite?mode=ro", uri=True)
+row=db.execute('SELECT id, type FROM credentials_entity WHERE id=?', ("azure-openai-header",)).fetchone()
+assert row == ("azure-openai-header", "httpHeaderAuth"), f"existing Mantle credential metadata is missing or wrong: {row}"
 print("  existing encrypted Mantle credential preserved")
 PY
-  rm -f /tmp/existing-creds.json
 fi
 sudo docker cp "$APP/n8n_weaver_v5.json" n8n:/tmp/wf.json
 sudo docker exec -u root n8n chown node:node /tmp/wf.json
