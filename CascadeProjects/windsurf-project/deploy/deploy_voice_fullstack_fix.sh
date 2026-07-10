@@ -347,7 +347,7 @@ PY
 fi
 sudo docker cp "$APP/n8n_weaver_v5.json" n8n:/tmp/wf.json
 sudo docker exec -u root n8n chown node:node /tmp/wf.json
-sudo docker exec -u node n8n n8n import:workflow --input=/tmp/wf.json --activeState=fromJson
+sudo docker exec -u node n8n n8n import:workflow --input=/tmp/wf.json
 sudo docker exec -u node n8n n8n publish:workflow --id=weaverv5soulbind || \
   sudo docker exec -u node n8n n8n update:workflow --id=weaverv5soulbind --active=true
 sudo systemctl restart n8n
