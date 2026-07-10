@@ -13,6 +13,7 @@ Environment=AWS_REGION=us-east-1
 Environment=WEAVER_HEADLESS_ACTIVE=1
 Environment=WEAVER_DEFAULT_BRAIN_ALIAS=weaver-one
 Environment=WEAVER_VAULT_DIR=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault
+Environment=WEAVER_N8N_WEBHOOK_URL=http://127.0.0.1:5678/webhook/weaver-input
 ExecStart=/home/ubuntu/weaver/CascadeProjects/windsurf-project/venv/bin/uvicorn bedrock_brain_api:app --host 127.0.0.1 --port 8093 --log-level warning
 Restart=on-failure
 RestartSec=8

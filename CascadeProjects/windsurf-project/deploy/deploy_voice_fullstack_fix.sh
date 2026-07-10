@@ -78,8 +78,8 @@ cleanup() {
   trap - EXIT
   set +e
   rm -f /tmp/n8n_cred.json /tmp/webhook.json /tmp/brain.json /tmp/synthcheck.bin /tmp/tts.headers \
-    /tmp/public-synthcheck.bin /tmp/public-tts.headers
-  sudo docker exec -u root n8n rm -f /tmp/n8n_cred.json /tmp/wf.json >/dev/null 2>&1 || true
+    /tmp/public-synthcheck.bin /tmp/public-tts.headers /tmp/existing-creds.json
+  sudo docker exec -u root n8n rm -f /tmp/n8n_cred.json /tmp/existing-creds.json /tmp/wf.json >/dev/null 2>&1 || true
   if (( rc != 0 )) && [ -n "$DB_ROLLBACK" ] && sudo test -f "$DB_ROLLBACK"; then
     echo "── restoring pre-import n8n database backup ──"
     if (( ! N8N_STOPPED )); then
@@ -212,6 +212,7 @@ echo "  verified $(find "$RELEASE" -type f | wc -l) tracked files from $DEPLOY_S
 echo "  ensuring supervised bridge dependencies"
 if ! "$APP/venv/bin/python3" -c 'import langchain_openai, discord, twilio' >/dev/null 2>&1; then
   "$APP/venv/bin/python3" -m pip install --disable-pip-version-check \
+    --no-cache-dir \
     --requirement "$APP/requirements-bridges.txt"
 fi
 "$APP/venv/bin/python3" -c 'import langchain_openai, discord, twilio; print("  bridge imports: ok")'
@@ -276,6 +277,7 @@ curl -fsS http://127.0.0.1:8765/health | python3 -c '
 import json,sys
 data=json.load(sys.stdin)
 assert data.get("status") == "ok", data
+assert data.get("n8n_route") == "http://127.0.0.1:5678/webhook/weaver-input", data
 print("  phone bridge: online; Twilio configured:", bool(data.get("twilio_configured")))
 '
 DISCORD_CONFIGURED=$("$APP/venv/bin/python3" -c 'from dotenv import dotenv_values; print("1" if (dotenv_values("/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env").get("DISCORD_BOT_TOKEN") or "").strip() else "0")')
@@ -302,7 +304,7 @@ from dotenv import dotenv_values
 values = dotenv_values("/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env")
 key = (values.get("MANTLE_API_KEY") or "").strip()
 if not key:
-    raise SystemExit("MANTLE_API_KEY is missing")
+    raise SystemExit(0)
 payload = [{
     "id": "azure-openai-header",
     "name": "Azure OpenAI Header Auth",
@@ -312,10 +314,24 @@ payload = [{
 with open("/tmp/n8n_cred.json", "w", encoding="utf-8") as fh:
     json.dump(payload, fh)
 PY
-sudo docker cp /tmp/n8n_cred.json n8n:/tmp/n8n_cred.json
-sudo docker exec -u root n8n sh -c 'chown node:node /tmp/n8n_cred.json && chmod 600 /tmp/n8n_cred.json'
-sudo docker exec -u node n8n n8n import:credentials --input=/tmp/n8n_cred.json
-rm -f /tmp/n8n_cred.json
+if [ -f /tmp/n8n_cred.json ]; then
+  sudo docker cp /tmp/n8n_cred.json n8n:/tmp/n8n_cred.json
+  sudo docker exec -u root n8n sh -c 'chown node:node /tmp/n8n_cred.json && chmod 600 /tmp/n8n_cred.json'
+  sudo docker exec -u node n8n n8n import:credentials --input=/tmp/n8n_cred.json
+  rm -f /tmp/n8n_cred.json
+  echo "  Mantle credential refreshed from deployment environment"
+else
+  sudo docker exec -u node n8n n8n export:credentials --all --output=/tmp/existing-creds.json
+  sudo docker cp n8n:/tmp/existing-creds.json /tmp/existing-creds.json
+  python3 - <<'PY'
+import json
+data=json.load(open("/tmp/existing-creds.json", encoding="utf-8"))
+matches=[item for item in data if item.get("id") == "azure-openai-header" and item.get("name") == "Azure OpenAI Header Auth"]
+assert matches, "existing encrypted Mantle credential is missing"
+print("  existing encrypted Mantle credential preserved")
+PY
+  rm -f /tmp/existing-creds.json
+fi
 sudo docker cp "$APP/n8n_weaver_v5.json" n8n:/tmp/wf.json
 sudo docker exec -u root n8n chown node:node /tmp/wf.json
 sudo docker exec -u node n8n n8n import:workflow --input=/tmp/wf.json

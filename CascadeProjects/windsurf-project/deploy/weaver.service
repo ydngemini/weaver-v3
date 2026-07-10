@@ -13,6 +13,8 @@ EnvironmentFile=/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env
 EnvironmentFile=-/etc/default/caddy
 Environment=WEAVER_CODEBASE_ROOT=/home/ubuntu/weaver
 Environment=WEAVER_VAULT_DIR=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault
+Environment=N8N_WEBHOOK_URL=http://127.0.0.1:5678/webhook/weaver-input
+Environment=WEAVER_N8N_WEBHOOK_URL=http://127.0.0.1:5678/webhook/weaver-input
 Environment=WEAVER_LORA_BACKEND=gguf
 Environment=WEAVER_SOUL_GGUF=/home/ubuntu/weaver/CascadeProjects/windsurf-project/weaver_merged_1B_Q4_K_M.gguf
 Environment=WEAVER_LORA_THREADS=4
