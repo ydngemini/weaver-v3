@@ -149,6 +149,21 @@ wait_http() {
   return 1
 }
 
+wait_n8n_workflow_ready() {
+  attempts=${1:-60}
+  marker='Activated workflow "Weaver Nervous System v5 (soul-binding)" (ID: weaverv5soulbind)'
+  for _ in $(seq 1 "$attempts"); do
+    if sudo docker logs n8n 2>&1 | grep -Fq "$marker"; then
+      echo "  n8n workflow activation complete"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "n8n became healthy but did not activate workflow weaverv5soulbind" >&2
+  sudo docker logs --tail 80 n8n >&2 || true
+  return 1
+}
+
 assert_n8n_offline() {
   if systemctl is-active --quiet n8n; then
     echo "refusing offline database access while n8n.service is active" >&2
@@ -360,6 +375,7 @@ const targets = [
 NODE
 
 echo "── 6. webhook attempt and conditional self-heal ──"
+wait_n8n_workflow_ready 60
 WEBHOOK_CODE=$(curl -sS -o /tmp/webhook.json -w '%{http_code}' -m 240 \
   -X POST http://127.0.0.1:5678/webhook/weaver-input \
   -H 'Content-Type: application/json' \
@@ -374,6 +390,7 @@ if [ "$WEBHOOK_CODE" != "200" ]; then
   sudo python3 /usr/local/sbin/repair_n8n_weaver_webhook.py --offline --no-backup
   sudo systemctl start n8n
   wait_http "n8n after repair" http://127.0.0.1:5678/healthz 60
+  wait_n8n_workflow_ready 60
   N8N_STOPPED=0
   WEBHOOK_CODE=$(curl -sS -o /tmp/webhook.json -w '%{http_code}' -m 240 \
     -X POST http://127.0.0.1:5678/webhook/weaver-input \
