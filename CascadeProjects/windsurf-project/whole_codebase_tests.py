@@ -713,10 +713,14 @@ async def test_V():
     conflict_blocked = False
     unsafe_blocked = False
     inactive_blocked = False
+    published_ok = False
     try:
         with sqlite3.connect(db_path) as db:
-            db.execute("create table workflow_entity (id text primary key, active integer not null)")
-            db.execute("insert into workflow_entity (id,active) values (?,1)", ("weaverv5soulbind",))
+            db.execute("create table workflow_entity (id text primary key, active integer not null, versionId text, activeVersionId text)")
+            db.execute("insert into workflow_entity (id,active,versionId,activeVersionId) values (?,1,?,?)", ("weaverv5soulbind", "version-live", "version-live"))
+            db.execute("create table workflow_history (versionId text primary key, workflowId text not null)")
+            db.execute("insert into workflow_history (versionId,workflowId) values (?,?)", ("version-live", "weaverv5soulbind"))
+            db.execute("create table workflow_published_version (workflowId text primary key, publishedVersionId text not null, createdAt text, updatedAt text)")
             db.execute(
                 "create table webhook_entity ("
                 "webhookPath text not null, method text not null, node text not null, "
@@ -763,9 +767,13 @@ async def test_V():
             row = db.execute(
                 "select workflowId,webhookPath,method,node,pathLength from webhook_entity"
             ).fetchone()
+            published = db.execute(
+                "select workflowId,publishedVersionId from workflow_published_version"
+            ).fetchone()
         inserted = rc == 0 and row == (
             "weaverv5soulbind", "weaver-input", "POST", "1. Input Gateway", 1
         )
+        published_ok = published == ("weaverv5soulbind", "version-live")
 
         backups = list(os.scandir(tmp))
         backup_paths = [entry.path for entry in backups if ".backup." in entry.name]
@@ -795,9 +803,10 @@ async def test_V():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    passed = inserted and backup_ok and conflict_blocked and unsafe_blocked and inactive_blocked
+    passed = inserted and published_ok and backup_ok and conflict_blocked and unsafe_blocked and inactive_blocked
     detail = "\n".join([
         f"  Canonical row inserted: {inserted}",
+        f"  Active version published: {published_ok}",
         f"  SQLite backup verified: {backup_ok}",
         f"  Foreign owner preserved: {conflict_blocked}",
         f"  Offline confirmation required: {unsafe_blocked}",

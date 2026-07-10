@@ -103,15 +103,64 @@ def repair(args: argparse.Namespace) -> int:
             if "workflow_entity" not in tables:
                 raise RuntimeError("workflow_entity table is missing")
             workflow_columns = {row[1] for row in con.execute("pragma table_info(workflow_entity)")}
-            select_columns = "id, active" if "active" in workflow_columns else "id"
+            select_names = ["id"]
+            if "active" in workflow_columns:
+                select_names.append("active")
+            version_column = "activeVersionId" if "activeVersionId" in workflow_columns else "versionId"
+            if version_column not in workflow_columns:
+                raise RuntimeError("workflow_entity has no active/current version column")
+            select_names.append(version_column)
             workflow = con.execute(
-                f"select {select_columns} from workflow_entity where id=?",
+                f"select {','.join(select_names)} from workflow_entity where id=?",
                 (args.workflow_id,),
             ).fetchone()
             if workflow is None:
                 raise RuntimeError(f"workflow {args.workflow_id!r} does not exist")
-            if len(workflow) > 1 and not bool(workflow[1]):
+            active_index = select_names.index("active") if "active" in select_names else None
+            if active_index is not None and not bool(workflow[active_index]):
                 raise RuntimeError(f"workflow {args.workflow_id!r} is not active")
+            version_id = workflow[select_names.index(version_column)]
+            if not version_id:
+                raise RuntimeError(f"workflow {args.workflow_id!r} has no active version")
+
+            required_tables = {"workflow_history", "workflow_published_version", "webhook_entity"}
+            missing_tables = required_tables - tables
+            if missing_tables:
+                raise RuntimeError(f"required n8n tables are missing: {sorted(missing_tables)}")
+            history = con.execute(
+                "select 1 from workflow_history where workflowId=? and versionId=?",
+                (args.workflow_id, version_id),
+            ).fetchone()
+            if history is None:
+                raise RuntimeError(
+                    f"active version {version_id!r} is absent from workflow_history"
+                )
+
+            published_columns = {
+                row[1] for row in con.execute("pragma table_info(workflow_published_version)")
+            }
+            published_required = {"workflowId", "publishedVersionId"}
+            if not published_required.issubset(published_columns):
+                raise RuntimeError(
+                    f"unsupported workflow_published_version schema: {sorted(published_columns)}"
+                )
+            published_values = {
+                "workflowId": args.workflow_id,
+                "publishedVersionId": version_id,
+            }
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            for timestamp in ("createdAt", "updatedAt"):
+                if timestamp in published_columns:
+                    published_values[timestamp] = now
+            con.execute(
+                "delete from workflow_published_version where workflowId=?",
+                (args.workflow_id,),
+            )
+            con.execute(
+                f"insert into workflow_published_version ({','.join(published_values)}) "
+                f"values ({','.join('?' for _ in published_values)})",
+                list(published_values.values()),
+            )
 
             conflicts = con.execute(
                 "select workflowId, node from webhook_entity where webhookPath=? and method=?",
@@ -158,12 +207,18 @@ def repair(args: argparse.Namespace) -> int:
             ).fetchone()
             if row != tuple(expected):
                 raise RuntimeError(f"webhook verification failed: {row!r}")
+            published = con.execute(
+                "select publishedVersionId from workflow_published_version where workflowId=?",
+                (args.workflow_id,),
+            ).fetchone()
+            if published != (version_id,):
+                raise RuntimeError(f"published version verification failed: {published!r}")
             con.commit()
 
         print(
             "repaired n8n webhook: "
             f"workflow={args.workflow_id} node={args.node} method={args.method} "
-            f"path={args.webhook_path}"
+            f"path={args.webhook_path} published_version={version_id}"
         )
         return 0
     finally:
