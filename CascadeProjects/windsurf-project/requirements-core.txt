@@ -26,6 +26,7 @@ langchain-core>=0.3.0
 
 # Telephony
 twilio>=9.0.0
+discord.py[voice]>=2.7.0
 
 # Vision / Face Recognition
 opencv-python-headless>=4.10.0

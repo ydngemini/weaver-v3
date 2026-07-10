@@ -256,7 +256,13 @@ async def twiml_endpoint(request: Request):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "weaver-full-stack-phone", "port": PORT}
+    return {
+        "status": "ok",
+        "service": "weaver-full-stack-phone",
+        "port": PORT,
+        "twilio_configured": bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN),
+        "n8n_route": N8N_WEBHOOK_URL,
+    }
 
 
 @app.post("/register-voice")

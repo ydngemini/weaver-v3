@@ -76,6 +76,7 @@ flock -n 9 || { rm -rf "$STAGE" "$RELEASE" "$BACKUP"; echo "another Weaver deplo
 cleanup() {
   rc=$?
   trap - EXIT
+  set +e
   rm -f /tmp/n8n_cred.json /tmp/webhook.json /tmp/brain.json /tmp/synthcheck.bin /tmp/tts.headers \
     /tmp/public-synthcheck.bin /tmp/public-tts.headers
   sudo docker exec -u root n8n rm -f /tmp/n8n_cred.json /tmp/wf.json >/dev/null 2>&1 || true
@@ -147,6 +148,19 @@ wait_http() {
   return 1
 }
 
+assert_n8n_offline() {
+  if systemctl is-active --quiet n8n; then
+    echo "refusing offline database access while n8n.service is active" >&2
+    return 1
+  fi
+  sudo docker info >/dev/null
+  state=$(sudo docker inspect -f '{{.State.Running}}' n8n 2>/dev/null || printf absent)
+  [ "$state" != "true" ] || {
+    echo "refusing offline database access while n8n container is running" >&2
+    return 1
+  }
+}
+
 echo "── deploy metadata ──"
 echo "  sha: $DEPLOY_SHA"
 echo "  host: $(hostname)"
@@ -195,6 +209,13 @@ while IFS= read -r -d '' source; do
 done < <(find "$RELEASE" -type f -print0)
 echo "  verified $(find "$RELEASE" -type f | wc -l) tracked files from $DEPLOY_SHA"
 
+echo "  ensuring supervised bridge dependencies"
+if ! "$APP/venv/bin/python3" -c 'import langchain_openai, discord, twilio' >/dev/null 2>&1; then
+  "$APP/venv/bin/python3" -m pip install --disable-pip-version-check \
+    --requirement "$APP/requirements-bridges.txt"
+fi
+"$APP/venv/bin/python3" -c 'import langchain_openai, discord, twilio; print("  bridge imports: ok")'
+
 sudo install -m 0644 "$APP/deploy/n8n.service" /etc/systemd/system/n8n.service
 sudo install -m 0644 "$APP/deploy/weaver.service" /etc/systemd/system/weaver.service
 sudo install -m 0644 "$APP/deploy/weaver-brain.service" /etc/systemd/system/weaver-brain.service
@@ -214,6 +235,7 @@ sudo systemctl daemon-reload
 echo "── 2. verified pre-migration n8n backup ──"
 sudo systemctl stop n8n
 N8N_STOPPED=1
+assert_n8n_offline
 backup_output=$(sudo python3 /usr/local/sbin/repair_n8n_weaver_webhook.py --offline --backup-only)
 echo "$backup_output"
 DB_ROLLBACK=$(printf '%s\n' "$backup_output" | sed -n 's/^backup=//p' | tail -1)
@@ -233,7 +255,43 @@ wait_http "quantum API" http://127.0.0.1:9997/health 60
 wait_http "Akashic Hub" http://127.0.0.1:9995/health 60
 wait_http "health dashboard" http://127.0.0.1:9996/health 60
 wait_http "phone bridge" http://127.0.0.1:8765/health 60
+wait_http "Obsidian bridge" http://127.0.0.1:5679/health 60
 wait_http "n8n" http://127.0.0.1:5678/healthz 60
+wait_http "local llama API" http://127.0.0.1:8090/v1/models 60
+curl -fsS -m 90 -X POST http://127.0.0.1:8090/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"weaver-local","max_tokens":8,"messages":[{"role":"user","content":"Reply: connected"}]}' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("choices", [{}])[0].get("message", {}).get("content", "").strip(), d; print("  local llama inference: connected")'
+
+curl -fsS http://127.0.0.1:9995/runtime/tasks | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+tasks=data.get("tasks", {})
+required={"nexus_bus","quantum_soul","pineal_gate","lora_server","qwen3b_server","quantum_api","health_dashboard","live_dashboard","codebase_api","akashic_hub_api","phone_bridge","obsidian_bridge","proactive_pulse","dream_state"}
+bad={name:tasks.get(name) for name in required if not tasks.get(name, {}).get("running")}
+assert not bad, f"missing/stopped supervised tasks: {bad}; live={sorted(tasks)}"
+print("  supervised runtime tasks:", len(required), "required running")
+'
+curl -fsS http://127.0.0.1:8765/health | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+assert data.get("status") == "ok", data
+print("  phone bridge: online; Twilio configured:", bool(data.get("twilio_configured")))
+'
+DISCORD_CONFIGURED=$("$APP/venv/bin/python3" -c 'from dotenv import dotenv_values; print("1" if (dotenv_values("/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env").get("DISCORD_BOT_TOKEN") or "").strip() else "0")')
+if [ "$DISCORD_CONFIGURED" = "1" ]; then
+  wait_http "Discord bridge" http://127.0.0.1:8770/health 60
+  DISCORD_VOICE_CONFIGURED=$("$APP/venv/bin/python3" -c 'from dotenv import dotenv_values; print("1" if (dotenv_values("/home/ubuntu/weaver/CascadeProjects/windsurf-project/.env").get("DISCORD_VOICE_CHANNEL_ID") or "").strip() else "0")')
+  curl -fsS http://127.0.0.1:8770/health | DISCORD_VOICE_CONFIGURED="$DISCORD_VOICE_CONFIGURED" python3 -c '
+import json,sys
+import os
+data=json.load(sys.stdin)
+assert data.get("bot_ready") and data.get("nexus_connected"), data
+if os.environ.get("DISCORD_VOICE_CONFIGURED") == "1":
+    assert data.get("voice_connected"), data
+print("  Discord bridge: bot ready and Nexus connected")
+'
+fi
 
 echo "── 4. refresh credential, import, and activate workflow ──"
 umask 077
@@ -298,6 +356,7 @@ if [ "$WEBHOOK_CODE" != "200" ]; then
   echo "  canonical route missing; applying owner-safe offline repair"
   sudo systemctl stop n8n
   N8N_STOPPED=1
+  assert_n8n_offline
   sudo python3 /usr/local/sbin/repair_n8n_weaver_webhook.py --offline --no-backup
   sudo systemctl start n8n
   wait_http "n8n after repair" http://127.0.0.1:5678/healthz 60

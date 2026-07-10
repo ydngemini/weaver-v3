@@ -1,0 +1,4 @@
+# Runtime integrations supervised by weaver.py.
+langchain-openai==1.2.1
+discord.py[voice]==2.7.1
+twilio==9.10.5

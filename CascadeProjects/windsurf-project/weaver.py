@@ -202,6 +202,7 @@ async def _supervised(coro, name: str, restart_on_crash: bool = False,
 
 async def main(heartbeat: bool = False, headless: bool = False) -> None:
     print(BANNER, flush=True)
+    tasks = []
 
     (nexus_main, qs_loop, run_vtv, AkashicHub, LiquidEngine, pineal_loop,
      build_experts, lora_main, qwen3b_main, quantum_api_serve,
@@ -268,6 +269,19 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
             async def _hub_health():
                 return {"status": "ok", "service": "weaver-akashic-hub",
                         "active_lobes": len(_hub_ref.active_lobes())}
+
+            @_hub_app.get("/runtime/tasks")
+            async def _runtime_tasks():
+                return {
+                    "status": "ok",
+                    "tasks": {
+                        task.get_name(): {
+                            "running": not task.done(),
+                            "cancelled": task.cancelled(),
+                        }
+                        for task in tuple(tasks)
+                    },
+                }
 
             async def _hub_api_serve():
                 _hub_host = os.environ.get("AKASHIC_HUB_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
@@ -594,7 +608,6 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         return
 
     # 1. Start Nexus Bus first so VTV can connect to it
-    tasks = []
     if nexus_main is not None:
         tasks.append(asyncio.create_task(
             _supervised(nexus_main, "Nexus Bus", restart_on_crash=True),
@@ -765,13 +778,15 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         print(f"[WEAVER] 💤 Dream State active (triggers after {int(DREAM_IDLE_MINUTES)}m idle, full-stack)...", flush=True)
 
     # 2k. Discord Bridge — voice/vision lobe for Discord servers
-    if discord_bridge_serve is not None:
+    if discord_bridge_serve is not None and os.environ.get("DISCORD_BOT_TOKEN", "").strip():
         tasks.append(asyncio.create_task(
             _supervised(discord_bridge_serve, "Discord Bridge", restart_on_crash=True,
                         restart_delay=10.0),
             name="discord_bridge"
         ))
         print("[WEAVER] 🎮 Discord Bridge on http://127.0.0.1:8770...", flush=True)
+    elif discord_bridge_serve is not None:
+        print("[WEAVER] 🎮 Discord Bridge not configured (DISCORD_BOT_TOKEN unset).", flush=True)
 
     if not headless:
         # 3. VTV Core — restarts on crash AND clean exit so the stack stays alive

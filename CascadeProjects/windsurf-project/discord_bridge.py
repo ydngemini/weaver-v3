@@ -845,6 +845,7 @@ async def _health_server():
             "voice_connected": _voice_client is not None and _voice_client.is_connected() if _voice_client else False,
             "listening": _listening,
             "nexus_connected": _nexus_client.connected if _nexus_client else False,
+            "bot_ready": bot.is_ready(),
         })
 
     app = web.Application()

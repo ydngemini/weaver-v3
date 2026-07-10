@@ -653,6 +653,11 @@ async def main():
     # Start the response listener (Weaver → Obsidian)
     app = web.Application()
     app.router.add_post("/weaver-response", _handle_weaver_response)
+    app.router.add_get("/health", lambda request: web.json_response({
+        "status": "ok",
+        "service": "weaver-obsidian-bridge",
+        "vault": VAULT_PATH,
+    }))
 
     runner = web.AppRunner(app)
     await runner.setup()
