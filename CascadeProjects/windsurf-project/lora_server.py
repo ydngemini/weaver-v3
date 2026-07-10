@@ -311,7 +311,8 @@ class LoRAHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/health":
             active = _memory.active_lora_version()
-            self._send_json(200, {
+            ready = _model is not None
+            self._send_json(200 if ready else 503, {
                 "status": "ok" if _model is not None else "model_not_loaded",
                 "model": "weaver-fracture-1b-lora",
                 "backend": LORA_BACKEND,
@@ -433,59 +434,20 @@ def _preload_in_background():
 
 
 def _notify_nexus_bus():
-    """Notify Nexus Bus that LoRA is ready (best-effort, sync socket)."""
-    import socket
-    import struct
-    import hashlib
-    import base64
-    import os as _os
+    """Notify Nexus Bus that LoRA is ready."""
     try:
-        sock = socket.create_connection(("localhost", 9999), timeout=5)
-        key = base64.b64encode(_os.urandom(16)).decode()
-        handshake = (
-            f"GET / HTTP/1.1\r\n"
-            f"Host: localhost:9999\r\n"
-            f"Upgrade: websocket\r\n"
-            f"Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\n"
-            f"Sec-WebSocket-Version: 13\r\n\r\n"
-        )
-        sock.sendall(handshake.encode())
-        resp = sock.recv(4096)
-        if b"101" not in resp:
-            sock.close()
-            return
+        from nexus_client import publish_once
 
-        def _ws_send(data: str):
-            b = data.encode()
-            mask_key = _os.urandom(4)
-            length = len(b)
-            if length < 126:
-                header = struct.pack("!BB", 0x81, 0x80 | length)
-            elif length < 65536:
-                header = struct.pack("!BBH", 0x81, 0x80 | 126, length)
-            else:
-                header = struct.pack("!BBQ", 0x81, 0x80 | 127, length)
-            masked = bytes(b[i] ^ mask_key[i % 4] for i in range(length))
-            sock.sendall(header + mask_key + masked)
-
-        def _ws_recv():
-            sock.recv(4096)
-
-        _ws_send(json.dumps({"action": "register", "lobe_id": "lora_server"}))
-        _ws_recv()  # drain sync
-        _ws_recv()  # drain ack
-        _ws_send(json.dumps({
-            "action": "publish",
-            "topic": "lobe_status",
-            "payload": {
+        publish_once(
+            "lora_server",
+            "lobe_status",
+            {
                 "lobe": "lora_server",
                 "status": "ready",
                 "model": "weaver-fracture-1b-lora",
                 "source": "lora_server",
             },
-        }))
-        sock.close()
+        )
         print("[LORA] Notified Nexus Bus: lora_server ready", flush=True)
     except Exception as e:
         print(f"[LORA] Nexus Bus notification skipped: {e}", flush=True)

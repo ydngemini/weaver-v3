@@ -482,7 +482,7 @@ async def pineal_gate_loop(hub: AkashicHub,
             print(f"   Latency: {result.latency_ms:.2f} ms", flush=True)
 
             # Broadcast gate decision to all lobes
-            if _nexus and _nexus.connected:
+            if _nexus:
                 await _nexus.publish("gate_decision", {
                     "description": result.description,
                     "experts": [er.dimension for er in result.expert_results],

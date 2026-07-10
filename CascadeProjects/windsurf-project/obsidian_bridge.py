@@ -622,8 +622,6 @@ async def _nexus_listener():
     try:
         while True:
             await asyncio.sleep(60)
-            if not client.connected:
-                await client.connect()
     except asyncio.CancelledError:
         await client.close()
 

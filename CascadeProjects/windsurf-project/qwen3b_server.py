@@ -235,7 +235,8 @@ class Qwen3BHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send_json(200, {
+            ready = _model is not None
+            self._send_json(200 if ready else 503, {
                 "status": "ok" if _model is not None else "model_not_loaded",
                 "model": "weaver-qwen2-3b",
                 "backend": _backend,
@@ -309,58 +310,20 @@ def _preload_in_background():
 
 
 def _notify_nexus_bus():
-    import socket
-    import struct
-    import base64
-    import os as _os
     try:
-        sock = socket.create_connection(("localhost", 9999), timeout=5)
-        key = base64.b64encode(_os.urandom(16)).decode()
-        handshake = (
-            f"GET / HTTP/1.1\r\n"
-            f"Host: localhost:9999\r\n"
-            f"Upgrade: websocket\r\n"
-            f"Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\n"
-            f"Sec-WebSocket-Version: 13\r\n\r\n"
-        )
-        sock.sendall(handshake.encode())
-        resp = sock.recv(4096)
-        if b"101" not in resp:
-            sock.close()
-            return
+        from nexus_client import publish_once
 
-        def _ws_send(data: str):
-            b = data.encode()
-            mask_key = _os.urandom(4)
-            length = len(b)
-            if length < 126:
-                header = struct.pack("!BB", 0x81, 0x80 | length)
-            elif length < 65536:
-                header = struct.pack("!BBH", 0x81, 0x80 | 126, length)
-            else:
-                header = struct.pack("!BBQ", 0x81, 0x80 | 127, length)
-            masked = bytes(b[i] ^ mask_key[i % 4] for i in range(length))
-            sock.sendall(header + mask_key + masked)
-
-        def _ws_recv():
-            sock.recv(4096)
-
-        _ws_send(json.dumps({"action": "register", "lobe_id": "qwen3b_server"}))
-        _ws_recv()
-        _ws_recv()
-        _ws_send(json.dumps({
-            "action": "publish",
-            "topic": "lobe_status",
-            "payload": {
+        publish_once(
+            "qwen3b_server",
+            "lobe_status",
+            {
                 "lobe": "qwen3b_server",
                 "status": "ready",
                 "model": "weaver-qwen2-3b",
                 "backend": _backend,
                 "source": "qwen3b_server",
             },
-        }))
-        sock.close()
+        )
         print(f"[QWEN3B] Notified Nexus Bus: qwen3b_server ready ({_backend})", flush=True)
     except Exception as e:
         print(f"[QWEN3B] Nexus Bus notification skipped: {e}", flush=True)

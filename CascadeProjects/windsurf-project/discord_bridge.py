@@ -127,11 +127,14 @@ async def _connect_nexus():
     global _nexus_client
     try:
         from nexus_client import NexusClient
-        _nexus_client = NexusClient(
-            lobe_id="discord_bridge",
-            topics=["dream_broadcast", "quantum_update", "phone_transcript"],
-            on_message=_on_nexus_message,
-        )
+        if _nexus_client is None:
+            _nexus_client = NexusClient(
+                lobe_id="discord_bridge",
+                topics=["dream_state", "quantum_state", "phone_transcript"],
+                on_message=_on_nexus_message,
+            )
+        if _nexus_client.connected:
+            return
         connected = await _nexus_client.connect()
         if connected:
             log.info("Registered with Nexus Bus as 'discord_bridge'")
@@ -142,7 +145,7 @@ async def _connect_nexus():
 
 
 async def publish_to_nexus(topic: str, data: dict):
-    if _nexus_client and _nexus_client.connected:
+    if _nexus_client:
         try:
             await _nexus_client.publish(topic, data)
         except Exception:
@@ -151,7 +154,7 @@ async def publish_to_nexus(topic: str, data: dict):
 
 async def _on_nexus_message(topic: str, payload: dict, from_lobe: str):
     """Handle messages from other lobes via Nexus Bus."""
-    if topic == "dream_broadcast":
+    if topic == "dream_state":
         log.info("[NEXUS] Dream broadcast: %s", str(payload)[:80])
 
 

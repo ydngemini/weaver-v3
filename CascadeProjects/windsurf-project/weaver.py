@@ -457,7 +457,7 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
             n8n_url = (
                 os.environ.get("WEAVER_N8N_WEBHOOK_URL")
                 or os.environ.get("N8N_WEBHOOK_URL")
-                or "http://127.0.0.1:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
+                or "http://127.0.0.1:5678/webhook/weaver-input"
             )
             last_dream_at = 0.0
 
@@ -701,7 +701,9 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
 
     # 2e-3. Codebase API — read-only self-inspection for deployed AWS code
     if codebase_api_serve is not None:
-        _codebase_host = os.environ.get("WEAVER_CODEBASE_HOST", "127.0.0.1")
+        _codebase_host = os.environ.get(
+            "WEAVER_CODEBASE_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1")
+        )
         _codebase_port = int(os.environ.get("WEAVER_CODEBASE_PORT", "8091"))
         tasks.append(asyncio.create_task(
             _supervised(lambda: codebase_api_serve(host=_codebase_host, port=_codebase_port),
@@ -786,8 +788,14 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     print(f"\n[WEAVER] 🟢 {len(tasks)} backend lobe(s) running.\n", flush=True)
 
     try:
-        # Run all lobes indefinitely until SIGTERM/SIGINT
-        await asyncio.Future()
+        # If a supervised lobe exhausts its retries, fail the master process so
+        # systemd restarts the complete stack instead of reporting false health.
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        failed = next(iter(done))
+        exc = failed.exception()
+        if exc is not None:
+            raise RuntimeError(f"lobe {failed.get_name()} failed") from exc
+        raise RuntimeError(f"lobe {failed.get_name()} exited unexpectedly")
     except asyncio.CancelledError:
         pass
     finally:

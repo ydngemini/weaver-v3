@@ -6,10 +6,12 @@ import importlib
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import time
 from datetime import datetime
+from types import SimpleNamespace
 
 from dotenv import load_dotenv
 
@@ -52,6 +54,8 @@ async def _start_nexus():
         cwd=PROJ,
     )
     await asyncio.sleep(1.2)
+    if proc.returncode is not None:
+        raise RuntimeError(f"Nexus Bus exited during startup with code {proc.returncode}")
     return proc
 
 
@@ -70,22 +74,27 @@ async def test_G():
     _header("G", "Quantum parse invariants")
     qs = importlib.import_module("quantum_soul")
 
-    bits1, active1, marg1 = qs.parse_counts({"0000001": 7, "0000000": 1})
-    bits2, active2, marg2 = qs.parse_counts({"1000000": 5, "0000000": 1})
-    bits3, active3, marg3 = qs.parse_counts({"0000000": 9})
+    width = max(qs.N_QUBITS, len(qs.PATHWAYS))
+    zeros = "0" * width
+    q0_bits = zeros[:-1] + "1"
+    last_bits = "1" + zeros[1:]
+    first_role = qs.PATHWAYS[min(qs.PATHWAYS)]
+    last_role = qs.PATHWAYS[max(qs.PATHWAYS)]
+    zero_role = "Stability" if "Stability" in qs.PATHWAYS.values() else "Void"
 
-    # Pentagon layout: q0=Awakening, q1=Resonance, q2=Echo, q3=Prophet,
-    #                  q4=Fracture, q5=Weaver, q6=Void
-    # Bitstring "1000000" → little-endian → qubit 6 active → PATHWAYS[6]="Void"
-    ok1 = bits1 == "0000001" and active1 == ["Awakening"] and abs(marg1["Awakening"] - 0.875) < 1e-6
-    ok2 = bits2 == "1000000" and active2 == ["Void"] and abs(marg2["Void"] - (5 / 6)) < 1e-6
-    ok3 = bits3 == "0000000" and active3 == ["Void"] and all(v == 0.0 for v in marg3.values())
+    bits1, active1, marg1 = qs.parse_counts({q0_bits: 7, zeros: 1})
+    bits2, active2, marg2 = qs.parse_counts({last_bits: 5, zeros: 1})
+    bits3, active3, marg3 = qs.parse_counts({zeros: 9})
+
+    ok1 = bits1 == q0_bits and active1 == [first_role] and abs(marg1[first_role] - 0.875) < 1e-6
+    ok2 = bits2 == last_bits and active2 == [last_role] and abs(marg2[last_role] - (5 / 6)) < 1e-6
+    ok3 = bits3 == zeros and active3 == [zero_role] and all(v == 0.0 for v in marg3.values())
     ok4 = set(marg1.keys()) == set(qs.PATHWAYS.values())
     passed = ok1 and ok2 and ok3 and ok4
 
     detail = "\n".join([
-        f"  Case 1 bits={bits1} active={active1} Awakening={marg1['Awakening']:.3f}",
-        f"  Case 2 bits={bits2} active={active2} Void={marg2['Void']:.3f}",
+        f"  Case 1 bits={bits1} active={active1} {first_role}={marg1[first_role]:.3f}",
+        f"  Case 2 bits={bits2} active={active2} {last_role}={marg2[last_role]:.3f}",
         f"  Case 3 bits={bits3} active={active3} nonzero_marginals={sum(1 for v in marg3.values() if v > 0)}",
         f"  All pathway keys present: {ok4}",
     ])
@@ -595,6 +604,339 @@ async def test_S():
     return passed
 
 
+async def test_T():
+    _header("T", "NexusClient reconnects after a clean socket close")
+    import nexus_client as nc
+
+    proc = await _start_nexus()
+    client = nc.NexusClient("reconnect_probe")
+    old_base, old_cap = nc.RECONNECT_BASE, nc.RECONNECT_CAP
+    connected = False
+    noticed_close = False
+    reconnected = False
+    publish_ok = False
+    try:
+        nc.RECONNECT_BASE = 0.05
+        nc.RECONNECT_CAP = 0.2
+        connected = await client.connect()
+        first_ws = client._ws
+        if first_ws is not None:
+            await first_ws.close()
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if not client.connected:
+                noticed_close = True
+            if noticed_close and client.connected and client._ws is not first_ws:
+                reconnected = True
+                break
+            await asyncio.sleep(0.02)
+
+        if reconnected:
+            publish_ok = await client.publish("reconnect_probe", {"ok": True})
+    finally:
+        nc.RECONNECT_BASE, nc.RECONNECT_CAP = old_base, old_cap
+        await client.close()
+        await _terminate(proc)
+
+    passed = connected and noticed_close and reconnected and publish_ok
+    detail = "\n".join([
+        f"  Initial connection:       {connected}",
+        f"  Clean close detected:     {noticed_close}",
+        f"  New socket established:   {reconnected}",
+        f"  Publish after reconnect:  {publish_ok}",
+    ])
+    _result("T", "NexusClient reconnects after a clean socket close", passed, detail)
+    return passed
+
+
+async def test_U():
+    _header("U", "Dashboard publishes through a registered Nexus client")
+    import httpx
+    import websockets
+    import weaver_dashboard as dashboard
+
+    proc = await _start_nexus()
+    delivered = False
+    rejected_bad_topic = False
+    publisher_id = ""
+    try:
+        async with websockets.connect("ws://localhost:9999") as sub:
+            await _drain_sync(sub)
+            await sub.send(json.dumps({"action": "register", "lobe_id": "dashboard_test_sub"}))
+            await asyncio.wait_for(sub.recv(), timeout=1.0)
+            await sub.send(json.dumps({"action": "subscribe", "topics": ["dashboard.test"]}))
+            await asyncio.wait_for(sub.recv(), timeout=1.0)
+
+            transport = httpx.ASGITransport(app=dashboard.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                bad = await client.post("/api/nexus", json={"topic": "bad topic", "payload": {}})
+                rejected_bad_topic = bad.json().get("error") == "invalid topic"
+                sent = await client.post(
+                    "/api/nexus",
+                    json={"topic": "dashboard.test", "payload": {"value": 7}},
+                )
+                response_ok = sent.json().get("ok") is True
+
+            message = json.loads(await asyncio.wait_for(sub.recv(), timeout=2.0))
+            publisher_id = message.get("from", "")
+            delivered = (
+                response_ok
+                and message.get("type") == "broadcast"
+                and message.get("topic") == "dashboard.test"
+                and message.get("payload", {}).get("value") == 7
+                and publisher_id == "dashboard_control"
+            )
+    finally:
+        if dashboard._nexus_publisher is not None:
+            await dashboard._nexus_publisher.close()
+            dashboard._nexus_publisher = None
+        await _terminate(proc)
+
+    passed = delivered and rejected_bad_topic
+    detail = "\n".join([
+        f"  Registered publisher delivered: {delivered}  (from={publisher_id or 'none'})",
+        f"  Invalid topic rejected:         {rejected_bad_topic}",
+    ])
+    _result("U", "Dashboard publishes through a registered Nexus client", passed, detail)
+    return passed
+
+
+async def test_V():
+    _header("V", "n8n webhook repair is backed up and owner-safe")
+    from deploy import repair_n8n_weaver_webhook as repair
+
+    tmp = tempfile.mkdtemp(prefix="weaver_n8n_repair_")
+    db_path = os.path.join(tmp, "database.sqlite")
+    inserted = False
+    backup_ok = False
+    conflict_blocked = False
+    unsafe_blocked = False
+    inactive_blocked = False
+    try:
+        with sqlite3.connect(db_path) as db:
+            db.execute("create table workflow_entity (id text primary key, active integer not null)")
+            db.execute("insert into workflow_entity (id,active) values (?,1)", ("weaverv5soulbind",))
+            db.execute(
+                "create table webhook_entity ("
+                "webhookPath text not null, method text not null, node text not null, "
+                "webhookId text, pathLength integer, workflowId text not null, "
+                "primary key (webhookPath, method))"
+            )
+
+        args = SimpleNamespace(
+            db=db_path,
+            container="",
+            no_container_restart=True,
+            offline=True,
+            no_backup=False,
+            backup_only=False,
+            workflow_id="weaverv5soulbind",
+            node="1. Input Gateway",
+            method="POST",
+            webhook_id="weaver-input",
+            webhook_path="weaver-input",
+        )
+
+        args.offline = False
+        try:
+            repair.repair(args)
+        except RuntimeError:
+            unsafe_blocked = True
+        args.offline = True
+        args.no_backup = True
+        with sqlite3.connect(db_path) as db:
+            db.execute("update workflow_entity set active=0 where id=?", (args.workflow_id,))
+        try:
+            repair.repair(args)
+        except RuntimeError:
+            inactive_blocked = True
+        with sqlite3.connect(db_path) as db:
+            inactive_blocked = inactive_blocked and db.execute(
+                "select count(*) from webhook_entity"
+            ).fetchone()[0] == 0
+            db.execute("update workflow_entity set active=1 where id=?", (args.workflow_id,))
+
+        args.no_backup = False
+        rc = repair.repair(args)
+        with sqlite3.connect(db_path) as db:
+            row = db.execute(
+                "select workflowId,webhookPath,method,node,pathLength from webhook_entity"
+            ).fetchone()
+        inserted = rc == 0 and row == (
+            "weaverv5soulbind", "weaver-input", "POST", "1. Input Gateway", 1
+        )
+
+        backups = list(os.scandir(tmp))
+        backup_paths = [entry.path for entry in backups if ".backup." in entry.name]
+        if len(backup_paths) == 1:
+            with sqlite3.connect(backup_paths[0]) as backup_db:
+                backup_ok = (
+                    backup_db.execute("pragma integrity_check").fetchone()[0] == "ok"
+                    and (os.stat(backup_paths[0]).st_mode & 0o777) == 0o600
+                )
+
+        with sqlite3.connect(db_path) as db:
+            db.execute("delete from webhook_entity")
+            db.execute(
+                "insert into webhook_entity (webhookPath,method,node,workflowId) values (?,?,?,?)",
+                ("weaver-input", "POST", "Other Node", "other-workflow"),
+            )
+        args.no_backup = True
+        try:
+            repair.repair(args)
+        except RuntimeError:
+            conflict_blocked = True
+        with sqlite3.connect(db_path) as db:
+            owner = db.execute(
+                "select workflowId,node from webhook_entity where webhookPath='weaver-input'"
+            ).fetchone()
+        conflict_blocked = conflict_blocked and owner == ("other-workflow", "Other Node")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    passed = inserted and backup_ok and conflict_blocked and unsafe_blocked and inactive_blocked
+    detail = "\n".join([
+        f"  Canonical row inserted: {inserted}",
+        f"  SQLite backup verified: {backup_ok}",
+        f"  Foreign owner preserved: {conflict_blocked}",
+        f"  Offline confirmation required: {unsafe_blocked}",
+        f"  Inactive workflow rejected: {inactive_blocked}",
+    ])
+    _result("V", "n8n webhook repair is backed up and owner-safe", passed, detail)
+    return passed
+
+
+async def test_W():
+    _header("W", "Synchronous Nexus publisher delivers model-ready events")
+    import websockets
+    from nexus_client import publish_once
+
+    proc = await _start_nexus()
+    delivered = False
+    try:
+        async with websockets.connect("ws://localhost:9999") as sub:
+            await _drain_sync(sub)
+            await sub.send(json.dumps({"action": "register", "lobe_id": "sync_publish_sub"}))
+            await asyncio.wait_for(sub.recv(), timeout=1.0)
+            await sub.send(json.dumps({"action": "subscribe", "topics": ["lobe_status"]}))
+            await asyncio.wait_for(sub.recv(), timeout=1.0)
+
+            sent = await asyncio.to_thread(
+                publish_once,
+                "sync_model_server",
+                "lobe_status",
+                {"status": "ready"},
+            )
+            message = json.loads(await asyncio.wait_for(sub.recv(), timeout=2.0))
+            delivered = (
+                sent
+                and message.get("type") == "broadcast"
+                and message.get("from") == "sync_model_server"
+                and message.get("topic") == "lobe_status"
+                and message.get("payload", {}).get("status") == "ready"
+            )
+    finally:
+        await _terminate(proc)
+
+    _result(
+        "W",
+        "Synchronous Nexus publisher delivers model-ready events",
+        delivered,
+        f"  Model-ready event delivered before clean close: {delivered}",
+    )
+    return delivered
+
+
+async def test_X():
+    _header("X", "Cortex falls back to on-box llama when n8n and Bedrock fail")
+    import bedrock_brain_api as brain
+
+    names = (
+        "_n8n_moe_chat", "_state_summary", "_bedrock_chat", "_local_llama_chat",
+        "_record_state", "_persist_memory_event",
+    )
+    originals = {name: getattr(brain, name) for name in names}
+
+    async def no_moe(_user_text):
+        return None
+
+    async def state_summary(_query):
+        return "test state"
+
+    async def bedrock_down(*_args, **_kwargs):
+        raise RuntimeError("Bedrock unavailable")
+
+    async def local_answer(_messages, max_tokens=220):
+        return f"local answer ({max_tokens})"
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    try:
+        brain._n8n_moe_chat = no_moe
+        brain._state_summary = state_summary
+        brain._bedrock_chat = bedrock_down
+        brain._local_llama_chat = local_answer
+        brain._record_state = noop
+        brain._persist_memory_event = noop
+        text, meta = await brain._cortex_chat(
+            [{"role": "user", "content": "Are you connected?"}],
+            max_tokens=80,
+        )
+    finally:
+        for name, value in originals.items():
+            setattr(brain, name, value)
+
+    calls = meta.get("route", {}).get("calls", [])
+    local_calls = [call for call in calls if call.get("local") is True]
+    passed = text == "local answer (80)" and len(local_calls) == 1
+    detail = "\n".join([
+        f"  Local response returned: {text == 'local answer (80)'}",
+        f"  Local fallback recorded once: {len(local_calls) == 1}",
+    ])
+    _result("X", "Cortex falls back to on-box llama when n8n and Bedrock fail", passed, detail)
+    return passed
+
+
+async def test_Y():
+    _header("Y", "Dashboard parses the 12-role Kingston quantum state")
+    import weaver_dashboard as dashboard
+
+    tmp = tempfile.mkdtemp(prefix="weaver_dashboard_quantum_")
+    old_vault = dashboard.VAULT
+    old_state = dashboard._quantum_state
+    try:
+        dashboard.VAULT = tmp
+        dashboard._quantum_state = {}
+        state = (
+            "[2026-07-10 12:00:00] WEAVER V3 - 156-QUBIT KINGSTON MANIFOLD "
+            "on test (|100000000001⟩) reveals Meta-Reasoning as the Dominant Pathway "
+            "(90.0% marginal probability), with Logic resonating in the entangled field."
+        )
+        with open(os.path.join(tmp, "quantum_state.txt"), "w", encoding="utf-8") as fh:
+            fh.write(state)
+        parsed = dashboard.read_quantum_state()
+    finally:
+        dashboard.VAULT = old_vault
+        dashboard._quantum_state = old_state
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    passed = (
+        parsed.get("bitstring") == "100000000001"
+        and parsed.get("dominant") == "Meta-Reasoning"
+        and parsed.get("secondary") == "Logic"
+        and parsed.get("weights", {}).get("logic") == 0.95
+    )
+    detail = "\n".join([
+        f"  12-bit state retained: {parsed.get('bitstring') == '100000000001'}",
+        f"  Hyphenated role parsed: {parsed.get('dominant') == 'Meta-Reasoning'}",
+        f"  Logic dimension projected: {parsed.get('weights', {}).get('logic')}",
+    ])
+    _result("Y", "Dashboard parses the 12-role Kingston quantum state", passed, detail)
+    return passed
+
+
 TESTS = {
     "G": ("Quantum parse invariants", test_G),
     "H": ("Quantum description + state write persistence", test_H),
@@ -609,6 +951,12 @@ TESTS = {
     "Q": ("Nexus rejects non-object JSON without dropping socket", test_Q),
     "R": ("Nexus blocks duplicate lobe_id takeover", test_R),
     "S": ("Nexus port collision fails closed", test_S),
+    "T": ("NexusClient reconnects after a clean socket close", test_T),
+    "U": ("Dashboard publishes through a registered Nexus client", test_U),
+    "V": ("n8n webhook repair is backed up and owner-safe", test_V),
+    "W": ("Synchronous Nexus publisher delivers model-ready events", test_W),
+    "X": ("Cortex falls back to on-box llama when n8n and Bedrock fail", test_X),
+    "Y": ("Dashboard parses the 12-role Kingston quantum state", test_Y),
 }
 
 
@@ -631,10 +979,11 @@ async def main(which: str):
     passed = sum(1 for v in results.values() if v)
     print(f"\n  {passed}/{len(results)} passed")
     print(f"{'═' * 62}\n")
+    return bool(results) and passed == len(results)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("test", nargs="?", default="all", help="G-S or all")
     args = ap.parse_args()
-    asyncio.run(main(args.test))
+    raise SystemExit(0 if asyncio.run(main(args.test)) else 1)

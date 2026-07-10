@@ -19,6 +19,7 @@ Features:
 """
 
 import asyncio
+import ast
 import json
 import os
 import re
@@ -31,7 +32,7 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from memory_manager import default_vault_dir
 
 PORT = int(os.environ.get("WEAVER_DASHBOARD_PORT", "9990"))
@@ -41,7 +42,7 @@ VAULT = str(default_vault_dir())
 N8N_WEBHOOK_URL = (
     os.environ.get("N8N_WEBHOOK_URL")
     or os.environ.get("WEAVER_N8N_WEBHOOK_URL")
-    or "http://127.0.0.1:5678/webhook/weaverv5soulbind/1.%2520input%2520gateway/weaver-input"
+    or "http://127.0.0.1:5678/webhook/weaver-input"
 )
 BRAIN_API_URL = os.environ.get("WEAVER_BRAIN_API_URL", "http://127.0.0.1:8093").rstrip("/")
 
@@ -63,6 +64,7 @@ _lobe_states: dict = {}
 _quantum_state: dict = {}
 _nexus_feed: deque = deque(maxlen=100)
 _nexus_stats = {"msg_count": 0, "lobes_seen": set(), "topics_seen": set()}
+_nexus_publisher = None
 _sse_subscribers: list[asyncio.Queue] = []
 
 LOBES = [
@@ -86,6 +88,228 @@ LOBES = [
 ]
 
 
+def _discover_codebase_root() -> Path:
+    start = Path(PROJ).resolve()
+    for candidate in (start, *start.parents):
+        if (candidate / "avatar").exists() and (candidate / "CascadeProjects" / "windsurf-project").exists():
+            return candidate
+    return start
+
+
+CODEBASE_ROOT = Path(os.environ.get("WEAVER_DASHBOARD_CODEBASE_ROOT") or _discover_codebase_root()).resolve()
+WIND = "CascadeProjects/windsurf-project"
+_SKIP_PATH_PARTS = {
+    ".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache",
+    "node_modules", "dist", "build", ".terraform",
+}
+_THREAD_CACHE: dict[str, dict] = {}
+_THREAD_DETAIL_CACHE: dict[str, dict] = {}
+
+THREAD_DEFS = [
+    {
+        "id": "runtime",
+        "label": "Runtime Spine",
+        "ring": "core",
+        "desc": "Supervisor, launcher, and process lifecycle wiring",
+        "status_lobes": ["Nexus Bus", "AWS Brain API", "Codebase API"],
+        "keywords": ["weaver", "supervisor", "startup", "health"],
+        "patterns": [
+            f"{WIND}/weaver.py",
+            f"{WIND}/start_weaver.sh",
+            f"{WIND}/setup_weaver.sh",
+            f"{WIND}/Makefile",
+        ],
+    },
+    {
+        "id": "cortex",
+        "label": "Cortex Routes",
+        "ring": "cortex",
+        "desc": "Bedrock/Nova routing, specialist selection, and unified model surface",
+        "status_lobes": ["AWS Brain API", "Headless UI"],
+        "keywords": ["brain", "cortex", "route", "model", "bedrock", "headless"],
+        "patterns": [
+            f"{WIND}/bedrock_brain_api.py",
+            f"{WIND}/slm_experts.py",
+            f"{WIND}/lora_server.py",
+            f"{WIND}/qwen3b_server.py",
+            f"{WIND}/n8n_weaver_*.json",
+        ],
+    },
+    {
+        "id": "voice",
+        "label": "Voice Stack",
+        "ring": "interface",
+        "desc": "Realtime voice, trained TTS, phone speech, and local audio loops",
+        "status_lobes": ["Trained Voice", "Phone Bridge", "Discord Bridge"],
+        "keywords": ["voice", "audio", "tts", "speech", "phone", "discord"],
+        "patterns": [
+            f"{WIND}/deploy/tts/**/*.py",
+            f"{WIND}/deploy/tts/**/*.sh",
+            f"{WIND}/vtv_basic.py",
+            f"{WIND}/voice_recognition.py",
+            f"{WIND}/twilio_weaver_bridge.py",
+            f"{WIND}/discord_bridge.py",
+        ],
+    },
+    {
+        "id": "memory",
+        "label": "Memory Plane",
+        "ring": "core",
+        "desc": "Persistent vault memory, Akashic vector state, and Obsidian sync",
+        "status_lobes": ["Akashic Hub"],
+        "keywords": ["memory", "akashic", "vault", "obsidian", "recall"],
+        "patterns": [
+            f"{WIND}/memory_manager.py",
+            f"{WIND}/akashic_hub.py",
+            f"{WIND}/obsidian_bridge.py",
+            f"{WIND}/nexus_client.py",
+            "CascadeProjects/SYPHER_VAULT/**/*.md",
+        ],
+    },
+    {
+        "id": "bus",
+        "label": "Nexus Bus",
+        "ring": "core",
+        "desc": "WebSocket pub/sub fabric and live event fanout",
+        "status_lobes": ["Nexus Bus"],
+        "keywords": ["nexus", "broadcast", "pubsub", "topic"],
+        "patterns": [
+            f"{WIND}/nexus_bus.py",
+            f"{WIND}/nexus_client.py",
+        ],
+    },
+    {
+        "id": "quantum",
+        "label": "Quantum Mesh",
+        "ring": "cortex",
+        "desc": "Kingston manifold, quantum API, and bias projection",
+        "status_lobes": ["Quantum Soul", "Quantum API"],
+        "keywords": ["quantum", "kingston", "qubit", "interference"],
+        "patterns": [
+            f"{WIND}/quantum_*.py",
+            f"{WIND}/weaver_core/quantum*.py",
+            f"{WIND}/weaver_core/pineal_gate.py",
+        ],
+    },
+    {
+        "id": "routing",
+        "label": "Routing Gate",
+        "ring": "cortex",
+        "desc": "Liquid fracture, Pineal entropy routing, and expert collapse",
+        "status_lobes": ["Pineal Gate", "ProactivePulse"],
+        "keywords": ["pineal", "gate", "fracture", "routing", "expert"],
+        "patterns": [
+            f"{WIND}/pineal_gate.py",
+            f"{WIND}/liquid_fracture.py",
+            f"{WIND}/slm_experts.py",
+            f"{WIND}/weaver_core/pineal_gate.py",
+            f"{WIND}/weaver_core/quantum_governor.py",
+        ],
+    },
+    {
+        "id": "browser",
+        "label": "Browser Bodies",
+        "ring": "interface",
+        "desc": "Embodied avatar, headless presence, hotkeys, and visual assets",
+        "status_lobes": ["Headless UI"],
+        "keywords": ["browser", "avatar", "headless", "vision", "ui"],
+        "patterns": [
+            "avatar/**/*.html",
+            "avatar/**/*.py",
+            "avatar/**/*.svg",
+            "tools/local-linux-hotkeys/**/*",
+        ],
+    },
+    {
+        "id": "codebase",
+        "label": "Self Inspection",
+        "ring": "interface",
+        "desc": "Read-only codebase and bounded public-web context APIs",
+        "status_lobes": ["Codebase API"],
+        "keywords": ["codebase", "search", "context", "inspect"],
+        "patterns": [
+            f"{WIND}/codebase_api.py",
+            f"{WIND}/README.md",
+            "README.md",
+        ],
+    },
+    {
+        "id": "bridges",
+        "label": "External Bridges",
+        "ring": "interface",
+        "desc": "Twilio, Discord, Obsidian, and operator bridge modules",
+        "status_lobes": ["Phone Bridge", "Discord Bridge"],
+        "keywords": ["bridge", "twilio", "discord", "obsidian", "sms"],
+        "patterns": [
+            f"{WIND}/*bridge*.py",
+            f"{WIND}/weaver_tools.py",
+        ],
+    },
+    {
+        "id": "dashboards",
+        "label": "Dashboards",
+        "ring": "support",
+        "desc": "Operator control plane, health dashboard, and status projection",
+        "status_lobes": ["Health Dashboard"],
+        "keywords": ["dashboard", "status", "health", "telemetry"],
+        "patterns": [
+            f"{WIND}/weaver_dashboard.py",
+            f"{WIND}/health_dashboard.py",
+            f"{WIND}/deploy/Caddyfile",
+        ],
+    },
+    {
+        "id": "deployment",
+        "label": "Deployment",
+        "ring": "support",
+        "desc": "Caddy, systemd, Docker, Terraform, and cloud setup scripts",
+        "status_lobes": ["n8n Workflow"],
+        "keywords": ["deploy", "caddy", "systemd", "docker", "terraform"],
+        "patterns": [
+            f"{WIND}/deploy/**/*",
+            f"{WIND}/Dockerfile*",
+            f"{WIND}/docker-compose.yml",
+        ],
+    },
+    {
+        "id": "training",
+        "label": "Training Forge",
+        "ring": "support",
+        "desc": "Datasets, distillation, MoE pretraining, and forge scripts",
+        "status_lobes": ["LoRA Server", "Qwen3B Branch"],
+        "keywords": ["train", "forge", "lora", "dataset", "distill"],
+        "patterns": [
+            f"{WIND}/forge*.py",
+            f"{WIND}/pretrain_moe/**/*.py",
+            f"{WIND}/pretrain_moe/**/*.md",
+        ],
+    },
+    {
+        "id": "validation",
+        "label": "Validation",
+        "ring": "support",
+        "desc": "Integration, stress, audio, and workflow test coverage",
+        "status_lobes": ["Health Dashboard"],
+        "keywords": ["test", "validation", "stress", "debug"],
+        "patterns": [
+            f"{WIND}/tests/**/*.py",
+            f"{WIND}/weaver_preflight.py",
+            f"{WIND}/whole_codebase_tests.py",
+        ],
+    },
+]
+
+THREAD_EDGES = [
+    ("runtime", "bus"), ("runtime", "cortex"), ("runtime", "quantum"),
+    ("runtime", "dashboards"), ("bus", "memory"), ("bus", "voice"),
+    ("bus", "browser"), ("bus", "bridges"), ("cortex", "routing"),
+    ("cortex", "voice"), ("cortex", "memory"), ("routing", "quantum"),
+    ("routing", "training"), ("quantum", "memory"), ("browser", "voice"),
+    ("browser", "codebase"), ("dashboards", "codebase"), ("dashboards", "bus"),
+    ("deployment", "runtime"), ("validation", "runtime"), ("bridges", "voice"),
+]
+
+
 def _latency_class(latency_ms: float | None) -> str:
     if latency_ms is None:
         return "unknown"
@@ -102,6 +326,330 @@ def _fmt_ms(latency_ms: float | None) -> str:
     if latency_ms >= 1000:
         return f"{latency_ms / 1000:.2f}s"
     return f"{latency_ms:.0f}ms"
+
+
+def _rel_code_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(CODEBASE_ROOT).as_posix()
+    except Exception:
+        return path.name
+
+
+def _allowed_code_path(path: Path) -> bool:
+    rel_parts = set(path.parts)
+    if rel_parts & _SKIP_PATH_PARTS:
+        return False
+    name = path.name.lower()
+    if name.endswith((".pyc", ".pyo", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".wav", ".mp3", ".pth", ".gguf")):
+        return False
+    if name in {"tokenizer.json", "agentic_traces.json", "agentic_traces.jsonl"}:
+        return False
+    try:
+        if path.stat().st_size > 2_000_000:
+            return False
+    except OSError:
+        return False
+    return True
+
+
+def _thread_paths(patterns: list[str]) -> list[Path]:
+    paths: dict[str, Path] = {}
+    for pattern in patterns:
+        try:
+            matches = CODEBASE_ROOT.glob(pattern)
+            for path in matches:
+                if path.is_file() and _allowed_code_path(path):
+                    paths[_rel_code_path(path)] = path
+        except Exception:
+            continue
+    return [paths[key] for key in sorted(paths)]
+
+
+def _count_lines(path: Path) -> int:
+    try:
+        total = 0
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 64), b""):
+                total += chunk.count(b"\n")
+        return total
+    except Exception:
+        return 0
+
+
+def _file_metric(path: Path) -> dict:
+    try:
+        stat = path.stat()
+        rel = _rel_code_path(path)
+        cached = _THREAD_CACHE.get(rel)
+        if cached and cached.get("mtime") == stat.st_mtime and cached.get("size") == stat.st_size:
+            return cached
+        item = {
+            "path": rel,
+            "name": path.name,
+            "lines": _count_lines(path),
+            "size_kb": round(stat.st_size / 1024, 1),
+            "mtime": stat.st_mtime,
+        }
+        _THREAD_CACHE[rel] = item
+        return item
+    except Exception:
+        return {"path": _rel_code_path(path), "name": path.name, "lines": 0, "size_kb": 0, "mtime": 0}
+
+
+def _decorator_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Call):
+        return _decorator_name(node.func)
+    if isinstance(node, ast.Attribute):
+        parent = _decorator_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    if isinstance(node, ast.Name):
+        return node.id
+    return ""
+
+
+def _source_detail(path: Path) -> dict:
+    rel = _rel_code_path(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return {"symbols": [], "imports": [], "endpoints": [], "selectors": [], "updated": ""}
+    cache_key = f"{rel}:{stat.st_mtime}:{stat.st_size}"
+    cached = _THREAD_DETAIL_CACHE.get(cache_key)
+    if cached:
+        return cached
+
+    detail = {
+        "symbols": [],
+        "imports": [],
+        "endpoints": [],
+        "selectors": [],
+        "updated": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+    }
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")[:180_000]
+    except Exception:
+        _THREAD_DETAIL_CACHE[cache_key] = detail
+        return detail
+
+    suffix = path.suffix.lower()
+    if suffix == ".py":
+        try:
+            tree = ast.parse(text)
+            symbols: list[str] = []
+            imports: set[str] = set()
+            endpoints: list[str] = []
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    kind = "class" if isinstance(node, ast.ClassDef) else "fn"
+                    symbols.append(f"{kind} {node.name}:{getattr(node, 'lineno', 0)}")
+                    for dec in getattr(node, "decorator_list", []):
+                        name = _decorator_name(dec)
+                        if name.startswith("app.") or ".route" in name:
+                            route = ""
+                            if isinstance(dec, ast.Call) and dec.args and isinstance(dec.args[0], ast.Constant):
+                                route = str(dec.args[0].value)
+                            endpoints.append(f"{name} {route}".strip())
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imports.add(alias.name.split(".")[0])
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imports.add(node.module.split(".")[0])
+            detail["symbols"] = symbols[:14]
+            detail["imports"] = sorted(imports)[:14]
+            detail["endpoints"] = endpoints[:10]
+        except SyntaxError:
+            pass
+    elif suffix in {".html", ".js", ".mjs"}:
+        functions = re.findall(r"\b(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(", text)
+        const_fns = re.findall(r"\b(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?\(", text)
+        ids = re.findall(r"\bid=['\"]([A-Za-z0-9_:-]+)['\"]", text)
+        detail["symbols"] = [f"fn {name}" for name in (functions + const_fns)[:14]]
+        detail["selectors"] = [f"#{name}" for name in ids[:14]]
+    elif suffix in {".json", ".service", ".sh", ".md", ".yml", ".yaml", ".tf"}:
+        headings = re.findall(r"(?m)^(?:#{1,3}\s+|\[Unit\]|\[Service\]|[A-Za-z0-9_.-]+\s*=)\s*(.{2,90})", text)
+        commands = re.findall(r"(?m)^\s*(?:ExecStart|command|CMD|RUN|uvicorn|python3?|node|docker|systemctl)\b[^\n]{0,120}", text)
+        detail["symbols"] = [s.strip()[:90] for s in headings[:8]]
+        detail["endpoints"] = [s.strip()[:120] for s in commands[:8]]
+
+    # Keep the cache bounded. This runs every dashboard poll.
+    if len(_THREAD_DETAIL_CACHE) > 500:
+        _THREAD_DETAIL_CACHE.clear()
+    _THREAD_DETAIL_CACHE[cache_key] = detail
+    return detail
+
+
+def _combined_status(statuses: list[str]) -> str:
+    clean = [s for s in statuses if s]
+    if not clean:
+        return "unknown"
+    if all(s == "online" for s in clean):
+        return "online"
+    if any(s == "online" for s in clean):
+        return "degraded"
+    if any(s in {"degraded", "stale"} for s in clean):
+        return "degraded"
+    if all(s in {"offline", "error"} for s in clean):
+        return "offline"
+    return "unknown"
+
+
+def _current_nexus_lobes(lobes: list[dict]) -> list[str]:
+    for lobe in lobes:
+        if lobe.get("name") != "Nexus Bus":
+            continue
+        detail = lobe.get("detail")
+        if isinstance(detail, dict) and isinstance(detail.get("lobe_ids"), list):
+            return [str(item) for item in detail["lobe_ids"]]
+    return []
+
+
+def _status_activity(status: str) -> float:
+    return {
+        "online": 0.78,
+        "degraded": 0.54,
+        "stale": 0.42,
+        "offline": 0.12,
+        "error": 0.12,
+        "unknown": 0.28,
+    }.get(status, 0.28)
+
+
+def _recent_topic_hits(keywords: list[str], feed: list[dict]) -> int:
+    if not keywords:
+        return 0
+    words = [w.lower() for w in keywords]
+    hits = 0
+    for item in feed[-25:]:
+        text = " ".join(str(item.get(k, "")) for k in ("from", "topic", "payload")).lower()
+        if any(word in text for word in words):
+            hits += 1
+    return hits
+
+
+def _recent_topic_events(keywords: list[str], feed: list[dict], limit: int = 5) -> list[dict]:
+    if not keywords:
+        return []
+    words = [w.lower() for w in keywords]
+    events: list[dict] = []
+    for item in reversed(feed[-50:]):
+        text = " ".join(str(item.get(k, "")) for k in ("from", "topic", "payload")).lower()
+        if not any(word in text for word in words):
+            continue
+        events.append({
+            "from": item.get("from", ""),
+            "topic": item.get("topic", ""),
+            "ts": item.get("ts", ""),
+            "payload": str(item.get("payload", ""))[:220],
+        })
+        if len(events) >= limit:
+            break
+    return events
+
+
+def read_codebase_threads(
+    lobes: list[dict],
+    brain: dict,
+    voice: dict,
+    codebase: dict,
+    nexus_feed: list[dict],
+) -> dict:
+    lobe_by_name = {str(l.get("name", "")): l for l in lobes}
+    now = time.time()
+    threads: list[dict] = []
+    unique_files: dict[str, int] = {}
+    active_threads = 0
+
+    for item in THREAD_DEFS:
+        paths = _thread_paths(item["patterns"])
+        metrics = [_file_metric(path) for path in paths]
+        files = len(metrics)
+        lines = sum(int(m.get("lines", 0) or 0) for m in metrics)
+        newest = max((float(m.get("mtime", 0) or 0) for m in metrics), default=0)
+        lobe_statuses = [str(lobe_by_name.get(name, {}).get("status", "")) for name in item.get("status_lobes", [])]
+        status = _combined_status(lobe_statuses)
+
+        if item["id"] == "cortex" and brain.get("status"):
+            status = _combined_status([status, str(brain.get("status"))])
+        elif item["id"] == "voice" and voice.get("status"):
+            status = _combined_status([status, str(voice.get("status"))])
+        elif item["id"] == "codebase" and codebase.get("status"):
+            status = _combined_status([status, str(codebase.get("status"))])
+
+        topic_hits = _recent_topic_hits(item.get("keywords", []), nexus_feed)
+        fresh_bonus = 0.10 if newest and now - newest < 3600 else 0.04 if newest and now - newest < 86400 else 0.0
+        density = min(0.12, files / 180)
+        activation = min(1.0, _status_activity(status) + min(0.18, topic_hits * 0.045) + fresh_bonus + density)
+        if activation >= 0.55:
+            active_threads += 1
+        for metric in metrics:
+            unique_files[str(metric.get("path", ""))] = int(metric.get("lines", 0) or 0)
+
+        hot_files = sorted(metrics, key=lambda m: (m.get("mtime", 0), m.get("lines", 0)), reverse=True)[:14]
+        enriched_files = []
+        for metric in hot_files:
+            file_path = CODEBASE_ROOT / str(metric.get("path", ""))
+            enriched_files.append({**metric, **_source_detail(file_path)})
+        lobe_details = []
+        for lobe_name in item.get("status_lobes", []):
+            lobe = lobe_by_name.get(lobe_name)
+            if not lobe:
+                lobe_details.append({"name": lobe_name, "status": "unknown", "latency_ms": None, "detail": ""})
+                continue
+            detail = lobe.get("detail", "")
+            if isinstance(detail, dict):
+                detail = detail.get("service") or detail.get("status") or json.dumps(detail, ensure_ascii=False)[:160]
+            lobe_details.append({
+                "name": lobe_name,
+                "status": lobe.get("status", "unknown"),
+                "latency_ms": lobe.get("latency_ms"),
+                "detail": str(detail)[:180],
+            })
+        newest_file = enriched_files[0] if enriched_files else {}
+        symbols = []
+        endpoints = []
+        imports = []
+        selectors = []
+        for file_info in enriched_files:
+            symbols.extend(file_info.get("symbols", []))
+            endpoints.extend(file_info.get("endpoints", []))
+            imports.extend(file_info.get("imports", []))
+            selectors.extend(file_info.get("selectors", []))
+        threads.append({
+            "id": item["id"],
+            "label": item["label"],
+            "ring": item["ring"],
+            "desc": item["desc"],
+            "status": status,
+            "activation": round(activation, 3),
+            "topic_hits": topic_hits,
+            "files": files,
+            "lines": lines,
+            "newest_age_s": round(now - newest) if newest else None,
+            "newest_file": newest_file.get("path", ""),
+            "updated": newest_file.get("updated", ""),
+            "status_lobes": item.get("status_lobes", []),
+            "lobe_details": lobe_details,
+            "recent_events": _recent_topic_events(item.get("keywords", []), nexus_feed),
+            "symbols": symbols[:18],
+            "endpoints": endpoints[:14],
+            "imports": sorted(set(imports))[:16],
+            "selectors": selectors[:14],
+            "hot_files": enriched_files,
+        })
+
+    return {
+        "root": str(CODEBASE_ROOT),
+        "generated_at": datetime.now().isoformat(),
+        "stats": {
+            "threads": len(threads),
+            "active": active_threads,
+            "files": len(unique_files),
+            "lines": sum(unique_files.values()),
+            "edges": len(THREAD_EDGES),
+        },
+        "threads": threads,
+        "edges": [{"from": a, "to": b} for a, b in THREAD_EDGES],
+    }
 
 
 def _weaver_key() -> str:
@@ -238,10 +786,11 @@ async def poll_all_lobes() -> list[dict]:
 
 # ── Quantum state reader ────────────────────────────────────────────────────
 
-PATHWAYS = ["Awakening", "Resonance", "Echo", "Prophet", "Fracture", "Weaver", "Void"]
 DIMENSION_MAP = {
-    "Awakening": "logic", "Resonance": "emotion", "Echo": "memory",
-    "Prophet": "creativity", "Fracture": "vigilance", "Weaver": "synthesis", "Void": "entropy",
+    "Logic": "logic", "Emotion": "emotion", "Intuition": "creativity",
+    "Memory": "memory", "Sovereignty": "vigilance", "Attention": "emotion",
+    "Reflection": "memory", "Language": "logic", "Planning": "creativity",
+    "Novelty": "creativity", "Stability": "vigilance", "Meta-Reasoning": "logic",
 }
 
 
@@ -273,28 +822,34 @@ def read_quantum_state() -> dict:
         if bit_match:
             result["bitstring"] = bit_match.group(1)
 
-        dom_match = re.search(r"reveals? (\w+) as the Dominant Pathway", text)
+        dom_match = re.search(r"reveals? ([\w-]+) as the Dominant Pathway", text)
         if dom_match:
             result["dominant"] = dom_match.group(1)
 
-        sec_match = re.search(r"with (\w+) resonating", text)
+        sec_match = re.search(r"with ([\w-]+) resonating", text)
         if sec_match:
             result["secondary"] = sec_match.group(1)
 
+        bitstring = result.get("bitstring")
+        if bitstring:
+            from quantum_networks import DIMENSION_QUBITS
+
+            qubits = bitstring.zfill(12)[::-1]
+            for dim, indices in DIMENSION_QUBITS.items():
+                active = sum(qubits[index] == "1" for index in indices if index < len(qubits))
+                result["weights"][dim] = round(active / max(len(indices), 1), 3)
+
         dominant = result["dominant"]
         if dominant in DIMENSION_MAP and DIMENSION_MAP[dominant] in result["weights"]:
-            result["weights"][DIMENSION_MAP[dominant]] = 0.95
+            result["weights"][DIMENSION_MAP[dominant]] = max(
+                result["weights"][DIMENSION_MAP[dominant]], 0.95
+            )
 
         secondary = result.get("secondary")
         if secondary and secondary in DIMENSION_MAP and DIMENSION_MAP[secondary] in result["weights"]:
-            result["weights"][DIMENSION_MAP[secondary]] = 0.85
-
-        bitstring = result.get("bitstring")
-        if bitstring and len(bitstring) >= 5:
-            dims = ["logic", "emotion", "memory", "creativity", "vigilance"]
-            for i, dim in enumerate(dims):
-                if i < len(bitstring):
-                    result["weights"][dim] = 0.95 if int(bitstring[i]) == 0 else 0.65
+            result["weights"][DIMENSION_MAP[secondary]] = max(
+                result["weights"][DIMENSION_MAP[secondary]], 0.85
+            )
 
         _quantum_state = result
         return result
@@ -532,8 +1087,10 @@ async def _nexus_listener():
                 await ws.send(json.dumps({"action": "register", "lobe_id": "live_dashboard"}))
                 await ws.send(json.dumps({"action": "subscribe", "topics": [
                     "vision", "quantum_state", "identity", "manifested_response",
-                    "overmind_directive", "routing", "gate", "interference",
-                    "dream_state", "proactive_pulse",
+                    "overmind_directive", "routing", "gate_decision", "interference",
+                    "dream_state", "proactive_pulse", "lobe_status", "sms_exchange",
+                    "state_reconciliation", "phone_transcript", "discord_transcript",
+                    "memory_update", "timer_fired", "reminder_fired", "play_sound",
                 ]}))
 
                 async for raw in ws:
@@ -592,8 +1149,13 @@ async def _poll_loop():
             read_voice_snapshot(),
             read_codebase_snapshot(),
         )
+        feed_snapshot = list(_nexus_feed)
+        codebase_threads = await asyncio.to_thread(
+            read_codebase_threads, lobes, brain, voice, codebase, feed_snapshot
+        )
         uptime = time.time() - _boot_time
         online = sum(1 for l in lobes if l["status"] == "online")
+        nexus_lobes = _current_nexus_lobes(lobes)
         payload = {
             "type": "poll",
             "lobes": lobes,
@@ -602,13 +1164,15 @@ async def _poll_loop():
             "brain": brain,
             "voice": voice,
             "codebase": codebase,
+            "codebase_threads": codebase_threads,
             "memory_events": read_memory_events(8),
             "online": online,
             "total": len(lobes),
             "uptime": round(uptime),
             "poll_count": _poll_count,
             "nexus_msg_count": _nexus_stats["msg_count"],
-            "nexus_lobes": len(_nexus_stats["lobes_seen"]),
+            "nexus_lobes": len(nexus_lobes),
+            "nexus_lobe_ids": nexus_lobes,
             "nexus_topics": len(_nexus_stats["topics_seen"]),
             "ngrok_url": _ngrok_url,
         }
@@ -691,6 +1255,11 @@ async def api_state():
         read_voice_snapshot(),
         read_codebase_snapshot(),
     )
+    feed_snapshot = list(_nexus_feed)
+    codebase_threads = await asyncio.to_thread(
+        read_codebase_threads, lobes, brain, voice, codebase, feed_snapshot
+    )
+    nexus_lobes = _current_nexus_lobes(lobes)
     return {
         "lobes": lobes,
         "quantum": qs,
@@ -698,6 +1267,7 @@ async def api_state():
         "brain": brain,
         "voice": voice,
         "codebase": codebase,
+        "codebase_threads": codebase_threads,
         "memory_events": read_memory_events(10),
         "online": sum(1 for l in lobes if l["status"] == "online"),
         "total": len(lobes),
@@ -706,6 +1276,7 @@ async def api_state():
         "nexus_stats": {
             "msg_count": _nexus_stats["msg_count"],
             "lobes_seen": list(_nexus_stats["lobes_seen"]),
+            "current_lobe_ids": nexus_lobes,
             "topics_seen": list(_nexus_stats["topics_seen"]),
         },
         "people": read_people_memory(),
@@ -863,14 +1434,26 @@ async def api_trigger_call(request: Request):
 @app.post("/api/nexus")
 async def api_publish_nexus(request: Request):
     """Publish a message to the Nexus Bus."""
-    body = await request.json()
-    topic = body.get("topic", "dashboard")
-    payload = body.get("payload", {})
+    global _nexus_publisher
     try:
-        import websockets as _ws
-        async with _ws.connect("ws://127.0.0.1:9999") as conn:
-            await conn.send(json.dumps({"topic": topic, "payload": payload, "source": "dashboard"}))
+        body = await request.json()
+    except Exception:
+        return {"error": "invalid JSON"}
+    if not isinstance(body, dict):
+        return {"error": "body must be a JSON object"}
+    topic = str(body.get("topic", "dashboard")).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", topic):
+        return {"error": "invalid topic"}
+    payload = body.get("payload", {})
+    if len(json.dumps(payload, ensure_ascii=False)) > 65_536:
+        return {"error": "payload too large"}
+    try:
+        from nexus_client import NexusClient
+        if _nexus_publisher is None:
+            _nexus_publisher = NexusClient("dashboard_control")
+        if await _nexus_publisher.publish(topic, payload):
             return {"ok": True, "topic": topic}
+        return {"error": "Nexus Bus unavailable"}
     except Exception as e:
         return {"error": str(e)[:200]}
 
@@ -885,6 +1468,14 @@ async def dashboard():
 @app.get("/favicon.svg", include_in_schema=False)
 async def favicon_svg():
     return Response(content=WEAVER_LOGO_SVG, media_type="image/svg+xml")
+
+
+@app.get("/vendor/three.module.js", include_in_schema=False)
+async def three_module_js():
+    path = CODEBASE_ROOT / "avatar" / "vendor" / "three.module.js"
+    if not path.exists():
+        return Response("three.module.js not found", status_code=404)
+    return FileResponse(path, media_type="application/javascript")
 
 
 
@@ -1338,11 +1929,246 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 .legend-item.active { background: rgba(52,212,255,0.08); color: var(--cyan); }
 .legend-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
 
+/* Thread Matrix */
+.thread-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 12px;
+  padding: 16px;
+  max-width: 1720px;
+  margin: 0 auto;
+  min-height: calc(100vh - 100px);
+}
+.thread-stage {
+  position: relative;
+  min-height: 620px;
+  overflow: hidden;
+  border: 1px solid rgba(52,212,255,0.16);
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(52,212,255,0.035) 1px, transparent 1px) 0 0 / 42px 42px,
+    linear-gradient(90deg, rgba(52,212,255,0.035) 1px, transparent 1px) 0 0 / 42px 42px,
+    radial-gradient(circle at 50% 48%, rgba(52,212,255,0.09), transparent 58%),
+    #030408;
+}
+.thread-stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.thread-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+.thread-canvas canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.thread-hud {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(72px, 1fr));
+  gap: 6px;
+  width: min(520px, calc(100% - 28px));
+}
+.thread-metric {
+  border: 1px solid rgba(52,212,255,0.14);
+  border-radius: 7px;
+  background: rgba(8,10,16,0.78);
+  padding: 7px 8px;
+}
+.thread-metric span:first-child {
+  display: block;
+  color: var(--dim);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.thread-metric span:last-child {
+  color: var(--cyan);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.thread-side {
+  display: grid;
+  grid-template-rows: auto minmax(220px, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+.thread-list {
+  display: grid;
+  gap: 7px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.thread-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 46px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid rgba(30,37,54,0.86);
+  border-radius: 7px;
+  background: rgba(8,10,16,0.58);
+  cursor: pointer;
+}
+.thread-row:hover { border-color: rgba(52,212,255,0.30); background: rgba(52,212,255,0.045); }
+.thread-row.active { border-color: rgba(52,212,255,0.48); background: rgba(52,212,255,0.075); }
+.thread-row-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.thread-row-dot.online { background: var(--green); box-shadow: 0 0 8px rgba(0,232,123,0.75); }
+.thread-row-dot.degraded, .thread-row-dot.stale { background: var(--orange); box-shadow: 0 0 8px rgba(255,184,48,0.65); }
+.thread-row-dot.offline, .thread-row-dot.error { background: var(--red); }
+.thread-row-main { min-width: 0; }
+.thread-row-title {
+  color: #eef3ff;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thread-row-sub {
+  color: var(--dim);
+  font-size: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thread-row-activation {
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.thread-detail {
+  border: 1px solid rgba(30,37,54,0.86);
+  border-radius: 8px;
+  background: rgba(3,4,8,0.50);
+  padding: 10px;
+  min-height: 220px;
+}
+.thread-detail-title {
+  color: #eef3ff;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.thread-detail-desc {
+  color: var(--dim);
+  font-size: 9px;
+  line-height: 1.5;
+  margin-bottom: 9px;
+}
+.thread-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.thread-detail-stat {
+  border: 1px solid rgba(30,37,54,0.8);
+  border-radius: 6px;
+  padding: 6px 7px;
+  background: rgba(12,15,24,0.58);
+}
+.thread-detail-stat span:first-child {
+  display: block;
+  color: var(--dim);
+  font-size: 7px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+.thread-detail-stat span:last-child {
+  display: block;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thread-files {
+  max-height: 190px;
+  overflow-y: auto;
+  display: grid;
+  gap: 5px;
+}
+.thread-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 3px 4px;
+  cursor: pointer;
+}
+.thread-file:hover { color: var(--text); border-color: rgba(52,212,255,0.20); background: rgba(52,212,255,0.04); }
+.thread-file.active { color: var(--cyan); border-color: rgba(52,212,255,0.36); background: rgba(52,212,255,0.08); }
+.thread-file span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-file span:last-child { color: var(--dim); font-variant-numeric: tabular-nums; }
+.thread-mini-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 9px;
+}
+.thread-chip {
+  max-width: 100%;
+  color: var(--text);
+  border: 1px solid rgba(30,37,54,0.86);
+  border-radius: 999px;
+  background: rgba(12,15,24,0.64);
+  padding: 3px 7px;
+  font-size: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-chip.good { color: var(--green); border-color: rgba(0,232,123,0.24); }
+.thread-chip.warn { color: var(--orange); border-color: rgba(255,184,48,0.24); }
+.thread-chip.hot { color: var(--cyan); border-color: rgba(52,212,255,0.24); }
+.thread-section-title {
+  color: var(--dim);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  margin: 9px 0 5px;
+}
+
 @media (max-width: 1000px) {
-  .overview-grid, .console-grid { grid-template-columns: 1fr; }
+  .overview-grid, .console-grid, .thread-grid { grid-template-columns: 1fr; }
   .manifold-frame { min-height: 300px; }
   .ops-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .route-list { grid-template-columns: 1fr; }
+  .thread-stage { min-height: 520px; }
 }
 @media (max-width: 560px) {
   .stats-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1350,6 +2176,8 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
   .ops-grid { grid-template-columns: 1fr; }
   .manifold-stats, .q-process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .manifold-frame { min-height: 260px; }
+  .thread-hud { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .thread-stage { min-height: 440px; }
 }
 </style>
 </head>
@@ -1380,6 +2208,7 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 <div class="tab-bar">
   <button class="tab-btn active" onclick="switchTab('overview',this)">Overview</button>
   <button class="tab-btn" onclick="switchTab('console',this)">Console</button>
+  <button class="tab-btn" onclick="switchTab('threads',this)">Thread Matrix</button>
   <button class="tab-btn" onclick="switchTab('neural',this)">Neural Map</button>
 </div>
 
@@ -1500,6 +2329,31 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 </div>
 </div>
 
+<!-- ══════════ THREAD MATRIX ══════════ -->
+<div class="tab-content" id="tab-threads">
+<div class="thread-grid">
+  <div class="thread-stage" id="threadStage">
+    <div id="threadCanvas" class="thread-canvas" role="application" tabindex="0" aria-label="Interactive 3D codebase thread activation matrix"></div>
+    <div class="thread-hud">
+      <div class="thread-metric"><span>Threads</span><span id="tmThreads">--</span></div>
+      <div class="thread-metric"><span>Active</span><span id="tmActive">--</span></div>
+      <div class="thread-metric"><span>Files</span><span id="tmFiles">--</span></div>
+      <div class="thread-metric"><span>Lines</span><span id="tmLines">--</span></div>
+    </div>
+  </div>
+  <aside class="thread-side">
+    <div class="panel">
+      <div class="panel-hdr"><span class="panel-title">Activation Threads</span><span class="panel-badge" id="tmBadge">waiting</span></div>
+      <div class="thread-list" id="threadList"><div class="empty-state">Waiting for codebase telemetry...</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-hdr"><span class="panel-title">Selected Thread</span><span class="panel-badge" id="threadSelectedBadge">none</span></div>
+      <div class="thread-detail" id="threadDetail"><div class="empty-state">Select a node or row to inspect its source files.</div></div>
+    </div>
+  </aside>
+</div>
+</div>
+
 <!-- ══════════ NEURAL MAP ══════════ -->
 <div class="tab-content" id="tab-neural">
 <div class="neural-wrap" id="neuralWrap">
@@ -1557,6 +2411,7 @@ function switchTab(name, btn) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if (btn) btn.classList.add('active');
+  if (name === 'threads') startThreadMatrix();
   if (name === 'neural') { neuralResize(); if (!_neuralRunning) startNeural(); }
 }
 
@@ -1567,6 +2422,17 @@ let _quantumArchitecture = null;
 let _quantumLast = {};
 let _matrixRAF = null;
 let _neuralRunning = false;
+let _threadMatrixRunning = false;
+let _threadMatrix = {
+  threads: [],
+  edges: [],
+  stats: {},
+  nodes: {},
+  hover: null,
+  selected: null,
+  selectedFile: null,
+  raf: 0,
+};
 let _liveState = {
   sse: false,
   browserOnline: navigator.onLine !== false,
@@ -1677,11 +2543,12 @@ async function fetchState() {
     updatePeople(d.people || []);
     updateDreams(d.dreams || []);
     updateBrain(d.brain || {}, d.voice || {}, d.codebase || {});
+    updateThreads(d.codebase_threads || {});
     updateMemoryEvents(d.memory_events || []);
     document.getElementById('sOnline').textContent = `${d.online}/${d.total}`;
     document.getElementById('sUptime').textContent = fmtUp(d.uptime||0);
     document.getElementById('sMsgs').textContent = d.nexus_stats?.msg_count || 0;
-    document.getElementById('sBusLobes').textContent = d.nexus_stats?.lobes_seen?.length || 0;
+    document.getElementById('sBusLobes').textContent = d.nexus_stats?.current_lobe_ids?.length || 0;
     document.getElementById('sTopics').textContent = d.nexus_stats?.topics_seen?.length || 0;
     document.getElementById('lobeBadge').textContent = `${d.online}/${d.total}`;
     if (d.ngrok_url) {
@@ -2068,6 +2935,606 @@ function hexToRgba(hex, alpha) {
   const g = parseInt(m.slice(2,4), 16);
   const b = parseInt(m.slice(4,6), 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ── Codebase Thread Matrix ──────────────────────────
+const THREAD_COLORS = {
+  core: '#34d4ff',
+  cortex: '#9b6dff',
+  interface: '#00e87b',
+  support: '#ffb830',
+};
+let _threadScenePromise = null;
+let _thread3d = {
+  THREE: null,
+  host: null,
+  scene: null,
+  camera: null,
+  renderer: null,
+  root: null,
+  ringGroup: null,
+  edgeGroup: null,
+  nodeGroup: null,
+  fileGroup: null,
+  labelGroup: null,
+  raycaster: null,
+  pointer: null,
+  ready: false,
+  interactive: [],
+  nodeMeshes: new Map(),
+  fileMeshes: new Map(),
+  dragging: false,
+  dragMoved: false,
+  dragLast: null,
+  rotX: -0.54,
+  rotY: 0.35,
+  zoom: 7.8,
+};
+window.__weaverThread3d = _thread3d;
+
+function fmtCount(value) {
+  const n = Number(value || 0);
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'm';
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+  return String(Math.round(n));
+}
+
+function fmtAge(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n < 0) return 'unknown';
+  if (n < 60) return `${Math.round(n)}s`;
+  if (n < 3600) return `${Math.round(n / 60)}m`;
+  if (n < 86400) return `${(n / 3600).toFixed(n < 7200 ? 1 : 0)}h`;
+  return `${Math.round(n / 86400)}d`;
+}
+
+function truncateText(value, limit = 58) {
+  const text = String(value || '');
+  return text.length > limit ? text.slice(0, Math.max(0, limit - 1)) + '...' : text;
+}
+
+function threadColorHex(threadOrRing) {
+  const ring = typeof threadOrRing === 'string' ? threadOrRing : threadOrRing?.ring;
+  return THREAD_COLORS[ring || 'core'] || THREAD_COLORS.core;
+}
+
+function threadColorNumber(threadOrRing) {
+  return parseInt(threadColorHex(threadOrRing).slice(1), 16);
+}
+
+function updateThreads(data) {
+  const threads = Array.isArray(data.threads) ? data.threads : [];
+  _threadMatrix.threads = threads;
+  _threadMatrix.edges = Array.isArray(data.edges) ? data.edges : [];
+  _threadMatrix.stats = data.stats || {};
+  setText('tmThreads', fmtCount(_threadMatrix.stats.threads || threads.length));
+  setText('tmActive', fmtCount(_threadMatrix.stats.active || threads.filter(t => Number(t.activation) >= 0.55).length));
+  setText('tmFiles', fmtCount(_threadMatrix.stats.files || threads.reduce((sum, t) => sum + Number(t.files || 0), 0)));
+  setText('tmLines', fmtCount(_threadMatrix.stats.lines || threads.reduce((sum, t) => sum + Number(t.lines || 0), 0)));
+  setText('tmBadge', data.generated_at ? data.generated_at.split('T')[1]?.slice(0, 8) || 'live' : 'live');
+  if (!threadById(_threadMatrix.selected) && threads.length) {
+    _threadMatrix.selected = threads.slice().sort((a, b) => Number(b.activation || 0) - Number(a.activation || 0))[0].id;
+  }
+  const selectedThread = threadById(_threadMatrix.selected);
+  if (!selectedThread || !threadFileByPath(selectedThread, _threadMatrix.selectedFile)) {
+    _threadMatrix.selectedFile = null;
+  }
+  renderThreadList();
+  updateThreadDetail();
+  if (_thread3d.ready) syncThreadScene();
+}
+
+function threadById(id) {
+  return _threadMatrix.threads.find(t => t.id === id) || null;
+}
+
+function threadFileByPath(thread, path) {
+  if (!thread || !path) return null;
+  return (Array.isArray(thread.hot_files) ? thread.hot_files : []).find(f => f.path === path) || null;
+}
+
+function renderThreadList() {
+  const list = document.getElementById('threadList');
+  if (!list) return;
+  const rows = _threadMatrix.threads.slice().sort((a, b) => Number(b.activation || 0) - Number(a.activation || 0));
+  if (!rows.length) {
+    list.innerHTML = '<div class="empty-state">Waiting for codebase telemetry...</div>';
+    return;
+  }
+  list.innerHTML = rows.map(t => `
+    <div class="thread-row ${_threadMatrix.selected === t.id ? 'active' : ''}" data-thread="${esc(t.id)}">
+      <span class="thread-row-dot ${esc(t.status || 'unknown')}"></span>
+      <span class="thread-row-main">
+        <span class="thread-row-title">${esc(t.label || t.id)}</span>
+        <span class="thread-row-sub">${esc(t.ring || 'thread')} &middot; ${fmtCount(t.files)} files &middot; ${fmtCount(t.lines)} lines &middot; ${fmtCount((t.endpoints || []).length)} routes</span>
+      </span>
+      <span class="thread-row-activation">${Math.round(Number(t.activation || 0) * 100)}%</span>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-thread]').forEach(row => {
+    row.addEventListener('click', () => selectThread(row.dataset.thread, null));
+  });
+}
+
+function selectThread(id, filePath = null) {
+  if (!threadById(id)) return;
+  _threadMatrix.selected = id;
+  _threadMatrix.selectedFile = filePath || null;
+  renderThreadList();
+  updateThreadDetail();
+  updateThreadHighlights();
+}
+
+function updateThreadDetail() {
+  const detail = document.getElementById('threadDetail');
+  const badge = document.getElementById('threadSelectedBadge');
+  if (!detail) return;
+  const thread = threadById(_threadMatrix.selected);
+  if (!thread) {
+    if (badge) badge.textContent = 'none';
+    detail.innerHTML = '<div class="empty-state">Select a node or row to inspect its source files.</div>';
+    return;
+  }
+  if (badge) badge.textContent = `${Math.round(Number(thread.activation || 0) * 100)}%`;
+  const files = Array.isArray(thread.hot_files) ? thread.hot_files : [];
+  const selectedFile = threadFileByPath(thread, _threadMatrix.selectedFile) || null;
+  const lobeDetails = Array.isArray(thread.lobe_details) ? thread.lobe_details : [];
+  const symbols = Array.isArray(thread.symbols) ? thread.symbols : [];
+  const endpoints = Array.isArray(thread.endpoints) ? thread.endpoints : [];
+  const imports = Array.isArray(thread.imports) ? thread.imports : [];
+  const selectors = Array.isArray(thread.selectors) ? thread.selectors : [];
+  const events = Array.isArray(thread.recent_events) ? thread.recent_events : [];
+  detail.innerHTML = `
+    <div class="thread-detail-title">${esc(thread.label || thread.id)}</div>
+    <div class="thread-detail-desc">${esc(thread.desc || '')}</div>
+    <div class="thread-detail-grid">
+      <div class="thread-detail-stat"><span>Status</span><span>${esc(thread.status || 'unknown')}</span></div>
+      <div class="thread-detail-stat"><span>Ring</span><span>${esc(thread.ring || 'thread')}</span></div>
+      <div class="thread-detail-stat"><span>Files</span><span>${fmtCount(thread.files)}</span></div>
+      <div class="thread-detail-stat"><span>Lines</span><span>${fmtCount(thread.lines)}</span></div>
+      <div class="thread-detail-stat"><span>Bus Hits</span><span>${fmtCount(thread.topic_hits)}</span></div>
+      <div class="thread-detail-stat"><span>Newest</span><span>${esc(thread.updated || fmtAge(thread.newest_age_s))}</span></div>
+    </div>
+    ${lobeDetails.length ? `
+      <div class="thread-section-title">Live Lobes</div>
+      <div class="thread-mini-list">
+        ${lobeDetails.map(l => `<span class="thread-chip ${l.status === 'online' ? 'good' : l.status === 'offline' ? 'warn' : ''}" title="${esc(l.detail || '')}">${esc(l.name)} ${esc(l.status || 'unknown')}${l.latency_ms == null ? '' : ` ${esc(l.latency_ms)}ms`}</span>`).join('')}
+      </div>
+    ` : ''}
+    ${selectedFile ? `
+      <div class="thread-section-title">Selected File</div>
+      <div class="thread-detail-grid">
+        <div class="thread-detail-stat"><span>Path</span><span title="${esc(selectedFile.path)}">${esc(selectedFile.path)}</span></div>
+        <div class="thread-detail-stat"><span>Updated</span><span>${esc(selectedFile.updated || 'unknown')}</span></div>
+        <div class="thread-detail-stat"><span>Lines</span><span>${fmtCount(selectedFile.lines)}</span></div>
+        <div class="thread-detail-stat"><span>Size</span><span>${fmtCount(selectedFile.size)}b</span></div>
+      </div>
+      ${(selectedFile.symbols || []).length ? `<div class="thread-section-title">File Symbols</div><div class="thread-mini-list">${selectedFile.symbols.slice(0, 10).map(s => `<span class="thread-chip hot">${esc(s.kind || 'symbol')} ${esc(s.name || '')}:${esc(s.line || '')}</span>`).join('')}</div>` : ''}
+      ${(selectedFile.endpoints || []).length ? `<div class="thread-section-title">File Routes</div><div class="thread-mini-list">${selectedFile.endpoints.slice(0, 8).map(e => `<span class="thread-chip good">${esc(e.method || 'route')} ${esc(e.path || e.name || '')}</span>`).join('')}</div>` : ''}
+      ${(selectedFile.imports || []).length || (selectedFile.selectors || []).length ? `<div class="thread-section-title">File Dependencies</div><div class="thread-mini-list">${[...(selectedFile.imports || []), ...(selectedFile.selectors || [])].slice(0, 12).map(v => `<span class="thread-chip">${esc(v)}</span>`).join('')}</div>` : ''}
+    ` : `
+      <div class="thread-section-title">Newest File</div>
+      <div class="thread-mini-list"><span class="thread-chip hot" title="${esc(thread.newest_file || '')}">${esc(thread.newest_file || 'unknown')}</span></div>
+    `}
+    ${endpoints.length ? `<div class="thread-section-title">Thread Routes</div><div class="thread-mini-list">${endpoints.slice(0, 10).map(e => `<span class="thread-chip good">${esc(e.method || 'route')} ${esc(e.path || e.name || '')}</span>`).join('')}</div>` : ''}
+    ${symbols.length ? `<div class="thread-section-title">Top Symbols</div><div class="thread-mini-list">${symbols.slice(0, 12).map(s => `<span class="thread-chip hot">${esc(s.kind || 'symbol')} ${esc(s.name || '')}</span>`).join('')}</div>` : ''}
+    ${(imports.length || selectors.length) ? `<div class="thread-section-title">Imports / Selectors</div><div class="thread-mini-list">${[...imports, ...selectors].slice(0, 14).map(v => `<span class="thread-chip">${esc(v)}</span>`).join('')}</div>` : ''}
+    ${events.length ? `<div class="thread-section-title">Recent Topic Energy</div><div class="thread-mini-list">${events.map(e => `<span class="thread-chip warn" title="${esc(e.payload || '')}">${esc(e.from || 'bus')}:${esc(e.topic || '')}</span>`).join('')}</div>` : ''}
+    <div class="thread-section-title">Clickable Source Dots</div>
+    <div class="thread-files">
+      ${files.length ? files.map(f => `<div class="thread-file ${_threadMatrix.selectedFile === f.path ? 'active' : ''}" data-thread="${esc(thread.id)}" data-path="${esc(f.path)}"><span title="${esc(f.path)}">${esc(f.path)}</span><span>${fmtCount(f.lines)}l</span></div>`).join('') : '<div class="empty-state">No files mapped yet</div>'}
+    </div>
+  `;
+  detail.querySelectorAll('.thread-file[data-thread][data-path]').forEach(row => {
+    row.addEventListener('click', () => selectThread(row.dataset.thread, row.dataset.path));
+  });
+}
+
+function startThreadMatrix() {
+  _threadMatrixRunning = true;
+  if (!_threadScenePromise) _threadScenePromise = ensureThreadScene();
+  _threadScenePromise.then(ok => {
+    if (!ok) return;
+    threadResize();
+    syncThreadScene();
+    if (!_threadMatrix.raf) _threadMatrix.raf = requestAnimationFrame(threadFrame);
+  });
+}
+
+async function ensureThreadScene() {
+  const host = document.getElementById('threadCanvas');
+  if (!host) return false;
+  try {
+    if (!_thread3d.THREE) _thread3d.THREE = await import('/vendor/three.module.js');
+  } catch (err) {
+    host.innerHTML = '<div class="empty-state" style="padding:18px">Three.js module unavailable. Check /vendor/three.module.js.</div>';
+    return false;
+  }
+  if (_thread3d.ready && _thread3d.host === host) return true;
+
+  const THREE = _thread3d.THREE;
+  host.innerHTML = '';
+  const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'high-performance'});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x030408, 0);
+  host.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x030408, 0.045);
+  const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 80);
+  camera.position.set(0, 0, _thread3d.zoom);
+
+  const root = new THREE.Group();
+  const ringGroup = new THREE.Group();
+  const edgeGroup = new THREE.Group();
+  const nodeGroup = new THREE.Group();
+  const fileGroup = new THREE.Group();
+  const labelGroup = new THREE.Group();
+  root.add(ringGroup, edgeGroup, nodeGroup, fileGroup, labelGroup);
+  scene.add(root);
+  scene.add(new THREE.AmbientLight(0x9fb6ff, 0.42));
+  const key = new THREE.DirectionalLight(0xffffff, 0.95);
+  key.position.set(3.2, 4.6, 6.5);
+  scene.add(key);
+  const rim = new THREE.PointLight(0x34d4ff, 1.2, 14, 1.6);
+  rim.position.set(-3.5, -2.4, 3.0);
+  scene.add(rim);
+  const violet = new THREE.PointLight(0x9b6dff, 0.85, 14, 2.0);
+  violet.position.set(3.0, 2.8, -2.0);
+  scene.add(violet);
+
+  Object.assign(_thread3d, {
+    host, scene, camera, renderer, root, ringGroup, edgeGroup, nodeGroup, fileGroup, labelGroup,
+    raycaster: new THREE.Raycaster(),
+    pointer: new THREE.Vector2(),
+    ready: true,
+  });
+  bindThreadSceneEvents();
+  return true;
+}
+
+function bindThreadSceneEvents() {
+  const canvas = _thread3d.renderer?.domElement;
+  if (!canvas || canvas.dataset.bound === '1') return;
+  canvas.dataset.bound = '1';
+  canvas.addEventListener('pointerdown', event => {
+    _thread3d.dragging = true;
+    _thread3d.dragMoved = false;
+    _thread3d.dragLast = {x: event.clientX, y: event.clientY};
+    canvas.setPointerCapture?.(event.pointerId);
+    canvas.style.cursor = 'grabbing';
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (_thread3d.dragging && _thread3d.dragLast) {
+      const dx = event.clientX - _thread3d.dragLast.x;
+      const dy = event.clientY - _thread3d.dragLast.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) _thread3d.dragMoved = true;
+      _thread3d.rotY += dx * 0.006;
+      _thread3d.rotX = Math.max(-1.18, Math.min(0.72, _thread3d.rotX + dy * 0.005));
+      _thread3d.dragLast = {x: event.clientX, y: event.clientY};
+      return;
+    }
+    const hit = threadPick(event);
+    const nextHover = hit?.userData?.threadId || null;
+    if (_threadMatrix.hover !== nextHover) {
+      _threadMatrix.hover = nextHover;
+      updateThreadHighlights();
+    }
+    canvas.style.cursor = hit ? 'pointer' : 'grab';
+  });
+  canvas.addEventListener('pointerup', event => {
+    _thread3d.dragging = false;
+    _thread3d.dragLast = null;
+    canvas.releasePointerCapture?.(event.pointerId);
+    canvas.style.cursor = 'grab';
+  });
+  canvas.addEventListener('mouseleave', () => {
+    _thread3d.dragging = false;
+    _thread3d.dragLast = null;
+    _threadMatrix.hover = null;
+    updateThreadHighlights();
+  });
+  canvas.addEventListener('click', event => {
+    if (_thread3d.dragMoved) {
+      _thread3d.dragMoved = false;
+      return;
+    }
+    const hit = threadPick(event);
+    if (!hit) return;
+    if (hit.userData.kind === 'file') selectThread(hit.userData.threadId, hit.userData.path);
+    else selectThread(hit.userData.threadId, null);
+  });
+  canvas.addEventListener('wheel', event => {
+    event.preventDefault();
+    _thread3d.zoom = Math.max(4.4, Math.min(12.5, _thread3d.zoom + event.deltaY * 0.006));
+  }, {passive: false});
+}
+
+function threadPick(event) {
+  if (!_thread3d.ready || !_thread3d.camera || !_thread3d.raycaster) return null;
+  const rect = _thread3d.renderer.domElement.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  _thread3d.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  _thread3d.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  _thread3d.raycaster.setFromCamera(_thread3d.pointer, _thread3d.camera);
+  const hits = _thread3d.raycaster.intersectObjects(_thread3d.interactive, false);
+  const fileHit = hits.find(hit => hit.object?.userData?.kind === 'file');
+  return hits.length ? (fileHit || hits[0]).object : null;
+}
+
+function threadResize() {
+  if (!_thread3d.ready || !_thread3d.host || !_thread3d.renderer || !_thread3d.camera) return;
+  const rect = _thread3d.host.getBoundingClientRect();
+  const width = Math.max(1, Math.floor(rect.width));
+  const height = Math.max(1, Math.floor(rect.height));
+  _thread3d.renderer.setSize(width, height, false);
+  _thread3d.camera.aspect = width / height;
+  _thread3d.camera.updateProjectionMatrix();
+}
+
+function layoutThreadPositions() {
+  const groups = {core: [], cortex: [], interface: [], support: []};
+  _threadMatrix.threads.forEach(t => (groups[t.ring] || groups.support).push(t));
+  const radii = {core: 1.05, cortex: 2.05, interface: 2.95, support: 3.75};
+  const heights = {core: 0.78, cortex: 0.26, interface: -0.30, support: -0.82};
+  const starts = {core: -Math.PI / 2, cortex: -Math.PI * 0.72, interface: -Math.PI * 0.62, support: -Math.PI * 0.55};
+  const positions = {};
+  Object.entries(groups).forEach(([ring, items]) => {
+    const count = Math.max(1, items.length);
+    items.forEach((thread, index) => {
+      const a = starts[ring] + (Math.PI * 2 * index / count);
+      const radius = radii[ring] || radii.support;
+      positions[thread.id] = {
+        angle: a,
+        ring,
+        x: Math.cos(a) * radius,
+        y: Math.sin(a) * radius * 0.68,
+        z: (heights[ring] || 0) + Math.sin(a * 2.0) * 0.26,
+      };
+    });
+  });
+  return positions;
+}
+
+function disposeObject(obj) {
+  if (!obj) return;
+  if (obj.geometry) obj.geometry.dispose();
+  if (obj.material) {
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    materials.forEach(mat => {
+      if (mat.map) mat.map.dispose();
+      mat.dispose?.();
+    });
+  }
+}
+
+function clearGroup(group) {
+  if (!group) return;
+  while (group.children.length) {
+    const child = group.children.pop();
+    if (child.children?.length) child.children.forEach(disposeObject);
+    disposeObject(child);
+  }
+}
+
+function syncThreadScene() {
+  if (!_thread3d.ready || !_thread3d.THREE) return;
+  const THREE = _thread3d.THREE;
+  clearGroup(_thread3d.ringGroup);
+  clearGroup(_thread3d.edgeGroup);
+  clearGroup(_thread3d.nodeGroup);
+  clearGroup(_thread3d.fileGroup);
+  clearGroup(_thread3d.labelGroup);
+  _thread3d.interactive = [];
+  _thread3d.nodeMeshes.clear();
+  _thread3d.fileMeshes.clear();
+
+  const positions = layoutThreadPositions();
+  _threadMatrix.nodes = positions;
+  const ringDefs = [
+    ['core', 1.05, 5, 0.78],
+    ['cortex', 2.05, 7, 0.26],
+    ['interface', 2.95, 9, -0.30],
+    ['support', 3.75, 12, -0.82],
+  ];
+  ringDefs.forEach(([ring, radius, sides, z], idx) => {
+    const torus = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, 0.008 + idx * 0.002, 8, sides),
+      new THREE.MeshBasicMaterial({color: threadColorNumber(ring), transparent: true, opacity: 0.16, depthWrite: false})
+    );
+    torus.scale.y = 0.68;
+    torus.position.z = z;
+    torus.rotation.z = idx * 0.09;
+    _thread3d.ringGroup.add(torus);
+  });
+
+  _threadMatrix.edges.forEach(edge => {
+    const a = positions[edge.from];
+    const b = positions[edge.to];
+    if (!a || !b) return;
+    const ta = threadById(edge.from);
+    const tb = threadById(edge.to);
+    const activation = (Number(ta?.activation || 0) + Number(tb?.activation || 0)) / 2;
+    const start = new THREE.Vector3(a.x, a.y, a.z);
+    const end = new THREE.Vector3(b.x, b.y, b.z);
+    const mid = start.clone().add(end).multiplyScalar(0.5);
+    mid.z += 0.18 + activation * 0.35;
+    const curve = new THREE.CatmullRomCurve3([start, mid, end]);
+    const geom = new THREE.BufferGeometry().setFromPoints(curve.getPoints(18));
+    const line = new THREE.Line(
+      geom,
+      new THREE.LineBasicMaterial({color: threadColorNumber(ta || tb || 'core'), transparent: true, opacity: 0.12 + activation * 0.34})
+    );
+    _thread3d.edgeGroup.add(line);
+  });
+
+  _threadMatrix.threads.forEach(thread => {
+    const p = positions[thread.id];
+    if (!p) return;
+    const activation = Number(thread.activation || 0);
+    const color = threadColorNumber(thread);
+    const radius = Math.max(0.18, Math.min(0.48, 0.18 + Math.sqrt(Number(thread.files || 0)) * 0.032 + activation * 0.12));
+    const body = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(radius, 3),
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.18 + activation * 0.32,
+        metalness: 0.42,
+        roughness: 0.28,
+        transparent: true,
+        opacity: 0.92,
+      })
+    );
+    body.position.set(p.x, p.y, p.z);
+    body.userData = {kind: 'thread', threadId: thread.id, baseScale: 1, baseRadius: radius};
+    _thread3d.nodeGroup.add(body);
+    _thread3d.interactive.push(body);
+    _thread3d.nodeMeshes.set(thread.id, body);
+
+    const halo = new THREE.Mesh(
+      new THREE.SphereGeometry(radius * 1.92, 24, 16),
+      new THREE.MeshBasicMaterial({color, transparent: true, opacity: 0.055 + activation * 0.08, depthWrite: false})
+    );
+    halo.position.copy(body.position);
+    halo.userData = {kind: 'halo', threadId: thread.id, baseScale: 1};
+    _thread3d.nodeGroup.add(halo);
+    body.userData.halo = halo;
+
+    const label = makeThreadLabel(`${thread.label || thread.id}  ${Math.round(activation * 100)}%`, threadColorHex(thread));
+    label.position.set(p.x, p.y - radius - 0.18, p.z + 0.04);
+    label.userData = {threadId: thread.id};
+    _thread3d.labelGroup.add(label);
+    body.userData.label = label;
+
+    const files = (Array.isArray(thread.hot_files) ? thread.hot_files : []).slice(0, 14);
+    files.forEach((file, index) => {
+      const a = index * 2.3999632297 + p.angle * 0.5;
+      const orbit = radius + 0.46 + (index % 4) * 0.095;
+      const vertical = ((index % 5) - 2) * 0.065;
+      const dotRadius = Math.max(0.075, Math.min(0.16, 0.068 + Math.sqrt(Number(file.lines || 0)) * 0.0017));
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(dotRadius, 18, 12),
+        new THREE.MeshStandardMaterial({
+          color,
+          emissive: color,
+          emissiveIntensity: 0.25 + activation * 0.25,
+          metalness: 0.24,
+          roughness: 0.36,
+          transparent: true,
+          opacity: 0.82,
+        })
+      );
+      dot.position.set(
+        p.x + Math.cos(a) * orbit,
+        p.y + Math.sin(a) * orbit * 0.72,
+        p.z + vertical + Math.cos(a * 0.7) * 0.16
+      );
+      dot.userData = {
+        kind: 'file',
+        threadId: thread.id,
+        path: file.path,
+        baseScale: 1,
+        activation,
+      };
+      _thread3d.fileGroup.add(dot);
+      _thread3d.interactive.push(dot);
+      _thread3d.fileMeshes.set(`${thread.id}::${file.path}`, dot);
+
+      const fiber = new THREE.BufferGeometry().setFromPoints([body.position, dot.position]);
+      const fiberLine = new THREE.Line(
+        fiber,
+        new THREE.LineBasicMaterial({color, transparent: true, opacity: 0.08 + activation * 0.12})
+      );
+      _thread3d.edgeGroup.add(fiberLine);
+    });
+  });
+  updateThreadHighlights();
+  threadResize();
+}
+
+function makeThreadLabel(text, color) {
+  const THREE = _thread3d.THREE;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = '700 34px JetBrains Mono, monospace';
+  const metrics = ctx.measureText(text);
+  canvas.width = Math.min(1024, Math.max(256, Math.ceil(metrics.width + 44)));
+  canvas.height = 72;
+  ctx.font = '700 34px JetBrains Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(3,4,8,0.66)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.36;
+  ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = color;
+  ctx.fillText(truncateText(text, 32), canvas.width / 2, canvas.height / 2 + 1);
+  const texture = new THREE.CanvasTexture(canvas);
+  if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map: texture, transparent: true, depthWrite: false}));
+  sprite.scale.set(canvas.width / 360, canvas.height / 360, 1);
+  return sprite;
+}
+
+function updateThreadHighlights() {
+  if (!_thread3d.ready) return;
+  _thread3d.nodeMeshes.forEach((mesh, id) => {
+    const selected = _threadMatrix.selected === id;
+    const hovered = _threadMatrix.hover === id;
+    const thread = threadById(id);
+    const activation = Number(thread?.activation || 0);
+    mesh.userData.targetScale = selected ? 1.22 : hovered ? 1.12 : 1;
+    mesh.material.emissiveIntensity = (selected ? 0.65 : hovered ? 0.48 : 0.18) + activation * 0.28;
+    if (mesh.userData.halo) mesh.userData.halo.material.opacity = selected ? 0.18 : hovered ? 0.13 : 0.055 + activation * 0.08;
+    if (mesh.userData.label) mesh.userData.label.material.opacity = selected || hovered ? 1 : 0.72;
+  });
+  _thread3d.fileMeshes.forEach(mesh => {
+    const selectedThread = _threadMatrix.selected === mesh.userData.threadId;
+    const selectedFile = selectedThread && _threadMatrix.selectedFile === mesh.userData.path;
+    mesh.userData.targetScale = selectedFile ? 1.95 : selectedThread ? 1.32 : 1;
+    mesh.material.opacity = selectedFile ? 1 : selectedThread ? 0.94 : 0.46;
+    mesh.material.emissiveIntensity = selectedFile ? 0.82 : selectedThread ? 0.46 : 0.20 + Number(mesh.userData.activation || 0) * 0.18;
+  });
+}
+
+function threadFrame(ts) {
+  _threadMatrix.raf = 0;
+  if (!_threadMatrixRunning || !_thread3d.ready) return;
+  const time = (ts || performance.now()) * 0.001;
+  const auto = _thread3d.dragging ? 0 : Math.sin(time * 0.16) * 0.055;
+  _thread3d.root.rotation.x = _thread3d.rotX;
+  _thread3d.root.rotation.y = _thread3d.rotY + auto;
+  _thread3d.root.rotation.z = Math.sin(time * 0.11) * 0.025;
+  _thread3d.camera.position.set(0, 0, _thread3d.zoom);
+  _thread3d.camera.lookAt(0, 0, 0);
+
+  _thread3d.nodeMeshes.forEach((mesh, id) => {
+    const thread = threadById(id);
+    const activation = Number(thread?.activation || 0);
+    const pulse = (0.5 + 0.5 * Math.sin(time * 3.1 + mesh.position.x * 1.7)) * activation * 0.06;
+    const target = Number(mesh.userData.targetScale || 1) + pulse;
+    const current = mesh.scale.x || 1;
+    const next = current + (target - current) * 0.16;
+    mesh.scale.setScalar(next);
+    if (mesh.userData.halo) {
+      const haloScale = (Number(mesh.userData.targetScale || 1) + pulse * 1.8);
+      mesh.userData.halo.scale.setScalar(haloScale);
+    }
+  });
+  let fileIndex = 0;
+  _thread3d.fileMeshes.forEach(mesh => {
+    const pulse = 1 + Math.sin(time * 4.2 + fileIndex * 0.37) * 0.045 * (0.4 + Number(mesh.userData.activation || 0));
+    fileIndex += 1;
+    const target = Number(mesh.userData.targetScale || 1) * pulse;
+    const current = mesh.scale.x || 1;
+    const next = current + (target - current) * 0.20;
+    mesh.scale.setScalar(next);
+  });
+  _thread3d.renderer.render(_thread3d.scene, _thread3d.camera);
+  _threadMatrix.raf = requestAnimationFrame(threadFrame);
 }
 
 // ── Console Chat ─────────────────────────────
@@ -2620,6 +4087,7 @@ function connectSSE() {
           updateLobes(d.lobes||[]);
           updateQuantum(d.quantum||{}, d.quantum_architecture || null);
           updateBrain(d.brain||{}, d.voice||{}, d.codebase||{});
+          updateThreads(d.codebase_threads||{});
           updateMemoryEvents(d.memory_events||[]);
           document.getElementById('sOnline').textContent = `${d.online}/${d.total}`;
           document.getElementById('sUptime').textContent = fmtUp(d.uptime||0);
@@ -2677,7 +4145,10 @@ connectSSE();
 setInterval(fetchState, 5000);
 setInterval(updateLiveHud, 1000);
 startKingstonMatrix();
-window.addEventListener('resize', () => { if (_neuralRunning) neuralResize(); });
+window.addEventListener('resize', () => {
+  if (_neuralRunning) neuralResize();
+  if (_threadMatrixRunning) threadResize();
+});
 </script>
 </body>
 </html>"""

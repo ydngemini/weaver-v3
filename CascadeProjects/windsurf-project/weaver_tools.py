@@ -226,7 +226,7 @@ async def publish_to_nexus(topic: str, data: dict):
                 await _nexus_client_ref[0].connect()
             except Exception:
                 pass
-        if _nexus_client_ref[0] and _nexus_client_ref[0].connected:
+        if _nexus_client_ref[0]:
             await _nexus_client_ref[0].publish(topic, data)
     except Exception:
         pass

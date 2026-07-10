@@ -40,11 +40,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 import websockets
-from websockets.server import WebSocketServerProtocol
+from websockets.asyncio.server import ServerConnection, serve
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 import os as _os
-HOST           = "localhost"
+HOST           = _os.environ.get("NEXUS_HOST", _os.environ.get("WEAVER_INTERNAL_HOST", "localhost"))
 PORT           = int(_os.environ.get("NEXUS_PORT", 9999))
 HEALTH_PORT    = int(_os.environ.get("NEXUS_HEALTH_PORT", PORT - 1))
 CACHE_SIZE     = 10          # rolling in-memory message history
@@ -67,7 +67,7 @@ log = logging.getLogger("nexus_bus")
 
 class LobeConnection:
     """Represents a single connected AI lobe."""
-    def __init__(self, ws: WebSocketServerProtocol):
+    def __init__(self, ws: ServerConnection):
         self.ws        = ws
         self.lobe_id   = f"lobe_{uuid.uuid4().hex[:6]}"   # overridden on register
         self.topics: set[str] = set()
@@ -100,7 +100,7 @@ def _ts() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _send(ws: WebSocketServerProtocol, payload: dict) -> None:
+async def _send(ws: ServerConnection, payload: dict) -> None:
     """Fire-and-forget send; drops silently if socket is closed."""
     try:
         await ws.send(json.dumps(payload, ensure_ascii=False))
@@ -199,7 +199,7 @@ async def _handle_message(lobe: LobeConnection, raw: str) -> None:
 
 # ── Connection lifecycle ───────────────────────────────────────────────────────
 
-async def _connection_handler(ws: WebSocketServerProtocol) -> None:
+async def _connection_handler(ws: ServerConnection) -> None:
     lobe = LobeConnection(ws)
     _connections[lobe.lobe_id] = lobe
     log.info("CONNECT   %s  (from %s)", lobe.lobe_id, ws.remote_address)
@@ -269,7 +269,7 @@ async def main() -> None:
     log.info("   Cache size : last %d messages", CACHE_SIZE)
     log.info("   Topics     : open schema — any string is a valid topic")
 
-    async with websockets.serve(
+    async with serve(
         _connection_handler, HOST, PORT,
         max_size=MAX_MSG_SIZE,
         ping_interval=PING_INTERVAL,

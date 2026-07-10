@@ -70,7 +70,7 @@ PATHWAY_ESSENCE = {
     "Prophet":    "the unnamed is spoken — the map appears before the road",
 }
 
-IBM_TOKEN   = os.environ.get("IBM_QUANTUM_TOKEN", "V-G5x2_yaDBPmTH-8qENQoTW2yhffonHSI-8SX334OJK")
+IBM_TOKEN   = os.environ.get("IBM_QUANTUM_TOKEN", "").strip()
 IBM_CHANNEL = "ibm_quantum_platform"
 SHOTS       = 1024
 LOOP_INTERVAL_S = 300   # 5 minutes
@@ -376,15 +376,14 @@ _nexus = None
 
 async def _ensure_nexus():
     global _nexus
-    if _nexus is not None and _nexus.connected:
-        return _nexus
     try:
-        from nexus_client import NexusClient
-        _nexus = NexusClient("quantum_soul", topics=[])
-        await _nexus.connect()
+        if _nexus is None:
+            from nexus_client import NexusClient
+            _nexus = NexusClient("quantum_soul", topics=[])
+        if not _nexus.connected:
+            await _nexus.connect()
     except Exception as e:
         print(f"⚛️  [QUANTUM LOBE] Nexus Bus unavailable ({e}) — running standalone", flush=True)
-        _nexus = None
     return _nexus
 
 
@@ -410,11 +409,12 @@ async def quantum_soul_loop() -> None:
             # Publish to Nexus Bus
             nexus = await _ensure_nexus()
             if nexus and nexus.connected:
-                await nexus.publish("quantum_state", {
+                published = await nexus.publish("quantum_state", {
                     "description": description[:500],
                     "source": "quantum_soul",
                 })
-                print("⚛️  [QUANTUM LOBE] State published to Nexus Bus.", flush=True)
+                if published:
+                    print("⚛️  [QUANTUM LOBE] State published to Nexus Bus.", flush=True)
 
             # Write quantum state to Akashic Hub
             if _akashic_hub_ref is not None:

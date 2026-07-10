@@ -35,6 +35,7 @@ tfplan
 # Python / IDE / local-agent cruft
 __pycache__/
 *.pyc
+*.log
 .claude/
 CascadeProjects/.claude/
 CascadeProjects/windsurf-project/Quantum Computing Architecture_files/

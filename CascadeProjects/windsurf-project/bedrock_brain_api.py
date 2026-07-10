@@ -991,6 +991,7 @@ async def _cortex_chat(
         final_text, meta = moe
         await _record_state(
             last_error="",
+            last_n8n_error="",
             last_cortex_at=_now(),
             last_cortex_route="n8n-moe",
             last_cortex_reflex="",
