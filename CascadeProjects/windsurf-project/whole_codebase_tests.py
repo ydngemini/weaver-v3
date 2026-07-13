@@ -3499,7 +3499,9 @@ async def test_AO():
     n8n_calls = 0
     model_calls = []
 
-    async def empty_context(_messages, _user_text):
+    async def empty_context(_messages, user_text):
+        if "bedrock_brain_api.py" in user_text:
+            return "SOURCE_SENTINEL: def _is_explicit_code_turn(value): return bool(value)"
         return ""
 
     async def state_summary(_query):
@@ -3564,10 +3566,12 @@ async def test_AO():
         coder_is_private = (
             n8n_calls == 0
             and code_text.startswith("I'm Weaver.")
-            and [alias for alias, _ in model_calls] == ["weaver-speed", "weaver-code", "weaver-brain"]
+            and [alias for alias, _ in model_calls] == ["weaver-code", "weaver-brain"]
+            and any(call.get("alias") == "weaver-router" and call.get("deterministic") is True for call in routed_calls)
             and any(call.get("alias") == "weaver-code" and call.get("silent_specialist") is True for call in routed_calls)
             and any(call.get("alias") == "weaver-brain" and call.get("speaker") is True for call in routed_calls)
             and code_meta["route"].get("public_speaker") == "weaver-brain"
+            and "SOURCE_SENTINEL" in model_calls[0][1]
             and brain.PUBLIC_SPEAKER_BOUNDARY in model_calls[-1][1]
         )
 

@@ -558,6 +558,7 @@ data=json.load(open("/tmp/brain-code.json", encoding="utf-8"))
 text=data.get("choices", [{}])[0].get("message", {}).get("content", "")
 route=data.get("weaver", {}).get("route", {})
 calls=route.get("calls", [])
+router=next((call for call in calls if call.get("alias") == "weaver-router"), {})
 coder=next((call for call in calls if call.get("alias") == "weaver-code"), {})
 speaker=next((call for call in calls if call.get("alias") == "weaver-brain" and call.get("speaker") is True), {})
 assert text.strip(), data
@@ -565,8 +566,10 @@ assert route.get("selected_specialist") == "weaver-code", route
 assert route.get("public_speaker") == "weaver-brain", route
 assert route.get("speaker_boundary_applied") is True, route
 assert route.get("internal_draft_hidden") is True, route
+assert router.get("deterministic") is True, calls
 assert coder.get("silent_specialist") is True, calls
 assert coder.get("route", {}).get("transport") == "bedrock-mantle", coder
+assert int(coder.get("usage", {}).get("inputTokens", 0)) > 500, coder
 assert speaker.get("route", {}).get("transport") == "bedrock-mantle", speaker
 assert not any(phrase in text.lower() for phrase in (
     "as an ai coding assistant", "i am a coder", "i'm a coder", "quality reviewer",
