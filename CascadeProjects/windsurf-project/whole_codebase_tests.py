@@ -3459,6 +3459,7 @@ async def test_AO():
     _header("AO", "Only Weaver speaks while the coder stays private")
     import httpx
     import bedrock_brain_api as brain
+    from codebase_api import build_context
 
     routing_cases = {
         "Are you the coder model?": False,
@@ -3476,6 +3477,19 @@ async def test_AO():
     ) and brain._specialist_for_turn([
         {"role": "user", "content": "Are you the coder model?"}
     ]) == "weaver-brain"
+    definition_context = build_context(
+        "bedrock_brain_api.py _is_explicit_code_turn",
+        "",
+        1,
+        6000,
+    )["context"]
+    definition_grounding = all(marker in definition_context for marker in (
+        "def _is_explicit_code_turn",
+        "traceback \\(most recent call last\\)",
+        "action = (",
+        "artifact = (",
+        "re.fullmatch(",
+    ))
 
     leaked_responses = (
         "I am Weaver, a multi-lobe AI system. My logic lobe is active.",
@@ -3579,7 +3593,7 @@ async def test_AO():
 
         async def repairing_bedrock(route, messages, max_tokens=None, temperature=None):
             repair_calls.append(route.alias)
-            if route.alias == "weaver-brain":
+            if route.alias == "weaver-brain" and repair_calls.count("weaver-brain") == 1:
                 text = "As an AI coding assistant, I can only assist with coding."
             elif len(repair_calls) == 1:
                 text = "private reflex"
@@ -3593,7 +3607,7 @@ async def test_AO():
         ])
         direct_leak_repaired = (
             repaired_text.startswith("I'm Weaver.")
-            and repair_calls == ["weaver-speed", "weaver-brain", "weaver-speed"]
+            and repair_calls == ["weaver-speed", "weaver-brain", "weaver-brain"]
             and repaired_meta["route"].get("speaker_repair_applied") is True
             and "model-preface" in repaired_meta["route"].get("speaker_repair_reasons", [])
         )
@@ -3694,6 +3708,7 @@ async def test_AO():
 
     passed = all((
         strict_intent_routing,
+        definition_grounding,
         leak_detector,
         rejected_private_draft,
         coder_is_private,
@@ -3703,6 +3718,7 @@ async def test_AO():
     ))
     detail = "\n".join([
         f"  Coder requires explicit programming intent: {strict_intent_routing}",
+        f"  Exact function body reaches grounding:      {definition_grounding}",
         f"  Known production identity leaks detected: {leak_detector}",
         f"  Unsafe n8n draft is never returned:       {rejected_private_draft}",
         f"  Coder works silently; Weaver answers:     {coder_is_private}",

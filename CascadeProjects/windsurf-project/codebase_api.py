@@ -409,6 +409,33 @@ def _read_text(path: Path, max_chars: int) -> str:
     return _redact(text[:max_chars])
 
 
+def _definition_line_indexes(
+    source_lines: list[str],
+    line_index: int,
+    max_lines: int = 160,
+) -> list[int]:
+    """Expand a matched Python definition without exposing unrelated source."""
+    if not 0 <= line_index < len(source_lines):
+        return []
+    match = re.match(
+        r"^(?P<indent>\s*)(?:async\s+def|def|class)\s+[A-Za-z_][A-Za-z0-9_]*\b",
+        source_lines[line_index],
+    )
+    if not match:
+        return []
+    definition_indent = len(match.group("indent").expandtabs(4))
+    end = min(len(source_lines), line_index + max_lines)
+    for candidate in range(line_index + 1, end):
+        stripped = source_lines[candidate].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indentation = len(source_lines[candidate]) - len(source_lines[candidate].lstrip())
+        if indentation <= definition_indent:
+            end = candidate
+            break
+    return list(range(line_index, end))
+
+
 def _context_chunk(path: Path, max_chars: int, matches: list[dict] | None = None) -> str:
     header = f"### {_rel(path)}\n"
     if matches:
@@ -417,7 +444,12 @@ def _context_chunk(path: Path, max_chars: int, matches: list[dict] | None = None
         seen_lines: set[int] = set()
         for match in matches:
             line_index = max(0, int(match["line"]) - 1)
-            for selected in range(max(0, line_index - 1), min(len(source_lines), line_index + 2)):
+            definition_lines = _definition_line_indexes(source_lines, line_index)
+            nearby_lines = range(
+                max(0, line_index - 1),
+                min(len(source_lines), line_index + 2),
+            )
+            for selected in definition_lines or nearby_lines:
                 if selected not in seen_lines:
                     seen_lines.add(selected)
                     selected_lines.append(selected)

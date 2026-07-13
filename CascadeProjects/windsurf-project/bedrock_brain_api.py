@@ -1965,20 +1965,20 @@ async def _cortex_chat_inner(
         repaired_text = ""
         try:
             repaired_text, repaired_meta = await _cortex_route_chat(
-                MODEL_ROUTES["weaver-speed"],
+                MODEL_ROUTES["weaver-brain"],
                 repair_messages,
                 max_tokens=min(int(max_tokens or 220), 300),
                 temperature=0.3,
             )
             calls.append({
-                "alias": "weaver-speed",
+                "alias": "weaver-brain",
                 "speaker_repair": True,
                 "reasons": speaker_repair_reasons,
                 **repaired_meta,
             })
         except Exception as repair_exc:
             calls.append({
-                "alias": "weaver-speed",
+                "alias": "weaver-brain",
                 "speaker_repair": True,
                 "error": _compact(repair_exc, 200),
                 "reasons": speaker_repair_reasons,

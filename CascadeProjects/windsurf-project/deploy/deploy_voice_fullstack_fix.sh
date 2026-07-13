@@ -571,6 +571,8 @@ assert coder.get("silent_specialist") is True, calls
 assert coder.get("route", {}).get("transport") == "bedrock-mantle", coder
 assert int(coder.get("usage", {}).get("inputTokens", 0)) > 500, coder
 assert speaker.get("route", {}).get("transport") == "bedrock-mantle", speaker
+assert len(text.split()) >= 20, text
+assert "couldn't form a reliable answer" not in text.lower(), text
 assert not any(phrase in text.lower() for phrase in (
     "as an ai coding assistant", "i am a coder", "i'm a coder", "quality reviewer",
 )), text
