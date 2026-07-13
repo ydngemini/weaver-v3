@@ -256,12 +256,16 @@ sudo install -m 0644 "$DEPLOY_ROOT/avatar/embodiment.html" /var/www/weaver/embod
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/headless.html" /var/www/weaver-headless/index.html
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/headless.html" /var/www/weaver-headless/headless.html
 for asset in \
+  weaver_avatar_dress.glb \
+  weaver_apartment.glb \
   weaver_avatar_dress_hifi.glb \
   textures/skin_normal_hifi.png \
   textures/skin_roughness_hifi.png \
   textures/skin_specular_hifi.png; do
-  test -s "$DEPLOY_ROOT/avatar/$asset" || { echo "missing generated high-fidelity avatar asset: $asset" >&2; exit 1; }
+  test -s "$DEPLOY_ROOT/avatar/$asset" || { echo "missing required visual asset: $asset" >&2; exit 1; }
 done
+sudo install -m 0644 "$DEPLOY_ROOT/avatar/weaver_avatar_dress.glb" /var/www/weaver/weaver_avatar_dress.glb
+sudo install -m 0644 "$DEPLOY_ROOT/avatar/weaver_apartment.glb" /var/www/weaver/weaver_apartment.glb
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/weaver_avatar_dress_hifi.glb" /var/www/weaver/weaver_avatar_dress_hifi.glb
 sudo install -d -m 0755 /var/www/weaver/textures
 for map in skin_normal_hifi.png skin_roughness_hifi.png skin_specular_hifi.png; do
@@ -705,19 +709,24 @@ for host in weaverv3.com headless.weaverv3.com; do
   live_vendor_sha=$(curl --resolve "$host:443:127.0.0.1" -fsS --max-time 20 "$url" | sha256sum | cut -d' ' -f1)
   [ "$live_vendor_sha" = "$vendor_sha" ] || { echo "vendor checksum mismatch: $url" >&2; exit 1; }
 done
-curl -fsSI --max-time 20 https://weaver-avatar-404870839825.s3.amazonaws.com/weaver_avatar_dress.glb >/dev/null
-curl -fsSI --max-time 20 https://weaver-avatar-404870839825.s3.amazonaws.com/weaver_apartment.glb >/dev/null
-echo "  avatar vendor modules and S3 GLBs reachable"
+if curl -fsSI --max-time 20 https://weaver-avatar-404870839825.s3.amazonaws.com/weaver_avatar_dress.glb >/dev/null \
+  && curl -fsSI --max-time 20 https://weaver-avatar-404870839825.s3.amazonaws.com/weaver_apartment.glb >/dev/null; then
+  echo "  optional S3 visual-asset fallback reachable"
+else
+  echo "  warning: optional S3 visual-asset fallback unavailable; verified local assets remain primary" >&2
+fi
 for asset in \
+  weaver_avatar_dress.glb \
+  weaver_apartment.glb \
   weaver_avatar_dress_hifi.glb \
   textures/skin_normal_hifi.png \
   textures/skin_roughness_hifi.png \
   textures/skin_specular_hifi.png; do
   local_asset_sha=$(sha256sum "$DEPLOY_ROOT/avatar/$asset" | cut -d' ' -f1)
   live_asset_sha=$(curl --resolve weaverv3.com:443:127.0.0.1 -fsS --max-time 60 "https://weaverv3.com/$asset" | sha256sum | cut -d' ' -f1)
-  [ "$live_asset_sha" = "$local_asset_sha" ] || { echo "high-fidelity asset checksum mismatch: $asset" >&2; exit 1; }
+  [ "$live_asset_sha" = "$local_asset_sha" ] || { echo "visual asset checksum mismatch: $asset" >&2; exit 1; }
 done
-echo "  high-fidelity GLB and PBR maps match deployed checksums"
+echo "  standard, penthouse, high-fidelity GLBs and PBR maps match deployed checksums"
 for service in weaver-brain weaver-tts weaver-llm weaver n8n caddy; do
   sudo systemctl is-active --quiet "$service" || { echo "$service is not active" >&2; exit 1; }
 done

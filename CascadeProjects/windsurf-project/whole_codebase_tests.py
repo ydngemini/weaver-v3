@@ -1836,7 +1836,8 @@ async def test_AF():
         "WeaverMidnightSatin",
         "WeaverSoftBlackBraids",
         "WeaverWovenFabricMicrotexture",
-        "weaver_woven_a_line_skirt",
+        "weaver_seamless_woven_a_line_skirt",
+        "weaver_closed_skirt_lining",
         "weaver_soft_hair_crown",
         "const strandCount = QUALITY.hairStrands",
         "function buildDynamicHair()",
@@ -1923,7 +1924,8 @@ async def test_AG():
         'role="status"',
         'aria-live="polite"',
         'aria-pressed="false"',
-        'aria-busy="false"',
+        'aria-busy="true"',
+        "setAttribute('aria-busy', 'false')",
         'button:focus-visible',
         '@media (prefers-reduced-motion: reduce)',
         'role="img"',
@@ -3096,11 +3098,11 @@ async def test_AL():
         "globalThis.__weaverFidelityAudit",
     ))
     deployment_integrated = all(marker in deploy for marker in (
-        'missing generated high-fidelity avatar asset',
+        'missing required visual asset',
         'sudo install -m 0644 "$DEPLOY_ROOT/avatar/weaver_avatar_dress_hifi.glb"',
         'sudo install -d -m 0755 /var/www/weaver/textures',
-        'high-fidelity asset checksum mismatch',
-        'high-fidelity GLB and PBR maps match deployed checksums',
+        'visual asset checksum mismatch',
+        'standard, penthouse, high-fidelity GLBs and PBR maps match deployed checksums',
     ))
 
     with open(hifi_path, "rb") as fh:
@@ -3307,6 +3309,129 @@ async def test_AM():
     return passed
 
 
+async def test_AN():
+    _header("AN", "Resilient visual boot, seamless clothing, and compositor-safe headless controls")
+
+    repo_root = os.path.abspath(os.path.join(PROJ, "..", ".."))
+    avatar_root = os.path.join(repo_root, "avatar")
+    with open(os.path.join(avatar_root, "embodiment.html"), "r", encoding="utf-8") as fh:
+        embodiment = fh.read()
+    with open(os.path.join(avatar_root, "headless.html"), "r", encoding="utf-8") as fh:
+        headless = fh.read()
+    with open(os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"), "r", encoding="utf-8") as fh:
+        deploy = fh.read()
+
+    embodied_boot = all(marker in embodiment for marker in (
+        'id="boot-title"',
+        'id="boot-fill"',
+        'id="boot-detail"',
+        "const bootState = {",
+        "function reportBootProgress(",
+        "function maybeFinishBoot(",
+        "function markBootFailure(",
+        "markBootReady('avatar'",
+        "markBootReady('environment'",
+        "wake.disabled = false",
+        "wake.textContent = 'RETRY'",
+    ))
+    local_first_assets = all(marker in embodiment for marker in (
+        "const APARTMENT_ASSET = 'weaver_apartment.glb'",
+        "candidates = [`./${APARTMENT_ASSET}`, `${ASSETS}/${APARTMENT_ASSET}`]",
+        "{ tier: 'standard', asset: AVATAR_ASSET, url: `./${AVATAR_ASSET}` }",
+        "loadApartmentAsset(candidates, index + 1)",
+        "loadAvatarAsset(candidates, index + 1)",
+    ))
+    seamless_garment = all(marker in embodiment for marker in (
+        "weaver_seamless_woven_a_line_skirt",
+        "weaver_closed_skirt_lining",
+        "skirtMaterial.side = THREE.DoubleSide",
+        "if (o.isSkinnedMesh) o.frustumCulled = false",
+        "skirt.frustumCulled = false",
+        "lining.frustumCulled = false",
+        "closedShells: 2",
+        "seamless: true",
+        "const dynamicExpansion = Math.min(0.18",
+        "outfitState.garmentCoverage.dynamicExpansion",
+        "stride * 0.14 + Math.abs(skeleton.current.hipShift) * 0.06",
+    ))
+
+    key_reader = headless.split("function key() {", 1)[1].split("function requestBrainKey()", 1)[0]
+    key_request = headless.split("function requestBrainKey() {", 1)[1].split("function headers(", 1)[0]
+    clean_locked_mode = (
+        "prompt(" not in key_reader
+        and "prompt(" in key_request
+        and all(marker in headless for marker in (
+            "function showCortexLocked()",
+            "if (!key()) {",
+            "cortex locked · Wake to connect",
+            "error.code = 'WEAVER_CORTEX_LOCKED'",
+            "const hasCortex = Boolean(requestBrainKey())",
+        ))
+    )
+    headless_visual_boot = all(marker in headless for marker in (
+        'id="visualBoot"',
+        'id="visualBootFill"',
+        "function setVisualBoot(",
+        "state.visualReady = true",
+        "setVisualBoot(1, 'Reactive field ready.', true)",
+        "setVisualBoot(1, 'Efficient reactive field ready.', true)",
+        "bootProgress: state.visualBootProgress",
+    ))
+    compositor_safe = (
+        "backdrop-filter" not in headless
+        and all(marker in headless for marker in (
+            "height: 44px",
+            "background-color: #f5c451 !important",
+            "background-image: none !important",
+            "appearance: none",
+            "isolation: isolate",
+            "contain: strict",
+            "env(safe-area-inset-bottom)",
+        ))
+    )
+    deploy_local_assets = all(marker in deploy for marker in (
+        'sudo install -m 0644 "$DEPLOY_ROOT/avatar/weaver_avatar_dress.glb"',
+        'sudo install -m 0644 "$DEPLOY_ROOT/avatar/weaver_apartment.glb"',
+        "standard, penthouse, high-fidelity GLBs and PBR maps match deployed checksums",
+        "optional S3 visual-asset fallback",
+        "visual asset checksum mismatch",
+    ))
+    visual_assets_valid = all(
+        os.path.getsize(os.path.join(avatar_root, filename)) >= minimum
+        for filename, minimum in (
+            ("weaver_avatar_dress.glb", 10_000_000),
+            ("weaver_apartment.glb", 2_000_000),
+            ("weaver_avatar_dress_hifi.glb", 20_000_000),
+        )
+    )
+    n8n_deploy_validation = deploy.count("scripts/validate_n8n_workflow.mjs") >= 2
+
+    passed = all((
+        embodied_boot,
+        local_first_assets,
+        seamless_garment,
+        clean_locked_mode,
+        headless_visual_boot,
+        compositor_safe,
+        deploy_local_assets,
+        visual_assets_valid,
+        n8n_deploy_validation,
+    ))
+    detail = "\n".join([
+        f"  Embodied loading is explicit and recoverable: {embodied_boot}",
+        f"  Apartment/avatar loading is local-first:      {local_first_assets}",
+        f"  Closed garment expands before pose clipping:  {seamless_garment}",
+        f"  Locked headless mode makes zero implicit prompt:{clean_locked_mode}",
+        f"  Headless visual readiness is independently UI: {headless_visual_boot}",
+        f"  WebGL controls avoid blur/compositor loss:      {compositor_safe}",
+        f"  Deployment installs and hashes every GLB:      {deploy_local_assets}",
+        f"  Required visual artifacts are nontrivial:      {visual_assets_valid}",
+        f"  n8n validator gates local and remote deploy:    {n8n_deploy_validation}",
+    ])
+    _result("AN", "Resilient visual boot, seamless clothing, and compositor-safe headless controls", passed, detail)
+    return passed
+
+
 TESTS = {
     "G": ("Quantum parse invariants", test_G),
     "H": ("Quantum description + state write persistence", test_H),
@@ -3341,6 +3466,7 @@ TESTS = {
     "AK": ("Cinematic facial articulation, layered body dynamics, and bounded material response", test_AK),
     "AL": ("High-fidelity original avatar LOD, physical scan maps, and safe runtime fallback", test_AL),
     "AM": ("iPhone 16e A18 adaptive mobile performance without embodiment loss", test_AM),
+    "AN": ("Resilient visual boot, seamless clothing, and compositor-safe headless controls", test_AN),
 }
 
 
@@ -3368,6 +3494,6 @@ async def main(which: str):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("test", nargs="?", default="all", help="G-AM or all")
+    ap.add_argument("test", nargs="?", default="all", help="G-AN or all")
     args = ap.parse_args()
     raise SystemExit(0 if asyncio.run(main(args.test)) else 1)

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <title>Weaver - Headless</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <link rel="icon" href="weaver-logo.svg" type="image/svg+xml" />
 <style>
   :root {
@@ -24,7 +24,7 @@
     --muted: #99a1b1;
   }
   * { box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; margin: 0; }
+  html, body { width: 100%; height: 100%; min-height: 100dvh; margin: 0; overscroll-behavior: none; }
   body {
     background:
       linear-gradient(var(--hairline) 1px, transparent 1px) 0 0 / 100% 46px,
@@ -34,6 +34,7 @@
     color: var(--text);
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     overflow: hidden;
+    isolation: isolate;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -53,15 +54,16 @@
     height: 100%;
     display: block;
     z-index: 0;
+    pointer-events: none;
+    contain: strict;
   }
   .top {
-    position: fixed; left: 16px; top: 16px; z-index: 2;
+    position: fixed; left: 16px; top: 16px; z-index: 4;
     width: min(410px, calc(100vw - 32px));
     padding: 16px;
-    background: linear-gradient(180deg, rgba(22, 25, 34, 0.76), rgba(12, 14, 19, 0.66));
+    background: linear-gradient(180deg, rgba(22, 25, 34, 0.97), rgba(12, 14, 19, 0.95));
     border: 1px solid var(--line);
     border-radius: 8px;
-    backdrop-filter: blur(14px);
     box-shadow: 0 22px 80px rgba(0, 0, 0, 0.32);
   }
   .top::before,
@@ -87,23 +89,26 @@
   .readout b { color: var(--blue); font-weight: 600; }
   .readout span { color: var(--gold); }
   .bar {
-    position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 2;
+    position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 4;
     display: grid; grid-template-columns: auto auto auto 1fr auto auto; gap: 8px;
     align-items: center;
     padding: 10px;
-    background: linear-gradient(180deg, rgba(22, 25, 34, 0.78), rgba(12, 14, 19, 0.70));
+    background: linear-gradient(180deg, rgba(22, 25, 34, 0.98), rgba(12, 14, 19, 0.96));
     border: 1px solid var(--line);
     border-radius: 8px;
-    backdrop-filter: blur(14px);
     box-shadow: 0 22px 80px rgba(0, 0, 0, 0.34);
   }
   button, input {
-    height: 42px;
+    height: 44px;
     border-radius: 6px;
     border: 1px solid rgba(255,255,255,0.12);
     font: inherit;
   }
   button {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    z-index: 1;
     background: rgba(245, 196, 81, 0.11);
     color: var(--text);
     padding: 0 14px;
@@ -111,7 +116,13 @@
     transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
   }
   button:hover { transform: translateY(-1px); border-color: rgba(245, 196, 81, 0.42); }
-  button.primary { background: var(--gold); color: #151109; border-color: transparent; font-weight: 800; }
+  button.primary {
+    background-color: #f5c451 !important;
+    background-image: none !important;
+    color: #151109 !important;
+    border-color: transparent;
+    font-weight: 800;
+  }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   input {
     min-width: 0;
@@ -122,7 +133,7 @@
   }
   input:focus, button:focus-visible { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(245,196,81,0.2); }
   .voice {
-    position: fixed; right: 16px; top: 16px; z-index: 2;
+    position: fixed; right: 16px; top: 16px; z-index: 4;
     width: min(360px, calc(100vw - 32px));
     color: var(--muted);
     font-size: 12px;
@@ -130,20 +141,71 @@
     padding: 12px 14px;
     border: 1px solid rgba(61,174,255,0.25);
     border-radius: 8px;
-    background: linear-gradient(180deg, rgba(12, 18, 26, 0.70), rgba(8, 10, 14, 0.62));
-    backdrop-filter: blur(14px);
+    background: linear-gradient(180deg, rgba(12, 18, 26, 0.97), rgba(8, 10, 14, 0.95));
     box-shadow: 0 22px 80px rgba(0, 0, 0, 0.32);
+  }
+  .visual-boot {
+    position: fixed;
+    inset: 50% auto auto 50%;
+    z-index: 3;
+    width: min(300px, calc(100vw - 40px));
+    transform: translate(-50%, -50%);
+    display: grid;
+    justify-items: center;
+    gap: 12px;
+    padding: 20px;
+    color: var(--muted);
+    text-align: center;
+    pointer-events: none;
+    transition: opacity .28s ease, visibility .28s ease;
+  }
+  .visual-boot.ready { opacity: 0; visibility: hidden; }
+  .visual-gem {
+    width: 38px;
+    height: 38px;
+    position: relative;
+    transform: rotate(45deg);
+    background: linear-gradient(145deg, #fff0ba 0 28%, #f5c451 29% 64%, #946b25 65%);
+    border: 1px solid rgba(255, 240, 186, .72);
+    box-shadow: 0 0 34px rgba(245, 196, 81, .32);
+    animation: visual-gem 1.8s ease-in-out infinite;
+  }
+  .visual-gem::after { content: ""; position: absolute; inset: 7px; border: 1px solid rgba(33, 24, 7, .32); }
+  .visual-title { color: var(--gold-soft); font-size: 11px; font-weight: 800; letter-spacing: .18em; }
+  .visual-track { width: 100%; height: 3px; overflow: hidden; border-radius: 2px; background: #272b34; }
+  #visualBootFill {
+    display: block;
+    width: 8%;
+    height: 100%;
+    background: var(--gold);
+    box-shadow: 0 0 12px rgba(245, 196, 81, .48);
+    transition: width .2s ease-out;
+  }
+  .visual-detail { min-height: 17px; font-size: 11px; line-height: 1.4; }
+  @keyframes visual-gem {
+    0%, 100% { transform: rotate(45deg) translateY(0) scale(.92); }
+    50% { transform: rotate(45deg) translate(-3px, -3px) scale(1); }
   }
   @media (min-width: 761px) and (max-width: 900px) {
     .voice { width: min(360px, calc(100vw - 458px)); }
   }
   @media (max-width: 760px) {
-    .voice { top: auto; bottom: 126px; right: 12px; left: 12px; width: auto; }
-    .top { left: 12px; top: 12px; width: calc(100vw - 24px); }
+    .voice {
+      top: auto;
+      bottom: max(126px, calc(116px + env(safe-area-inset-bottom)));
+      right: max(12px, env(safe-area-inset-right));
+      left: max(12px, env(safe-area-inset-left));
+      width: auto;
+    }
+    .top {
+      left: max(12px, env(safe-area-inset-left));
+      top: max(12px, env(safe-area-inset-top));
+      width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    }
     .bar {
-      left: 12px;
-      right: 12px;
-      bottom: 12px;
+      left: max(12px, env(safe-area-inset-left));
+      right: max(12px, env(safe-area-inset-right));
+      bottom: max(12px, env(safe-area-inset-bottom));
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
     .bar button { width: 100%; padding: 0 8px; }
@@ -155,11 +217,18 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
     body::after { display: none; }
+    .visual-gem { animation: none; }
   }
 </style>
 </head>
 <body>
 <canvas id="field" role="img" aria-label="Weaver quantum cortex visualization"></canvas>
+<div id="visualBoot" class="visual-boot" role="status" aria-live="polite" aria-atomic="true">
+  <div class="visual-gem" aria-hidden="true"></div>
+  <div id="visualBootTitle" class="visual-title">INITIALIZING WEAVER</div>
+  <div class="visual-track" aria-hidden="true"><span id="visualBootFill"></span></div>
+  <div id="visualBootDetail" class="visual-detail">Preparing the reactive field…</div>
+</div>
 <section class="top" role="status" aria-live="polite" aria-atomic="false" aria-label="Weaver headless status">
   <div class="brand">
     <h1>WEAVER HEADLESS</h1>
@@ -214,6 +283,10 @@ const ui = {
   send: document.getElementById('send'),
   dream: document.getElementById('dream'),
   text: document.getElementById('text'),
+  visualBoot: document.getElementById('visualBoot'),
+  visualBootTitle: document.getElementById('visualBootTitle'),
+  visualBootFill: document.getElementById('visualBootFill'),
+  visualBootDetail: document.getElementById('visualBootDetail'),
 };
 function loadEphemeralBrainKey() {
   try {
@@ -258,6 +331,8 @@ const state = {
   particles: [],
   scene3d: null,
   visualMode: 'boot',
+  visualReady: false,
+  visualBootProgress: 0.08,
   pointerX: 0,
   pointerY: 0,
   targetPointerX: 0,
@@ -378,18 +453,45 @@ let audioCtx = null;
 let pollTimer = 0;
 let resizeRaf = 0;
 function key() {
-  if (!state.key) {
-    state.key = (prompt('Enter Weaver brain key for this tab:') || '').trim().slice(0, 512);
-    try {
-      if (state.key) sessionStorage.setItem('weaver_llm_key', state.key);
-    } catch (e) {}
-  }
+  return state.key;
+}
+function requestBrainKey() {
+  if (state.key) return state.key;
+  const entered = (prompt('Enter Weaver brain key for this tab, or cancel for visual-only mode:') || '').trim().slice(0, 512);
+  if (!entered) return '';
+  state.key = entered;
+  try { sessionStorage.setItem('weaver_llm_key', state.key); } catch (e) {}
   return state.key;
 }
 function headers(json = false) {
-  const h = { 'X-Weaver-Key': key() };
+  const brainKey = key();
+  if (!brainKey) {
+    const error = new Error('cortex locked');
+    error.code = 'WEAVER_CORTEX_LOCKED';
+    throw error;
+  }
+  const h = { 'X-Weaver-Key': brainKey };
   if (json) h['Content-Type'] = 'application/json';
   return h;
+}
+function setVisualBoot(progress, detail, ready = false) {
+  state.visualBootProgress = Math.max(state.visualBootProgress, Math.min(1, Number(progress) || 0));
+  if (ui.visualBootFill) ui.visualBootFill.style.width = `${Math.round(state.visualBootProgress * 100)}%`;
+  if (ui.visualBootDetail && detail) ui.visualBootDetail.textContent = detail;
+  if (!ready) {
+    if (ui.stamp.textContent === 'starting') ui.stamp.textContent = 'loading visual';
+    return;
+  }
+  state.visualReady = true;
+  state.visualBootProgress = 1;
+  if (ui.visualBootFill) ui.visualBootFill.style.width = '100%';
+  if (ui.visualBootTitle) ui.visualBootTitle.textContent = 'WEAVER IS READY';
+  if (ui.visualBoot) ui.visualBoot.classList.add('ready');
+  if (/^(starting|loading visual)$/.test(ui.stamp.textContent)) ui.stamp.textContent = 'visual ready';
+}
+function showCortexLocked() {
+  ui.brain.textContent = 'cortex locked · Wake to connect';
+  dot(ui.brainDot, '');
 }
 function compact(value, max = 280) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -571,7 +673,15 @@ async function replayPendingVoice() {
 }
 async function brainFetch(path, options = {}) {
   const r = await fetch(path, { ...options, headers: { ...headers(Boolean(options.body)), ...(options.headers || {}) } });
-  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  if (!r.ok) {
+    if (r.status === 403) {
+      state.key = '';
+      try { sessionStorage.removeItem('weaver_llm_key'); } catch (e) {}
+    }
+    const error = new Error(`${path} ${r.status}`);
+    error.status = r.status;
+    throw error;
+  }
   return r.json();
 }
 function updateRealtimeButton() {
@@ -773,8 +883,11 @@ async function startRealtimeVoice() {
     stopRealtimeVoice('live stopped');
     return;
   }
+  if (!requestBrainKey()) {
+    setRealtimeStatus('cortex locked · tap Wake to connect', '');
+    return;
+  }
   const runId = ++state.realtime.runId;
-  key();
   if (!navigator.mediaDevices?.getUserMedia) {
     setRealtimeStatus('mic unavailable', '');
     return;
@@ -875,16 +988,21 @@ function canUseWebGL() {
 }
 async function initReactiveField() {
   configurePerformance();
+  setVisualBoot(0.14, 'Checking graphics support…');
   if (state.reducedMotion || !canUseWebGL()) {
     initFallbackField();
     return;
   }
   state.visualMode = 'loading-3d';
+  setVisualBoot(0.28, 'Loading the quantum field…');
   try {
     const THREE = await import(THREE_MODULE_URL);
+    setVisualBoot(0.62, 'Building the cortex manifold…');
     createThreeField(THREE);
+    setVisualBoot(0.90, 'Calibrating responsive motion…');
     resize();
     startDraw();
+    setVisualBoot(1, 'Reactive field ready.', true);
   } catch (e) {
     state.visualMode = 'fallback-2d';
     state.lastVisualError = e.message || String(e);
@@ -896,6 +1014,7 @@ function initFallbackField() {
   state.visualMode = state.visualMode === 'fallback-2d' ? state.visualMode : '2d';
   resize();
   startDraw();
+  setVisualBoot(1, 'Efficient reactive field ready.', true);
 }
 function createLightningLine(THREE, color, radius) {
   const points = Array.from({ length: 14 }, () => new THREE.Vector3());
@@ -1785,6 +1904,10 @@ function draw(now = 0) {
   startDraw();
 }
 async function pollState() {
+  if (!key()) {
+    showCortexLocked();
+    return;
+  }
   try {
     const s = await brainFetch('/brain/state');
     state.lastState = s;
@@ -1810,6 +1933,10 @@ function schedulePoll(delay = document.hidden ? 20000 : 5000) {
   }, delay);
 }
 async function checkModels() {
+  if (!key()) {
+    showCortexLocked();
+    return;
+  }
   try {
     const m = await brainFetch('/brain/v1/models');
     const ids = (m.data || []).map(x => x.id);
@@ -2033,6 +2160,11 @@ async function speak(text, options = {}) {
 }
 async function chat(text) {
   ui.heard.textContent = compact(text, 260);
+  if (!requestBrainKey()) {
+    ui.said.textContent = 'Cortex locked. Wake Weaver to connect, or keep the visual field running offline.';
+    showCortexLocked();
+    return;
+  }
   ui.said.textContent = 'thinking';
   dot(ui.brainDot, 'busy');
   state.pulse = 0.85;
@@ -2068,6 +2200,11 @@ async function chat(text) {
   }
 }
 async function triggerDream() {
+  if (!requestBrainKey()) {
+    ui.lastDream.textContent = 'cortex locked · Wake to connect';
+    showCortexLocked();
+    return;
+  }
   dot(ui.dreamDot, 'busy');
   try {
     const r = await brainFetch('/brain/trigger/dream', {
@@ -2109,7 +2246,7 @@ ui.wake.addEventListener('click', async () => {
     pollState();
     return;
   }
-  key();
+  const hasCortex = Boolean(requestBrainKey());
   const ok = await unlockAudio();
   ui.wake.setAttribute('aria-pressed', ok ? 'true' : 'false');
   state.wakeSpoken = true;
@@ -2118,10 +2255,15 @@ ui.wake.addEventListener('click', async () => {
     pollState();
     return;
   }
-  voiceStatus('testing voice', 'busy');
-  speak(state.lastVoiceText || "I'm here.");
-  checkModels();
-  pollState();
+  if (hasCortex) {
+    voiceStatus('testing voice', 'busy');
+    speak(state.lastVoiceText || "I'm here.");
+    checkModels();
+    pollState();
+  } else {
+    voiceStatus(ok ? 'visual-only mode · audio ready' : 'visual-only mode', ok ? 'on' : '');
+    showCortexLocked();
+  }
   if (!ok && !canUseBrowserSpeech()) {
     voiceStatus('audio blocked', '');
   }
@@ -2160,6 +2302,9 @@ globalThis.__weaverHeadlessAudioAudit = () => ({
 });
 globalThis.__weaverHeadlessVisualAudit = () => ({
   mode: state.visualMode,
+  ready: state.visualReady,
+  bootProgress: state.visualBootProgress,
+  cortexLocked: !Boolean(key()),
   threeReady: Boolean(state.scene3d),
   fallback2d: Boolean(ctx),
   width: canvas.width,

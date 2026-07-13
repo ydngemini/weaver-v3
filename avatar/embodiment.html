@@ -31,7 +31,14 @@
     border: 1px solid rgba(230,184,74,0.25); border-radius: 14px;
     padding: 14px 18px; max-width: min(380px, calc(100vw - 36px));
   }
+  .hud-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .hud h1 { font-size: 14px; letter-spacing: 3px; color: var(--gold); font-weight: 600; }
+  #hud-toggle {
+    display: none; min-width: 44px; min-height: 44px; padding: 0 10px;
+    border: 1px solid rgba(230,184,74,0.32); border-radius: 8px;
+    background: #171922; color: #e8e6e0; font: 700 10px/1 system-ui, sans-serif;
+    letter-spacing: .08em; cursor: pointer; touch-action: manipulation;
+  }
   .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 12.5px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: #444; flex: none; }
   .dot.on { background: #37d67a; box-shadow: 0 0 8px #37d67a; }
@@ -49,7 +56,38 @@
   }
   #start {
     position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
-    background: rgba(5,6,10,0.82); backdrop-filter: blur(6px);
+    background: rgba(5,6,10,0.92);
+  }
+  .boot-panel {
+    width: min(330px, calc(100vw - 40px)); display: grid; justify-items: center; gap: 14px;
+    padding: 26px 24px 22px; border: 1px solid rgba(230,184,74,0.30); border-radius: 14px;
+    background: #101219; box-shadow: 0 24px 80px rgba(0,0,0,.42); text-align: center;
+  }
+  .boot-gem {
+    width: 42px; height: 42px; position: relative; transform: rotate(45deg);
+    background: linear-gradient(145deg, #ffe291 0 28%, #e6b84a 29% 64%, #8f6422 65%);
+    border: 1px solid rgba(255,239,187,.7); box-shadow: 0 0 30px rgba(230,184,74,.25);
+    animation: weaver-gem 1.8s ease-in-out infinite;
+  }
+  .boot-gem::after {
+    content: ""; position: absolute; inset: 8px; border: 1px solid rgba(38,26,8,.28);
+  }
+  .boot-title { color: #f1d17e; font: 700 12px/1.2 system-ui, sans-serif; letter-spacing: .18em; }
+  .boot-detail { min-height: 17px; color: #aeb3bf; font-size: 12px; line-height: 1.4; }
+  .boot-track {
+    width: 100%; height: 4px; overflow: hidden; border-radius: 2px; background: #272a32;
+  }
+  #boot-fill {
+    display: block; width: 4%; height: 100%; background: #e6b84a;
+    box-shadow: 0 0 14px rgba(230,184,74,.5); transition: width .22s ease-out;
+  }
+  #start:not(.ready) #wake { visibility: hidden; }
+  #start.ready .boot-gem { animation: none; transform: rotate(45deg) scale(.82); }
+  #start.ready .boot-title { color: #e8e6e0; }
+  #start.awake .boot-panel { display: none; }
+  @keyframes weaver-gem {
+    0%, 100% { transform: rotate(45deg) translateY(0) scale(.92); }
+    50% { transform: rotate(45deg) translate(-3px, -3px) scale(1); }
   }
   #start button {
     background: linear-gradient(135deg, #e6b84a, #b8842a); color: #14100a;
@@ -58,7 +96,7 @@
   }
   /* awake: the full-screen overlay collapses to a small SLEEP pill (top-right,
      clear of the HUD on the left and the camera bottom-right) */
-  #start.awake { inset: 18px 18px auto auto; background: transparent; backdrop-filter: none; }
+  #start.awake { inset: 18px 18px auto auto; display: block; background: transparent; }
   #start.awake button { font-size: 12px; padding: 10px 20px; opacity: .82; }
   button:focus-visible { outline: 3px solid #9ab6ff; outline-offset: 4px; }
   button[aria-busy="true"] { cursor: progress; opacity: .68; }
@@ -81,7 +119,14 @@
       background: rgba(12,14,20,0.88); backdrop-filter: none;
       contain: layout paint;
     }
+    .hud-head { min-height: 44px; }
     .hud h1 { font-size: 12px; letter-spacing: 2.4px; }
+    #hud-toggle { display: inline-grid; place-items: center; }
+    .hud.compact { width: auto; max-width: calc(100vw - 92px); padding: 4px 6px 4px 12px; }
+    .hud.compact .row,
+    .hud.compact .ops-line,
+    .hud.compact #heard,
+    .hud.compact #said { display: none; }
     .row { gap: 7px; margin-top: 6px; font-size: 12px; }
     #heard, #said { margin-top: 7px; font-size: 12px; line-height: 1.35; }
     #cam {
@@ -96,6 +141,7 @@
     }
     #start button { min-width: 56px; min-height: 56px; touch-action: manipulation; }
     #start.awake button { min-height: 44px; padding: 9px 16px; }
+    .boot-panel { width: min(310px, calc(100vw - 32px)); padding: 24px 20px 20px; }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
@@ -111,8 +157,11 @@
 </head>
 <body>
 <div id="stage" role="img" aria-label="Weaver standing in an interactive night penthouse"></div>
-<section class="hud" role="status" aria-live="polite" aria-atomic="false" aria-label="Weaver senses and conversation status">
-  <h1>WEAVER · EMBODIED</h1>
+<section id="hud" class="hud" role="status" aria-live="polite" aria-atomic="false" aria-label="Weaver senses and conversation status">
+  <div class="hud-head">
+    <h1>WEAVER · EMBODIED</h1>
+    <button id="hud-toggle" type="button" aria-controls="hud" aria-expanded="true">HIDE</button>
+  </div>
   <div class="row"><div id="d-see" class="dot" aria-hidden="true"></div><div>Vision <span id="s-see">off</span></div></div>
   <div class="row"><div id="d-hear" class="dot" aria-hidden="true"></div><div>Hearing <span id="s-hear">off</span></div></div>
   <div class="row"><div id="d-brain" class="dot" aria-hidden="true"></div><div>Brain <span id="s-brain">checking…</span></div></div>
@@ -125,7 +174,15 @@
 </section>
 <video id="cam" autoplay muted playsinline aria-label="Front camera preview"></video>
 <div id="facebox" aria-hidden="true"></div>
-<div id="start" role="group" aria-label="Weaver wake control"><button id="wake" type="button" aria-pressed="false" aria-busy="false">WAKE HER UP</button></div>
+<div id="start" role="group" aria-label="Weaver loading and wake control">
+  <div class="boot-panel" role="status" aria-live="polite" aria-atomic="true">
+    <div class="boot-gem" aria-hidden="true"></div>
+    <div id="boot-title" class="boot-title">BUILDING WEAVER'S WORLD</div>
+    <div class="boot-track" aria-hidden="true"><span id="boot-fill"></span></div>
+    <div id="boot-detail" class="boot-detail">Preparing the renderer…</div>
+    <button id="wake" type="button" aria-pressed="false" aria-busy="true" disabled>WAKE HER UP</button>
+  </div>
+</div>
 <div id="sr-status" class="sr-only" role="status" aria-live="assertive"></div>
 
 <script type="module">
@@ -137,6 +194,66 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const ASSETS = 'https://weaver-avatar-404870839825.s3.amazonaws.com';
 const AVATAR_ASSET = 'weaver_avatar_dress.glb';
 const HIFI_AVATAR_ASSET = 'weaver_avatar_dress_hifi.glb';
+const APARTMENT_ASSET = 'weaver_apartment.glb';
+const bootState = {
+  renderer: 0.18,
+  environment: 0,
+  avatar: 0,
+  environmentReady: false,
+  avatarReady: false,
+  failed: false,
+  startedAt: performance.now()
+};
+function updateBootUi(detail = '') {
+  const progress = Math.round(Math.min(1, 0.08 * bootState.renderer + 0.24 * bootState.environment + 0.68 * bootState.avatar) * 100);
+  const fill = document.getElementById('boot-fill');
+  const label = document.getElementById('boot-detail');
+  if (fill) fill.style.width = `${Math.max(4, progress)}%`;
+  if (label && detail) label.textContent = detail;
+}
+function reportBootProgress(channel, event, label) {
+  const total = Number(event?.total) || 0;
+  if (total > 0) bootState[channel] = Math.max(bootState[channel], Math.min(0.96, Number(event.loaded || 0) / total));
+  else bootState[channel] = Math.min(0.90, bootState[channel] + 0.025);
+  updateBootUi(label);
+}
+function maybeFinishBoot() {
+  if (!bootState.avatarReady || !bootState.environmentReady || bootState.failed) return;
+  const start = document.getElementById('start');
+  const wake = document.getElementById('wake');
+  const title = document.getElementById('boot-title');
+  bootState.renderer = 1;
+  bootState.environment = 1;
+  bootState.avatar = 1;
+  updateBootUi('Body, clothing, and penthouse are ready.');
+  if (title) title.textContent = 'WEAVER IS READY';
+  if (wake) {
+    wake.disabled = false;
+    wake.setAttribute('aria-busy', 'false');
+  }
+  start?.classList.add('ready');
+  document.getElementById('sr-status').textContent = 'Weaver finished loading and is ready to wake.';
+}
+function markBootReady(channel, detail) {
+  bootState[channel] = 1;
+  bootState[`${channel}Ready`] = true;
+  updateBootUi(detail);
+  maybeFinishBoot();
+}
+function markBootFailure(message) {
+  bootState.failed = true;
+  const start = document.getElementById('start');
+  const wake = document.getElementById('wake');
+  const title = document.getElementById('boot-title');
+  if (title) title.textContent = 'LOAD INTERRUPTED';
+  updateBootUi(message || 'The character asset could not be loaded.');
+  if (wake) {
+    wake.disabled = false;
+    wake.textContent = 'RETRY';
+    wake.setAttribute('aria-busy', 'false');
+  }
+  start?.classList.add('ready', 'failed');
+}
 const BRAINS = [
   { name: 'unified AWS cortex', models: '/brain/v1/models', chat: '/brain/v1/chat/completions', key: 'ask' },
 ];
@@ -163,12 +280,14 @@ try {
   localStorage.removeItem('weaver_llm_key');
 } catch (e) {}
 function brainKey() {
-  if (!ephemeralBrainKey) {
-    ephemeralBrainKey = (prompt('Enter her brain key for this tab:') || '').trim().slice(0, 512);
-    try {
-      if (ephemeralBrainKey) sessionStorage.setItem('weaver_llm_key', ephemeralBrainKey);
-    } catch (e) {}
-  }
+  return ephemeralBrainKey;
+}
+function requestBrainKey() {
+  if (ephemeralBrainKey) return ephemeralBrainKey;
+  const entered = (prompt('Enter her brain key for this tab, or cancel for visual-only mode:') || '').trim().slice(0, 512);
+  if (!entered) return '';
+  ephemeralBrainKey = entered;
+  try { sessionStorage.setItem('weaver_llm_key', ephemeralBrainKey); } catch (e) {}
   return ephemeralBrainKey;
 }
 const NEXUS = null;  // Nexus Bus is localhost-only on the box; optional transcript publish disabled on cloud.
@@ -782,7 +901,12 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: isiOS || remoteGpuState.wanted ? 'high-performance' : 'low-power',
   failIfMajorPerformanceCaveat: false,
   stencil: false,
-  alpha: true
+  // The optional remote GPU stream sits behind this canvas, so the context
+  // must remain alpha-capable when setRemoteGpuActive() clears to alpha zero.
+  alpha: true,
+  premultipliedAlpha: false,
+  preserveDrawingBuffer: false,
+  desynchronized: true
 });
 function detectWebglRenderer() {
   try {
@@ -806,6 +930,8 @@ recordOpsEvent('renderer-ready', {
   pixelScale: renderPerf.pixelScale,
   success: true
 });
+bootState.renderer = 1;
+updateBootUi('Loading penthouse and character assets…');
 const longTaskPressure = [];
 if ('PerformanceObserver' in globalThis) {
   try {
@@ -1435,7 +1561,7 @@ function enforceImportedLuxuryRules(root) {
   root.updateMatrixWorld(true);
 }
 
-new GLTFLoader().load(`${ASSETS}/weaver_apartment.glb`, (g) => {
+function initializeApartmentAsset(g) {
   g.scene.userData.remoteGpuEnvironment = true;
   enforceImportedLuxuryRules(g.scene);
   g.scene.traverse(o => {
@@ -1471,9 +1597,28 @@ new GLTFLoader().load(`${ASSETS}/weaver_apartment.glb`, (g) => {
   environmentState.error = '';
   applyWorldModelVisuals();
   applyRemoteEnvironmentVisibility();
-}, undefined, error => {
-  environmentState.error = error?.message || String(error || 'apartment asset failed');
-});
+  markBootReady('environment', 'Penthouse ready. Finishing Weaver…');
+}
+function loadApartmentAsset(candidates = [`./${APARTMENT_ASSET}`, `${ASSETS}/${APARTMENT_ASSET}`], index = 0) {
+  const url = candidates[index];
+  if (!url) {
+    environmentState.error = environmentState.error || 'apartment asset failed';
+    // The procedural lights, floor, skyline, and interaction map remain usable
+    // when both local and S3 apartment assets are unavailable.
+    markBootReady('environment', 'Penthouse fallback ready. Finishing Weaver…');
+    return;
+  }
+  new GLTFLoader().load(
+    url,
+    initializeApartmentAsset,
+    event => reportBootProgress('environment', event, 'Loading the penthouse…'),
+    error => {
+      environmentState.error = error?.message || String(error || 'apartment asset failed');
+      loadApartmentAsset(candidates, index + 1);
+    }
+  );
+}
+loadApartmentAsset();
 
 /* ── her ── */
 let mixer, headBone = null, neckBone = null, model = null;
@@ -1488,6 +1633,15 @@ const outfitState = {
   hairVolumeMeshes: 0,
   clothMeshes: 0,
   garmentLayers: 0,
+  garmentCoverage: {
+    seamless: false,
+    closedShells: 0,
+    hipRadius: 0,
+    hemRadius: 0,
+    frustumSafe: false,
+    doubleSided: false,
+    dynamicExpansion: 0
+  },
   fabricProfile: 'matte woven satin with rose-gold piping',
   skinProfile: 'texture-preserving physical skin with deterministic pore microdetail',
   eyeProfile: 'wet corneal clearcoat with bounded portrait catchlight response',
@@ -4056,12 +4210,21 @@ function styleAvatarWardrobe(root) {
         specularIntensity: 0.38,
         envMapIntensity: 0.46
       });
+  dressMat.side = THREE.DoubleSide;
+  dressMat.shadowSide = THREE.DoubleSide;
+  dressMat.depthTest = true;
+  dressMat.depthWrite = true;
+  dressMat.polygonOffset = true;
+  dressMat.polygonOffsetFactor = -0.35;
+  dressMat.polygonOffsetUnits = -0.35;
   root.traverse(o => {
     if (!o.isMesh) return;
+    if (o.isSkinnedMesh) o.frustumCulled = false;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     const materialName = mats.map(mat => mat?.name || '').join(' ');
     if (/DressGold|outfit_dress/i.test(`${o.name} ${materialName}`)) {
       o.material = dressMat;
+      o.frustumCulled = false;
       o.renderOrder = 2;
       outfitState.clothMeshes += 1;
       outfitState.styledMeshes.push(o.name || 'dress_mesh');
@@ -4155,22 +4318,30 @@ function buildTailoredGarmentLayer() {
   group.name = 'weaver_tailored_garment_layers';
 
   const skirtMaterial = wardrobeDressMaterial.clone();
-  skirtMaterial.name = `${wardrobeDressMaterial.name}LayeredSkirt`;
+  skirtMaterial.name = `${wardrobeDressMaterial.name}SeamlessOuterSkirt`;
   skirtMaterial.side = THREE.DoubleSide;
+  skirtMaterial.depthTest = true;
   skirtMaterial.depthWrite = true;
+  skirtMaterial.polygonOffset = true;
+  skirtMaterial.polygonOffsetFactor = -1;
+  skirtMaterial.polygonOffsetUnits = -1;
   const profile = [
-    new THREE.Vector2(0.205, 0.115),
-    new THREE.Vector2(0.211, 0.082),
-    new THREE.Vector2(0.222, 0.038),
-    new THREE.Vector2(0.234, -0.012),
-    new THREE.Vector2(0.246, -0.064),
-    new THREE.Vector2(0.259, -0.118),
-    new THREE.Vector2(0.273, -0.174),
-    new THREE.Vector2(0.286, -0.226),
-    new THREE.Vector2(0.296, -0.272),
-    new THREE.Vector2(0.301, -0.312),
+    // The narrow high waist overlaps the imported bodice. The curve then
+    // follows the hip before relaxing into an A-line hem, avoiding both the
+    // source mesh's side slit and a detached hoop-skirt silhouette.
+    new THREE.Vector2(0.185, 0.205),
+    new THREE.Vector2(0.195, 0.170),
+    new THREE.Vector2(0.215, 0.130),
+    new THREE.Vector2(0.238, 0.080),
+    new THREE.Vector2(0.258, 0.020),
+    new THREE.Vector2(0.268, -0.060),
+    new THREE.Vector2(0.278, -0.140),
+    new THREE.Vector2(0.289, -0.220),
+    new THREE.Vector2(0.300, -0.310),
+    new THREE.Vector2(0.307, -0.380),
   ];
-  const skirtGeometry = new THREE.LatheGeometry(profile, lowPowerDevice ? 48 : 72);
+  const radialSegments = QUALITY.name === 'performance' ? 48 : 72;
+  const skirtGeometry = new THREE.LatheGeometry(profile, radialSegments, 0, Math.PI * 2);
   const skirtPositions = skirtGeometry.attributes.position;
   for (let vertex = 0; vertex < skirtPositions.count; vertex++) {
     const x = skirtPositions.getX(vertex);
@@ -4178,21 +4349,37 @@ function buildTailoredGarmentLayer() {
     const z = skirtPositions.getZ(vertex);
     const radius = Math.max(0.001, Math.hypot(x, z));
     const theta = Math.atan2(z, x);
-    const hemWeight = smoothUnit((0.115 - y) / 0.427);
-    const pleat = Math.sin(theta * 12 + y * 4.4) * 0.0045 * hemWeight * hemWeight;
-    const panel = Math.sin(theta * 4 - 0.55) * 0.0018 * hemWeight;
+    const hemWeight = smoothUnit((0.205 - y) / 0.585);
+    const pleat = Math.sin(theta * 12 + y * 4.4) * 0.0040 * hemWeight * hemWeight;
+    const panel = Math.sin(theta * 4 - 0.55) * 0.0015 * hemWeight;
     const scale = (radius + pleat + panel) / radius;
     skirtPositions.setXYZ(vertex, x * scale, y, z * scale);
   }
   skirtPositions.needsUpdate = true;
   skirtGeometry.computeVertexNormals();
   const skirt = new THREE.Mesh(skirtGeometry, skirtMaterial);
-  skirt.name = 'weaver_woven_a_line_skirt';
-  skirt.scale.set(1.04, 1, 0.78);
+  skirt.name = 'weaver_seamless_woven_a_line_skirt';
+  skirt.scale.set(1.06, 1, 0.92);
   skirt.castShadow = Boolean(QUALITY.shadows);
   skirt.receiveShadow = false;
+  skirt.frustumCulled = false;
   skirt.renderOrder = 3;
   group.add(skirt);
+
+  // A dark inner shell removes view-through seams while preserving depth
+  // testing during hip rotation, walking, and low-angle mobile framing.
+  const liningMaterial = skirtMaterial.clone();
+  liningMaterial.name = 'WeaverSeamlessGarmentLining';
+  liningMaterial.side = THREE.BackSide;
+  liningMaterial.polygonOffsetFactor = 0.5;
+  liningMaterial.polygonOffsetUnits = 0.5;
+  liningMaterial.color?.multiplyScalar(0.72);
+  const lining = new THREE.Mesh(skirtGeometry.clone(), liningMaterial);
+  lining.name = 'weaver_closed_skirt_lining';
+  lining.scale.set(1.047, 0.998, 0.907);
+  lining.frustumCulled = false;
+  lining.renderOrder = 2;
+  group.add(lining);
 
   const pipingMaterial = new THREE.MeshStandardMaterial({
     name: 'WeaverRoseGoldPiping',
@@ -4201,27 +4388,38 @@ function buildTailoredGarmentLayer() {
     metalness: 0.12,
     envMapIntensity: 0.34,
   });
-  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.212, 0.004, 6, 56), pipingMaterial);
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.187, 0.004, 6, 64), pipingMaterial);
   belt.name = 'weaver_tailored_waist_piping';
   belt.rotation.x = Math.PI / 2;
-  belt.position.y = 0.092;
-  belt.scale.y = 0.78;
+  belt.position.y = 0.198;
+  belt.scale.set(1.06, 0.92, 1);
+  belt.frustumCulled = false;
   belt.renderOrder = 4;
   group.add(belt);
 
-  const hem = new THREE.Mesh(new THREE.TorusGeometry(0.301, 0.004, 6, 72), pipingMaterial);
+  const hem = new THREE.Mesh(new THREE.TorusGeometry(0.307, 0.004, 6, 72), pipingMaterial);
   hem.name = 'weaver_tailored_hem_piping';
   hem.rotation.x = Math.PI / 2;
-  hem.position.y = -0.312;
-  hem.scale.set(1.04, 0.78, 1.0);
+  hem.position.y = -0.380;
+  hem.scale.set(1.06, 0.92, 1.0);
+  hem.frustumCulled = false;
   hem.renderOrder = 4;
   group.add(hem);
 
   model.add(group);
   garmentLayer = group;
-  outfitState.garmentLayers = 3;
-  outfitState.clothMeshes += 3;
-  outfitState.styledMeshes.push(skirt.name, belt.name, hem.name);
+  outfitState.garmentLayers = 4;
+  outfitState.clothMeshes += 4;
+  outfitState.garmentCoverage = {
+    seamless: true,
+    closedShells: 2,
+    hipRadius: 0.284,
+    hemRadius: 0.325,
+    frustumSafe: true,
+    doubleSided: true,
+    dynamicExpansion: 0
+  };
+  outfitState.styledMeshes.push(skirt.name, lining.name, belt.name, hem.name);
   updateTailoredGarmentLayer();
 }
 
@@ -4243,12 +4441,28 @@ function updateTailoredGarmentLayer() {
     cinematicMotion.softTissue.garmentLag * 0.16,
     -0.055 * skeleton.current.hipShift - cinematicMotion.softTissue.pelvicMass * 0.42,
   );
-  const skirt = garmentLayer.children.find(child => child.name === 'weaver_woven_a_line_skirt');
+  const skirt = garmentLayer.children.find(child => child.name === 'weaver_seamless_woven_a_line_skirt');
+  const lining = garmentLayer.children.find(child => child.name === 'weaver_closed_skirt_lining');
+  const belt = garmentLayer.children.find(child => child.name === 'weaver_tailored_waist_piping');
+  const hem = garmentLayer.children.find(child => child.name === 'weaver_tailored_hem_piping');
+  // Give the cloth clearance before a raised/extended thigh reaches the shell.
+  // This is deliberately pose-driven rather than a permanent size increase,
+  // retaining the fitted neutral silhouette while preventing motion clipping.
+  const stride = Math.max(Math.abs(skeleton.current.leftStep), Math.abs(skeleton.current.rightStep));
+  const dynamicExpansion = Math.min(0.18, stride * 0.14 + Math.abs(skeleton.current.hipShift) * 0.06);
+  outfitState.garmentCoverage.dynamicExpansion = Number(dynamicExpansion.toFixed(3));
   if (skirt) {
     skirt.rotation.z = cinematicMotion.softTissue.garmentLag * 0.55;
-    skirt.scale.x = 1.04 + Math.abs(cinematicMotion.softTissue.garmentLag) * 0.08;
-    skirt.scale.z = 0.78 + Math.abs(cinematicMotion.softTissue.pelvicMass) * 0.10;
+    skirt.scale.x = 1.06 + dynamicExpansion + Math.abs(cinematicMotion.softTissue.garmentLag) * 0.05;
+    skirt.scale.z = 0.92 + dynamicExpansion * 0.20 + Math.abs(cinematicMotion.softTissue.pelvicMass) * 0.05;
   }
+  if (lining) {
+    lining.rotation.z = cinematicMotion.softTissue.garmentLag * 0.55;
+    lining.scale.x = 1.047 + dynamicExpansion * 0.985 + Math.abs(cinematicMotion.softTissue.garmentLag) * 0.046;
+    lining.scale.z = 0.907 + dynamicExpansion * 0.19 + Math.abs(cinematicMotion.softTissue.pelvicMass) * 0.046;
+  }
+  if (belt) belt.scale.x = 1.06 + dynamicExpansion * 0.34;
+  if (hem) hem.scale.x = 1.06 + dynamicExpansion * 0.92;
   garmentLayer.updateMatrixWorld(true);
 }
 
@@ -4525,19 +4739,21 @@ function initializeAvatarAsset(g, candidate) {
     mixer = new THREE.AnimationMixer(model);
     mixer.clipAction(idle).play();
   }
+  markBootReady('avatar', 'Weaver is dressed and ready.');
   setTimeout(() => startBodyAutonomy(), 4200);
 }
 function loadAvatarAsset(candidates = avatarAssetCandidates(), index = 0) {
   const candidate = candidates[index];
   if (!candidate) {
     highFidelityState.errors.push('avatar-load:all candidates failed');
+    markBootFailure('Her character asset could not load. Check the connection and retry.');
     return;
   }
   highFidelityState.attempts.push({ tier: candidate.tier, asset: candidate.asset, url: candidate.url });
   new GLTFLoader().load(
     candidate.url,
     gltf => initializeAvatarAsset(gltf, candidate),
-    undefined,
+    event => reportBootProgress('avatar', event, candidate.tier === 'hifi' ? 'Loading high-detail Weaver…' : 'Loading Weaver…'),
     error => {
       highFidelityState.errors.push(`${candidate.tier}:${candidate.asset}:${error?.message || 'load failed'}`);
       loadAvatarAsset(candidates, index + 1);
@@ -5307,9 +5523,15 @@ if (NEXUS) {
 }
 
 async function brainCheck() {
+  const key = brainKey();
+  if (!key) {
+    BRAIN = null;
+    set('d-brain', 's-brain', false, 'locked · visual-only mode');
+    return false;
+  }
   for (const b of BRAINS) {
     try {
-      const headers = b.key ? { 'X-Weaver-Key': brainKey() } : {};
+      const headers = b.key ? { 'X-Weaver-Key': key } : {};
       const r = await fetch(b.models, { headers, signal: AbortSignal.timeout(3500) });
       if (r.ok) {
         BRAIN = b;
@@ -6718,6 +6940,7 @@ async function wakeUp() {
     // here would suppress early microphone frames and could overwrite a fast
     // cortex response with a second trained-voice utterance.
     if (realtimeHearing.live || realtimeHearing.connecting || realtimeHearing.lastHeard) return;
+    if (!brainKey()) return;
     const greeting = hasLiveTrack($$('cam')?.srcObject, 'video')
       ? "Hey. I can see you now."
       : "Hey. I'm awake, but the camera is blocked.";
@@ -6736,14 +6959,30 @@ function goToSleep() {
   mediaState.tracks = [];
   set('d-brain', 's-brain', brainUp, 'standby');
 }
+const hudElement = $$('hud');
+const hudToggle = $$('hud-toggle');
+function setHudCompact(compact) {
+  hudElement?.classList.toggle('compact', compact);
+  if (hudToggle) {
+    hudToggle.textContent = compact ? 'DETAILS' : 'HIDE';
+    hudToggle.setAttribute('aria-expanded', compact ? 'false' : 'true');
+  }
+}
+hudToggle?.addEventListener('click', () => setHudCompact(!hudElement?.classList.contains('compact')));
 $$('wake').onclick = async () => {
   if (wakeBusy) return;
+  if (bootState.failed || !model) {
+    location.reload();
+    return;
+  }
   wakeBusy = true;
   $$('wake').setAttribute('aria-busy', 'true');
   try {
     if (!awake) {
+      requestBrainKey();
       awake = true;
       $$('start').classList.add('awake');
+      if (matchMedia('(max-width: 720px)').matches) setHudCompact(true);
       $$('wake').textContent = 'SLEEP';
       $$('wake').setAttribute('aria-pressed', 'true');
       $$('sr-status').textContent = 'Weaver is waking. Camera and microphone permission may be requested.';
@@ -6753,6 +6992,7 @@ $$('wake').onclick = async () => {
       awake = false;
       goToSleep();
       $$('start').classList.remove('awake');
+      setHudCompact(false);
       $$('wake').textContent = 'WAKE HER UP';
       $$('wake').setAttribute('aria-pressed', 'false');
       $$('sr-status').textContent = 'Weaver is asleep. Camera and microphone are off.';
