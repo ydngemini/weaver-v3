@@ -442,14 +442,26 @@ def _context_chunk(path: Path, max_chars: int, matches: list[dict] | None = None
         source_lines = _read_text(path, MATCH_READ_CHARS).splitlines()
         selected_lines: list[int] = []
         seen_lines: set[int] = set()
-        for match in matches:
-            line_index = max(0, int(match["line"]) - 1)
-            definition_lines = _definition_line_indexes(source_lines, line_index)
-            nearby_lines = range(
-                max(0, line_index - 1),
-                min(len(source_lines), line_index + 2),
-            )
-            for selected in definition_lines or nearby_lines:
+        definition_spans = [
+            span
+            for match in matches
+            if (span := _definition_line_indexes(
+                source_lines,
+                max(0, int(match["line"]) - 1),
+            ))
+        ]
+        if definition_spans:
+            line_groups = definition_spans
+        else:
+            line_groups = [
+                range(
+                    max(0, int(match["line"]) - 2),
+                    min(len(source_lines), int(match["line"]) + 1),
+                )
+                for match in matches
+            ]
+        for line_group in line_groups:
+            for selected in line_group:
                 if selected not in seen_lines:
                     seen_lines.add(selected)
                     selected_lines.append(selected)

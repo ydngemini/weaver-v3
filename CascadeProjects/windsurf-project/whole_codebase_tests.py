@@ -3489,6 +3489,10 @@ async def test_AO():
         "action = (",
         "artifact = (",
         "re.fullmatch(",
+    )) and all(marker not in definition_context for marker in (
+        "model-preface",
+        "coder-role",
+        "conversation-refusal",
     ))
 
     leaked_responses = (
