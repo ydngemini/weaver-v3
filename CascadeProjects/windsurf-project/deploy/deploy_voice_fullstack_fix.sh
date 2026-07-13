@@ -83,7 +83,10 @@ cleanup() {
   set +e
   rm -f /tmp/n8n_cred.json /tmp/webhook.json /tmp/brain.json /tmp/brain-code.json /tmp/synthcheck.bin /tmp/tts.headers \
     /tmp/public-synthcheck.bin /tmp/public-tts.headers /tmp/cognition-capsule.json \
-    /tmp/cognition-evaluate.json
+    /tmp/cognition-evaluate.json /tmp/n8n-webhook-request.json /tmp/headless-session.headers \
+    /tmp/headless-session.json /tmp/headless-root.headers /tmp/headless-asset.headers /tmp/headless-sw.headers \
+    /tmp/headless-unauth.headers /tmp/headless-unauth.json /tmp/headless.cookies \
+    /tmp/headless-state.json /tmp/headless-revoke.json
   sudo rm -f /tmp/existing-creds.json
   sudo docker exec -u root n8n rm -f /tmp/n8n_cred.json /tmp/existing-creds.json /tmp/wf.json >/dev/null 2>&1 || true
   if (( rc != 0 )) && [ -n "$DB_ROLLBACK" ] && sudo test -f "$DB_ROLLBACK"; then
@@ -115,13 +118,16 @@ cleanup() {
       done < "$BACKUP/new-files"
     fi
     sudo tar -xzf "$BACKUP/units.tgz" -C /etc/systemd/system || true
+    sudo install -m 0644 "$BACKUP/Caddyfile" /etc/caddy/Caddyfile || true
     sudo install -m 0755 "$APP/deploy/repair_n8n_weaver_webhook.py" /usr/local/sbin/repair_n8n_weaver_webhook.py || true
     sudo rm -rf /var/www/weaver /var/www/weaver-headless
     sudo tar -xzf "$BACKUP/web.tgz" -C /var/www || true
     sudo systemctl daemon-reload || true
+    sudo bash "$APP/deploy/validate_caddy.sh" /etc/default/caddy /etc/caddy/Caddyfile || true
+    sudo systemctl reload caddy || sudo systemctl restart caddy || true
   fi
   if (( rc != 0 && BACKUP_READY )); then
-    sudo systemctl restart n8n weaver-brain weaver-tts weaver || true
+    sudo systemctl restart weaver-llm weaver-brain weaver-tts weaver n8n || true
     N8N_STOPPED=0
   elif (( N8N_STOPPED )); then
     echo "cleanup: restarting n8n"
@@ -219,7 +225,8 @@ while IFS= read -r -d '' source; do
   fi
 done < <(find "$RELEASE" \( -type f -o -type l \) -print0)
 sudo tar -czf "$BACKUP/units.tgz" -C /etc/systemd/system \
-  n8n.service weaver.service weaver-brain.service weaver-tts.service
+  n8n.service weaver.service weaver-brain.service weaver-llm.service weaver-tts.service
+sudo cp -a /etc/caddy/Caddyfile "$BACKUP/Caddyfile"
 sudo tar -czf "$BACKUP/web.tgz" -C /var/www weaver weaver-headless
 BACKUP_READY=1
 
@@ -231,6 +238,37 @@ done < <(find "$RELEASE" -type f -print0)
 echo "  verified $(find "$RELEASE" -type f | wc -l) tracked files from $DEPLOY_SHA"
 
 node "$APP/scripts/validate_n8n_workflow.mjs" "$APP/n8n_weaver_v5.json"
+test -s "$APP/requirements-security.txt"
+
+# Security floors are forward-only infrastructure: a code/config rollback must
+# not reinstall a vulnerable library. Install before service migration so a
+# resolver/network failure leaves the currently running processes untouched.
+"$APP/venv/bin/python3" -m pip install --disable-pip-version-check \
+  --no-cache-dir --upgrade --upgrade-strategy only-if-needed \
+  --requirement "$APP/requirements-security.txt"
+"$APP/venv/bin/python3" -m pip check
+"$APP/venv/bin/python3" - <<'PY'
+from importlib.metadata import version
+from pathlib import Path
+
+requirements = Path(
+    "/home/ubuntu/weaver/CascadeProjects/windsurf-project/requirements-security.txt"
+)
+expected = {}
+for raw in requirements.read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    name, pinned = line.split("==", 1)
+    expected[name] = pinned
+actual = {name: version(name) for name in expected}
+assert actual == expected, {
+    name: (expected[name], actual.get(name))
+    for name in expected
+    if actual.get(name) != expected[name]
+}
+print("  Python runtime security floor:", len(expected), "exact packages")
+PY
 N8N_IMAGE="docker.n8n.io/n8nio/n8n:2.25.7@sha256:761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd"
 sudo docker pull --quiet "$N8N_IMAGE" >/dev/null
 # Pulling tag@digest guarantees content identity but does not necessarily create
@@ -249,12 +287,44 @@ fi
 sudo install -m 0644 "$APP/deploy/n8n.service" /etc/systemd/system/n8n.service
 sudo install -m 0644 "$APP/deploy/weaver.service" /etc/systemd/system/weaver.service
 sudo install -m 0644 "$APP/deploy/weaver-brain.service" /etc/systemd/system/weaver-brain.service
+sudo install -m 0644 "$APP/deploy/weaver-llm.service" /etc/systemd/system/weaver-llm.service
 sudo install -m 0644 "$APP/deploy/tts/weaver-tts.service" /etc/systemd/system/weaver-tts.service
+sudo install -m 0644 "$APP/deploy/Caddyfile" /etc/caddy/Caddyfile
 sudo install -m 0755 "$APP/deploy/repair_n8n_weaver_webhook.py" /usr/local/sbin/repair_n8n_weaver_webhook.py
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/embodiment.html" /var/www/weaver/index.html
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/embodiment.html" /var/www/weaver/embodiment.html
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/headless.html" /var/www/weaver-headless/index.html
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/headless.html" /var/www/weaver-headless/headless.html
+HEADLESS_ASSETS=(
+  headless/styles/tokens.css
+  headless/styles/shell.css
+  headless/js/core.js
+  headless/js/session.js
+  headless/js/voice-support.js
+  headless/js/visual-data.js
+  headless/js/visual-runtime.js
+  headless/js/voice.js
+  headless/js/visualization.js
+  headless/js/cortex.js
+  headless/js/state-channel.js
+  headless/js/lifecycle.js
+  headless/js/accessibility.js
+  headless/js/app.js
+)
+HEADLESS_ROOT_ASSETS=(
+  manifest.webmanifest
+  headless-sw.js
+)
+test -s "$DEPLOY_ROOT/avatar/headless-legacy.html" || { echo "missing headless rollback artifact" >&2; exit 1; }
+for asset in "${HEADLESS_ASSETS[@]}" "${HEADLESS_ROOT_ASSETS[@]}"; do
+  test -s "$DEPLOY_ROOT/avatar/$asset" || { echo "missing modular headless asset: $asset" >&2; exit 1; }
+done
+sudo rm -rf /var/www/weaver-headless/headless
+sudo install -d -m 0755 /var/www/weaver-headless/headless
+sudo cp -a "$DEPLOY_ROOT/avatar/headless/." /var/www/weaver-headless/headless/
+for asset in "${HEADLESS_ROOT_ASSETS[@]}"; do
+  sudo install -m 0644 "$DEPLOY_ROOT/avatar/$asset" "/var/www/weaver-headless/$asset"
+done
 for asset in \
   weaver_avatar_dress.glb \
   weaver_apartment.glb \
@@ -276,6 +346,13 @@ for root in /var/www/weaver /var/www/weaver-headless; do
   sudo cp -a "$DEPLOY_ROOT/avatar/vendor" "$root/vendor"
   sudo install -m 0644 "$DEPLOY_ROOT/avatar/weaver-logo.svg" "$root/weaver-logo.svg"
 done
+sudo systemd-analyze verify \
+  /etc/systemd/system/n8n.service \
+  /etc/systemd/system/weaver.service \
+  /etc/systemd/system/weaver-brain.service \
+  /etc/systemd/system/weaver-llm.service \
+  /etc/systemd/system/weaver-tts.service
+sudo bash "$APP/deploy/validate_caddy.sh" /etc/default/caddy /etc/caddy/Caddyfile
 sudo systemctl daemon-reload
 
 echo "── 2. verified pre-migration n8n backup ──"
@@ -288,12 +365,14 @@ DB_ROLLBACK=$(printf '%s\n' "$backup_output" | sed -n 's/^backup=//p' | tail -1)
 test -n "$DB_ROLLBACK" && sudo test -f "$DB_ROLLBACK"
 
 echo "── 3. restart runtime services ──"
+sudo systemctl restart weaver-llm
 sudo systemctl restart weaver-brain
 sudo systemctl restart weaver-tts
 sudo systemctl restart weaver
 sudo systemctl start n8n
 N8N_STOPPED=0
-wait_http "brain" http://127.0.0.1:8093/health 45
+sudo systemctl reload caddy || sudo systemctl restart caddy
+wait_http "brain liveness" http://127.0.0.1:8093/health/live 45
 wait_http "Nexus Bus" http://127.0.0.1:9998/health 60
 wait_http "live dashboard" http://127.0.0.1:9990/health 60
 wait_http "codebase API" http://127.0.0.1:8091/health 60
@@ -308,13 +387,58 @@ import json,sys
 data=json.load(sys.stdin)[0]
 host=data.get("HostConfig", {})
 env=set(data.get("Config", {}).get("Env", []))
+user=str(data.get("Config", {}).get("User") or "").strip().lower()
+assert host.get("Init") is True, host.get("Init")
 assert host.get("ReadonlyRootfs") is True, host
 assert "ALL" in (host.get("CapDrop") or []), host.get("CapDrop")
 assert "no-new-privileges:true" in (host.get("SecurityOpt") or []), host.get("SecurityOpt")
-assert "N8N_BLOCK_ENV_ACCESS_IN_NODE=true" in env, env
-assert "N8N_RUNNERS_ENABLED=true" in env, env
+assert host.get("PidsLimit") == 512, host.get("PidsLimit")
+assert host.get("Memory") == 2 * 1024**3, host.get("Memory")
+assert host.get("MemoryReservation") == 1536 * 1024**2, host.get("MemoryReservation")
+assert host.get("MemorySwap") == 2 * 1024**3, host.get("MemorySwap")
+assert host.get("NanoCpus") == 2_000_000_000, host.get("NanoCpus")
+assert host.get("NetworkMode") == "host", host.get("NetworkMode")
+assert user not in {"", "0", "root", "0:0"}, user
+tmpfs=host.get("Tmpfs") or {}
+for path in ("/tmp", "/home/node/.cache"):
+    flags=tmpfs.get(path, "")
+    assert all(flag in flags for flag in ("noexec", "nosuid", "nodev")), (path, flags)
+log=host.get("LogConfig") or {}
+assert log.get("Type") == "local", log
+assert log.get("Config", {}).get("max-size") == "10m", log
+assert log.get("Config", {}).get("max-file") == "3", log
+expected={
+    "N8N_RUNNERS_ENABLED=true",
+    "N8N_RUNNERS_MODE=internal",
+    "N8N_RUNNERS_BROKER_LISTEN_ADDRESS=127.0.0.1",
+    "N8N_RUNNERS_MAX_PAYLOAD=16777216",
+    "N8N_RUNNERS_TASK_TIMEOUT=120",
+    "N8N_BLOCK_RUNNER_ENV_ACCESS=true",
+    "N8N_BLOCK_ENV_ACCESS_IN_NODE=true",
+    "N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=true",
+    "N8N_COMMUNITY_PACKAGES_ENABLED=false",
+    "N8N_UNVERIFIED_PACKAGES_ENABLED=false",
+    "N8N_VERIFIED_PACKAGES_ENABLED=false",
+    "N8N_PYTHON_ENABLED=false",
+    "N8N_DISABLE_UI=true",
+    "N8N_PUBLIC_API_DISABLED=true",
+    "N8N_DIAGNOSTICS_ENABLED=false",
+    "N8N_PAYLOAD_SIZE_MAX=1",
+    "EXECUTIONS_TIMEOUT=115",
+    "EXECUTIONS_TIMEOUT_MAX=115",
+    "EXECUTIONS_DATA_SAVE_ON_ERROR=none",
+    "EXECUTIONS_DATA_SAVE_ON_SUCCESS=none",
+    "EXECUTIONS_DATA_SAVE_ON_PROGRESS=false",
+    "EXECUTIONS_DATA_PRUNE=true",
+    "EXECUTIONS_DATA_MAX_AGE=24",
+    "EXECUTIONS_DATA_PRUNE_MAX_COUNT=100",
+    "N8N_CONCURRENCY_PRODUCTION_LIMIT=4",
+    "N8N_GRACEFUL_SHUTDOWN_TIMEOUT=125",
+}
+missing=expected-env
+assert not missing, sorted(missing)
 assert data.get("Config", {}).get("Image") == "docker.n8n.io/n8nio/n8n:2.25.7@sha256:761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd", data.get("Config", {}).get("Image")
-print("  n8n container: pinned, read-only, capability-dropped, sandboxed")
+print("  n8n container: pinned, non-root, bounded, read-only, capability-dropped, sandboxed")
 '
 wait_http "local llama API" http://127.0.0.1:8090/v1/models 60
 curl -fsS -m 90 -X POST http://127.0.0.1:8090/v1/chat/completions \
@@ -418,10 +542,36 @@ NODE
 
 echo "── 6. webhook attempt and conditional self-heal ──"
 wait_n8n_workflow_ready 60
+DEPLOY_SHA="$DEPLOY_SHA" python3 - <<'PY'
+import json
+import os
+
+sha = os.environ["DEPLOY_SHA"]
+payload = {
+    "contract_version": "weaver-headless-n8n-v1",
+    "correlation_id": f"deploy-{sha[:40]}",
+    "deadline_ms": 115000,
+    "text": "Deploy connectivity test. Reply with one short sentence.",
+    "self_check": False,
+    "introspect": False,
+    "path_glob": "**/*",
+    "search_query": "",
+    "codebase_context": "",
+    "quantum_pathway": "",
+    "cognition_context": {
+        "awareness_confidence": 1.0,
+        "fabric_pressure": 0.0,
+        "immune_status": "nominal",
+        "open_components": [],
+    },
+}
+with open("/tmp/n8n-webhook-request.json", "w", encoding="utf-8") as stream:
+    json.dump(payload, stream, separators=(",", ":"), sort_keys=True)
+PY
 WEBHOOK_CODE=$(curl -sS -o /tmp/webhook.json -w '%{http_code}' -m 240 \
   -X POST http://127.0.0.1:5678/webhook/weaver-input \
   -H 'Content-Type: application/json' \
-  -d '{"text":"Deploy connectivity test. Reply with one short sentence."}') || WEBHOOK_CODE=000
+  --data-binary @/tmp/n8n-webhook-request.json) || WEBHOOK_CODE=000
 echo "  webhook attempt 1: HTTP $WEBHOOK_CODE"
 if [ "$WEBHOOK_CODE" != "200" ]; then
   [ "$WEBHOOK_CODE" = "404" ] || { head -c 500 /tmp/webhook.json 2>/dev/null || true; exit 1; }
@@ -437,37 +587,54 @@ if [ "$WEBHOOK_CODE" != "200" ]; then
   WEBHOOK_CODE=$(curl -sS -o /tmp/webhook.json -w '%{http_code}' -m 240 \
     -X POST http://127.0.0.1:5678/webhook/weaver-input \
     -H 'Content-Type: application/json' \
-    -d '{"text":"Deploy connectivity retest. Reply with one short sentence."}') || WEBHOOK_CODE=000
+    --data-binary @/tmp/n8n-webhook-request.json) || WEBHOOK_CODE=000
   echo "  webhook attempt 2: HTTP $WEBHOOK_CODE"
 fi
 [ "$WEBHOOK_CODE" = "200" ]
 python3 - <<'PY'
 import json
+from datetime import datetime
+
 data=json.load(open("/tmp/webhook.json", encoding="utf-8"))
+request=json.load(open("/tmp/n8n-webhook-request.json", encoding="utf-8"))
+expected={
+    "contract_version", "status", "error", "correlation_id",
+    "manifested_response", "speaker", "speaker_boundary_applied",
+    "speaker_model", "internal_draft_hidden", "reflection_applied",
+    "soul_voice_active", "codebase_grounded", "expert_parallel",
+    "expert_count", "experts_completed", "expert_errors",
+    "expert_fanout_elapsed_ms", "execution_id", "timestamp",
+    "pipeline_architecture", "pipeline_version",
+}
+assert set(data) == expected, sorted(set(data) ^ expected)
+assert data.get("contract_version") == "weaver-headless-n8n-v1", data
+assert data.get("status") == "ok" and data.get("error") is False, data
+assert data.get("correlation_id") == request["correlation_id"], data
 assert isinstance(data.get("manifested_response"), str) and data["manifested_response"].strip(), data
+assert data.get("speaker") == "weaver", data
 assert data.get("pipeline_version") == "v6-parallel-cognition", data
 assert data.get("pipeline_architecture") == "parallel-fanout-barrier", data
 assert data.get("expert_count") == 5, data
 assert data.get("experts_completed") == 5, data
+assert data.get("expert_errors") == 0, data
 assert data.get("expert_parallel") is True, data
-assert data.get("qwen3b_active") is True, data
-assert not data.get("lora_error"), data.get("lora_error")
-assert not data.get("qwen3b_error"), data.get("qwen3b_error")
-assert isinstance(data.get("lora_latency_ms"), (int, float)) and data["lora_latency_ms"] > 0, data
-assert isinstance(data.get("qwen3b_latency_ms"), (int, float)) and data["qwen3b_latency_ms"] > 0, data
-assert data.get("cognition_mesh_active") is True, data
-assert data.get("written_to_hub") is False, data
+assert isinstance(data.get("expert_fanout_elapsed_ms"), int), data
+assert 0 <= data["expert_fanout_elapsed_ms"] <= 115000, data
 assert data.get("speaker_boundary_applied") is True, data
 assert data.get("speaker_model") == "qwen.qwen3-235b-a22b-2507", data
 assert data.get("internal_draft_hidden") is True, data
-assert "original_input" not in data and "collapsed_response" not in data, data
+assert data.get("reflection_applied") is True, data
+assert isinstance(data.get("soul_voice_active"), bool), data
+assert data.get("codebase_grounded") is False, data
+assert isinstance(data.get("execution_id"), str) and data["execution_id"], data
+datetime.fromisoformat(data["timestamp"].replace("Z", "+00:00"))
 lower=data["manifested_response"].lower()
 for forbidden in ("multi-lobe", "logic lobe", "emotion lobe", "expert response", "codebase evidence", "quality reviewer"):
     assert forbidden not in lower, (forbidden, data["manifested_response"])
-print("  webhook: v6 parallel cognition; both local models executed; response=", data["manifested_response"][:180])
+print("  webhook: exact v1 contract; five private experts; Weaver-only response=", data["manifested_response"][:180])
 PY
 sudo systemctl restart weaver-brain
-wait_http "brain after n8n recovery" http://127.0.0.1:8093/health 45
+wait_http "brain after n8n recovery" http://127.0.0.1:8093/health/live 45
 
 echo "── 7. Nexus dashboard publish round trip ──"
 "$APP/venv/bin/python3" - <<'PY'
@@ -520,6 +687,94 @@ echo "── 8. brain and public-route verification ──"
 KEY=$(sudo sed -n 's/^WEAVER_LLM_KEY=//p' /etc/default/caddy | head -1)
 KEY=${KEY%\"}; KEY=${KEY#\"}; KEY=${KEY%\'}; KEY=${KEY#\'}
 test -n "$KEY"
+
+HEADLESS_CODE=$(curl --resolve headless.weaverv3.com:443:127.0.0.1 -sS \
+  -D /tmp/headless-unauth.headers -o /tmp/headless-unauth.json -w '%{http_code}' \
+  https://headless.weaverv3.com/brain/headless/v2/state \
+  -H 'X-Correlation-ID: deploy-edge-probe')
+[ "$HEADLESS_CODE" = "403" ]
+grep -qi '^content-type: application/json' /tmp/headless-unauth.headers
+grep -qi '^cache-control: no-store' /tmp/headless-unauth.headers
+grep -qi '^x-correlation-id: deploy-edge-probe' /tmp/headless-unauth.headers
+python3 - <<'PY'
+import json
+data=json.load(open("/tmp/headless-unauth.json", encoding="utf-8"))
+assert data == {"error": {
+    "code": "authentication-required",
+    "retryable": False,
+    "correlation_id": "deploy-edge-probe",
+}}, data
+print("  headless edge: v2 route reaches FastAPI authentication boundary")
+PY
+
+SESSION_CODE=$(curl --resolve headless.weaverv3.com:443:127.0.0.1 -sS \
+  -D /tmp/headless-session.headers -c /tmp/headless.cookies \
+  -o /tmp/headless-session.json -w '%{http_code}' \
+  -X POST https://headless.weaverv3.com/brain/headless/v2/session \
+  -H 'Origin: https://headless.weaverv3.com' \
+  -H "X-Weaver-Key: $KEY" \
+  -H 'X-Correlation-ID: deploy-session-probe')
+[ "$SESSION_CODE" = "200" ]
+grep -qi '^set-cookie: .*HttpOnly' /tmp/headless-session.headers
+grep -qi '^set-cookie: .*Secure' /tmp/headless-session.headers
+grep -qi '^set-cookie: .*SameSite=strict' /tmp/headless-session.headers
+CSRF=$(python3 - <<'PY'
+import json
+data=json.load(open("/tmp/headless-session.json", encoding="utf-8"))
+assert set(data) == {"schema_version", "csrf_token", "expires_at", "expires_in_seconds"}, data
+assert data["schema_version"] == 2, data
+assert 1 <= data["expires_in_seconds"] <= 3600, data
+assert len(data["csrf_token"]) >= 32, data
+print(data["csrf_token"])
+PY
+)
+curl --resolve headless.weaverv3.com:443:127.0.0.1 -fsS \
+  -b /tmp/headless.cookies \
+  https://headless.weaverv3.com/brain/headless/v2/state \
+  -o /tmp/headless-state.json
+python3 - <<'PY'
+import json
+data=json.load(open("/tmp/headless-state.json", encoding="utf-8"))
+assert data.get("schema_version") == 2, data
+assert isinstance(data.get("revision"), int) and data["revision"] > 0, data
+print("  headless session: HttpOnly cookie authenticated revision", data["revision"])
+PY
+curl --resolve headless.weaverv3.com:443:127.0.0.1 -fsS \
+  -b /tmp/headless.cookies \
+  -X DELETE https://headless.weaverv3.com/brain/headless/v2/session \
+  -H 'Origin: https://headless.weaverv3.com' \
+  -H "X-Weaver-CSRF: $CSRF" \
+  -o /tmp/headless-revoke.json
+python3 - <<'PY'
+import json
+data=json.load(open("/tmp/headless-revoke.json", encoding="utf-8"))
+assert data == {"revoked": True}, data
+print("  headless session: CSRF-protected revocation passed")
+PY
+unset CSRF
+
+curl --resolve headless.weaverv3.com:443:127.0.0.1 -fsS \
+  -D /tmp/headless-root.headers -o /dev/null \
+  https://headless.weaverv3.com/
+grep -qi '^strict-transport-security: max-age=31536000; includeSubDomains' /tmp/headless-root.headers
+grep -qi '^x-content-type-options: nosniff' /tmp/headless-root.headers
+grep -qi '^x-frame-options: DENY' /tmp/headless-root.headers
+grep -qi '^referrer-policy: no-referrer' /tmp/headless-root.headers
+grep -qi '^cross-origin-opener-policy: same-origin' /tmp/headless-root.headers
+grep -qi '^permissions-policy: .*camera=(self).*microphone=(self)' /tmp/headless-root.headers
+grep -qi '^content-security-policy: .*frame-ancestors '\''none'\''' /tmp/headless-root.headers
+grep -qi '^cache-control: no-store, max-age=0' /tmp/headless-root.headers
+curl --resolve headless.weaverv3.com:443:127.0.0.1 -fsS \
+  -D /tmp/headless-asset.headers -o /dev/null \
+  https://headless.weaverv3.com/vendor/three.module.js
+grep -qi '^cache-control: public, max-age=86400, stale-while-revalidate=604800' /tmp/headless-asset.headers
+curl --resolve headless.weaverv3.com:443:127.0.0.1 -fsS \
+  -D /tmp/headless-sw.headers -o /dev/null \
+  https://headless.weaverv3.com/headless-sw.js
+grep -qi '^cache-control: no-store, max-age=0' /tmp/headless-sw.headers
+grep -qi '^service-worker-allowed: /' /tmp/headless-sw.headers
+echo "  Caddy: security headers, no-store HTML/SW, and bounded asset caching verified"
+
 curl -fsS -m 240 -X POST http://127.0.0.1:8093/v1/chat/completions \
   -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
   -d '{"model":"weaver-one","max_tokens":160,"messages":[{"role":"user","content":"Can we have a normal conversation about music?"}]}' \
@@ -793,6 +1048,16 @@ for pair in "embodiment.html:weaverv3.com" "headless.html:headless.weaverv3.com"
   }
   echo "  $file == live ($local_md5)"
 done
+for asset in "${HEADLESS_ASSETS[@]}" "${HEADLESS_ROOT_ASSETS[@]}"; do
+  local_sha=$(sha256sum "$DEPLOY_ROOT/avatar/$asset" | cut -d' ' -f1)
+  live_sha=$(curl --resolve headless.weaverv3.com:443:127.0.0.1 -fsS --max-time 30 \
+    "https://headless.weaverv3.com/$asset" | sha256sum | cut -d' ' -f1)
+  [ "$live_sha" = "$local_sha" ] || {
+    echo "modular headless asset mismatch: $asset" >&2
+    exit 1
+  }
+done
+echo "  modular headless CSS/ES modules match deployed checksums; offline shell matches too"
 
 printf '%s\n' "$DEPLOY_SHA" > "$DEPLOY_ROOT/.weaver-deployed-sha"
 if (( DEGRADED )); then

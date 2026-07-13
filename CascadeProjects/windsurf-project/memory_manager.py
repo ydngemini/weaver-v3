@@ -31,6 +31,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 import numpy as np
+from memory_lifecycle import MemoryLifecycle
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -49,6 +50,8 @@ MEMORY_FILENAMES: dict[str, str] = {
     "discord_transcript": "weaver_discord_transcript.txt",
     "state_reconciliation": "weaver_state_reconciliation.jsonl",
     "lora_versions": "weaver_lora_versions.json",
+    "memory_index": "weaver_memory_index.json",
+    "memory_deletions": "weaver_memory_deletions.jsonl",
 }
 
 
@@ -174,6 +177,47 @@ def _line_count(path: Path) -> int:
         return 0
 
 
+def _remove_jsonl_memory(path: Path, memory_id: str) -> int:
+    if not path.exists():
+        return 0
+    kept: list[str] = []
+    removed = 0
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            item = None
+        if isinstance(item, dict) and item.get("memory_id") == memory_id:
+            removed += 1
+        else:
+            kept.append(line)
+    path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+    return removed
+
+
+def _remove_marked_lines(path: Path, memory_id: str) -> int:
+    if not path.exists():
+        return 0
+    marker = f"[{memory_id}]"
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    kept = [line for line in lines if marker not in line]
+    removed = len(lines) - len(kept)
+    path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+    return removed
+
+
+def _remove_dream_block(path: Path, memory_id: str) -> int:
+    if not path.exists():
+        return 0
+    marker = f"[{memory_id}]"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    blocks = text.split("\n\n---\n")
+    kept = [block for block in blocks if marker not in block]
+    removed = len(blocks) - len(kept)
+    path.write_text("\n\n---\n".join(kept), encoding="utf-8")
+    return removed
+
+
 def _text_vector(text: str, dim: int = 256) -> np.ndarray:
     vec = np.zeros(dim, dtype=np.float64)
     tokens = re.findall(r"[a-z0-9']+", text.lower())[:800]
@@ -248,13 +292,15 @@ class PeopleMemory:
         name = _redact_text(event.get("name", "unknown"), 120) or "unknown"
         appearance = _redact_text(event.get("appearance", ""), 500)
         notes = _redact_text(event.get("notes", ""), 800)
+        memory_id = _redact_text(event.get("memory_id", ""), 40)
 
         entry_parts = [f"**{name}**"]
         if appearance:
             entry_parts.append(f"- {appearance}")
         if notes:
             entry_parts.append(f"({notes})")
-        new_entry = f"- {' '.join(entry_parts)}"
+        marker = f"[{memory_id}] " if memory_id else ""
+        new_entry = f"- {marker}{' '.join(entry_parts)}"
 
         lines = self._content.splitlines()
         updated = False
@@ -318,12 +364,14 @@ class ConversationMemory:
         content = _redact_text(event.get("content", ""), 5000)
         timestamp = _redact_text(event.get("timestamp", _utc_iso()), 80)
         source = _redact_text(event.get("source", "main"), 80) or "main"
+        memory_id = _redact_text(event.get("memory_id", ""), 40)
         if not content:
             return
         path = self.transcript_for_source(source)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] {speaker.upper()}: {content}\n")
+            marker = f" [{memory_id}]" if memory_id else ""
+            f.write(f"[{timestamp}]{marker} {speaker.upper()}: {content}\n")
 
     def get_recent(self, source: str = "main", lines: int = 40) -> str:
         transcript = self.transcript_for_source(source)
@@ -401,6 +449,47 @@ class AkashicPersistence:
     async def write_text_lobe(self, lobe_id: str, text: str, meta: dict[str, Any] | None = None) -> None:
         await asyncio.to_thread(self.write_text_lobe_sync, lobe_id, text, meta)
 
+    def delete_memory_sync(self, memory_id: str) -> int:
+        """Remove latest vector lobes whose metadata points at a deleted memory."""
+
+        if not self.meta_path.exists():
+            return 0
+        try:
+            payload = json.loads(self.meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return 0
+        metadata = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        lobe_ids = [
+            lobe_id
+            for lobe_id, item in metadata.items()
+            if isinstance(item, dict) and item.get("memory_id") == memory_id
+        ]
+        if not lobe_ids:
+            return 0
+        arrays: dict[str, Any] = {}
+        if self.state_path.exists():
+            try:
+                with np.load(self.state_path) as existing:
+                    arrays = {
+                        name: existing[name]
+                        for name in existing.files
+                        if name not in lobe_ids
+                    }
+            except Exception:
+                arrays = {}
+        if arrays:
+            np.savez_compressed(self.state_path, **arrays)
+        elif self.state_path.exists():
+            self.state_path.unlink()
+        for lobe_id in lobe_ids:
+            metadata.pop(lobe_id, None)
+            if isinstance(payload.get("timestamps"), dict):
+                payload["timestamps"].pop(lobe_id, None)
+        payload["meta"] = metadata
+        payload["saved_at"] = datetime.now(timezone.utc).timestamp()
+        self.meta_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        return len(lobe_ids)
+
 
 class MemoryManager:
     """Unified interface for all Weaver memory systems."""
@@ -412,6 +501,10 @@ class MemoryManager:
         self.people = PeopleMemory(self.vault_dir)
         self.conversations = ConversationMemory(self.vault_dir)
         self.akashic = AkashicPersistence(self.vault_dir)
+        self.lifecycle = MemoryLifecycle(
+            self.paths["memory_index"],
+            self.paths["memory_deletions"],
+        )
 
     def _ensure_layout(self) -> None:
         self.vault_dir.mkdir(parents=True, exist_ok=True)
@@ -429,11 +522,18 @@ class MemoryManager:
             "discord_transcript",
             "state_reconciliation",
             "lora_versions",
+            "memory_index",
+            "memory_deletions",
         ):
             self.paths[key].parent.mkdir(parents=True, exist_ok=True)
             if key == "lora_versions" and not self.paths[key].exists():
                 self.paths[key].write_text(
                     json.dumps({"active_version": "", "versions": []}, indent=2),
+                    encoding="utf-8",
+                )
+            elif key == "memory_index" and not self.paths[key].exists():
+                self.paths[key].write_text(
+                    json.dumps({"version": 1, "records": {}}, indent=2),
                     encoding="utf-8",
                 )
             else:
@@ -464,6 +564,7 @@ class MemoryManager:
                 "thought": _redact_text(_tail_file(self.paths["thoughts"], 900), 900),
                 "browser": _redact_text(_tail_file(self.paths["browser"], 900), 900),
             },
+            "lifecycle": self.lifecycle.state(),
         }
 
     async def recall(self, context: str) -> Dict[str, Any]:
@@ -476,14 +577,18 @@ class MemoryManager:
     async def remember(self, event: Dict[str, Any]) -> None:
         event_type = str(event.get("type", "")).lower()
         if event_type == "person":
-            self.people.add(event)
-            self.append_event_sync(
+            receipt = self.append_event_sync(
                 "person",
                 f"{event.get('name', 'unknown')}: {event.get('appearance', '')} {event.get('notes', '')}",
                 source=event.get("source", "memory-manager"),
                 speaker=event.get("speaker", "system"),
                 meta=event,
             )
+            if receipt and not receipt.get("deduplicated"):
+                self.people.add({
+                    **event,
+                    "memory_id": receipt.get("memory_id", ""),
+                })
         elif event_type == "conversation":
             self.append_event_sync(
                 "conversation",
@@ -520,12 +625,40 @@ class MemoryManager:
         source = _redact_text(source or "brain", 80)
         speaker = _redact_text(speaker or "", 80)
         timestamp = _utc_iso()
+        raw_retention = (meta or {}).get("retention_days")
+        retention_days = (
+            int(raw_retention)
+            if isinstance(raw_retention, (int, float)) and not isinstance(raw_retention, bool)
+            else None
+        )
+        lifecycle = self.lifecycle.admit(
+            kind=kind,
+            content=content,
+            source=source,
+            speaker=speaker,
+            meta=meta,
+            retention_days=retention_days,
+        )
+        if lifecycle["deduplicated"]:
+            return {
+                "timestamp": timestamp,
+                "kind": kind,
+                "source": source,
+                "speaker": speaker,
+                "memory": lifecycle,
+                "deduplicated": True,
+            }
         event = {
             "timestamp": timestamp,
+            "memory_id": lifecycle["memory_id"],
             "kind": kind,
             "source": source,
             "speaker": speaker,
             "content": content,
+            "content_digest": lifecycle["content_digest"],
+            "provenance": lifecycle["provenance"],
+            "retention": lifecycle["retention"],
+            "deduplicated": False,
             "meta": _sanitize_payload(meta or {}),
         }
 
@@ -539,23 +672,31 @@ class MemoryManager:
                     "speaker": speaker or source,
                     "content": content,
                     "source": source,
+                    "memory_id": lifecycle["memory_id"],
                 }
             )
         elif kind == "thought":
             with open(self.paths["thoughts"], "a", encoding="utf-8") as f:
-                f.write(f"\n- [{timestamp}] ({source}) {content}\n")
+                f.write(
+                    f"\n- [{timestamp}] [{lifecycle['memory_id']}] ({source}) {content}\n"
+                )
         elif kind == "dream":
             with open(self.paths["dreams"], "a", encoding="utf-8") as f:
-                f.write(f"\n\n---\n### Headless Dream - {timestamp} ({source})\n{content}\n")
+                f.write(
+                    f"\n\n---\n### Headless Dream - {timestamp} "
+                    f"[{lifecycle['memory_id']}] ({source})\n{content}\n"
+                )
         elif kind == "browser_memory":
             with open(self.paths["browser"], "a", encoding="utf-8") as f:
                 f.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
         elif kind == "vision":
             with open(self.paths["vision"], "a", encoding="utf-8") as f:
-                f.write(f"\n- [{timestamp}] ({source}) {content}\n")
+                f.write(
+                    f"\n- [{timestamp}] [{lifecycle['memory_id']}] ({source}) {content}\n"
+                )
         elif kind == "quantum":
             with open(self.paths["quantum"], "a", encoding="utf-8") as f:
-                f.write(f"\n[{timestamp}] {content}\n")
+                f.write(f"\n[{timestamp}] [{lifecycle['memory_id']}] {content}\n")
 
         lobe_map = {
             "conversation": "aws_brain_conversation_memory",
@@ -586,6 +727,57 @@ class MemoryManager:
             speaker=speaker,
             meta=meta,
         )
+
+    def delete_memory_sync(self, memory_id: str, *, reason: str) -> dict[str, Any] | None:
+        """Delete one indexed memory from canonical and derived stores with an audit tombstone."""
+
+        receipt = self.lifecycle.delete_record(memory_id, reason=reason)
+        if receipt is None:
+            return None
+        removed = 0
+        storage_errors: list[str] = []
+        operations = (
+            ("events", lambda: _remove_jsonl_memory(self.paths["events"], memory_id)),
+            ("browser", lambda: _remove_jsonl_memory(self.paths["browser"], memory_id)),
+            ("people", lambda: _remove_marked_lines(self.paths["people"], memory_id)),
+            ("transcript", lambda: _remove_marked_lines(self.paths["transcript"], memory_id)),
+            ("phone", lambda: _remove_marked_lines(self.paths["phone_transcript"], memory_id)),
+            ("discord", lambda: _remove_marked_lines(self.paths["discord_transcript"], memory_id)),
+            ("thoughts", lambda: _remove_marked_lines(self.paths["thoughts"], memory_id)),
+            ("dreams", lambda: _remove_dream_block(self.paths["dreams"], memory_id)),
+            ("vision", lambda: _remove_marked_lines(self.paths["vision"], memory_id)),
+            ("quantum", lambda: _remove_marked_lines(self.paths["quantum"], memory_id)),
+        )
+        for label, operation in operations:
+            try:
+                removed += int(operation())
+            except OSError:
+                storage_errors.append(label)
+        try:
+            removed += self.akashic.delete_memory_sync(memory_id)
+        except OSError:
+            storage_errors.append("akashic")
+        self.people.refresh()
+        return {
+            **receipt,
+            "storage_records_removed": removed,
+            "storage_errors": storage_errors,
+        }
+
+    async def delete_memory(self, memory_id: str, *, reason: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(
+            self.delete_memory_sync,
+            memory_id,
+            reason=reason,
+        )
+
+    def expire_due_sync(self, *, limit: int = 32) -> list[dict[str, Any]]:
+        receipts: list[dict[str, Any]] = []
+        for memory_id in self.lifecycle.due_memory_ids()[: max(1, min(int(limit), 128))]:
+            receipt = self.delete_memory_sync(memory_id, reason="retention-expired")
+            if receipt is not None:
+                receipts.append(receipt)
+        return receipts
 
     def build_context(self, query: str = "", max_chars: int = 7200) -> str:
         parts: list[str] = []

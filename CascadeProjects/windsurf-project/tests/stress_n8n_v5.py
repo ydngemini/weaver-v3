@@ -7,17 +7,17 @@ stress_n8n_v5.py — Weaver n8n v6 Parallel Cognition Stress Test
   N1   Port Pre-Flight          — n8n :5678, LoRA :8899, Nexus :9999
   N2   Schema Invariants        — offline: workflow JSON field guards (no n8n)
   N3   Fracture Math            — offline: SMOOTHING, PHI, interference formula
-  N4   Input Sanitization       — empty, HTML, oversized, null-byte inputs
+  N4   Input Contract Gate      — valid text accepted; malformed text rejected
   N5   DLQ Routing              — empty → error gate → DLQ (no OpenAI needed)
-  N6   Fracture Routing         — 5 pure-dimension inputs → correct dominant_lobe
+  N6   Routing Privacy          — private fracture routing never reaches clients
   N7   Expert Coverage          — all 5 parallel lobe branches complete
-  N8   Collapse Geometry        — bounded qubit layout metadata
+  N8   Collapse Privacy         — private geometry never reaches clients
   N9   Pipeline Metadata        — v6 parallel cognition contract
   N10  Self-Check Privacy       — internal self metadata is not leaked
   N11  Grounding Privacy        — source evidence is used but not echoed
   N12  Concurrent Burst         — 5 parallel requests, all succeed
   N13  DLQ Privacy Envelope     — metadata returned without raw input/files
-  N14  LoRA Soul Voice          — soul_voice_active or lora_error set (not both null)
+  N14  LoRA Privacy             — aggregate activity only; raw errors stay private
   N15  Throughput               — 5 sequential requests, P50/P99 under cap
 
 Usage:
@@ -35,6 +35,7 @@ import socket
 import sys
 import time
 from datetime import datetime
+from itertools import count
 from typing import Any, Dict, List, Optional, Tuple
 
 import urllib.request
@@ -58,6 +59,21 @@ BAR  = "─" * 66
 BAR2 = "═" * 66
 DIMS = ["logic", "emotion", "memory", "creativity", "vigilance"]
 PHI  = 2 * math.pi / 5
+CONTRACT_VERSION = "weaver-headless-n8n-v1"
+_CORRELATION_SEQUENCE = count(1)
+PUBLIC_SUCCESS_FIELDS = {
+    "contract_version", "status", "error", "correlation_id",
+    "manifested_response", "speaker", "speaker_boundary_applied",
+    "speaker_model", "internal_draft_hidden", "reflection_applied",
+    "soul_voice_active", "codebase_grounded", "expert_parallel",
+    "expert_count", "experts_completed", "expert_errors",
+    "expert_fanout_elapsed_ms", "execution_id", "timestamp",
+    "pipeline_architecture", "pipeline_version",
+}
+PUBLIC_REJECTION_FIELDS = {
+    "contract_version", "status", "error", "error_code", "correlation_id",
+    "execution_id", "timestamp", "pipeline_version",
+}
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
@@ -86,6 +102,30 @@ def _port_open(port: int, host: str = "localhost", timeout: float = 1.5) -> bool
     s.close()
     return ok
 
+
+def _contract_payload(payload: Dict) -> Dict:
+    """Fill the exact authenticated brain→n8n v1 envelope for live tests."""
+    envelope = {
+        "contract_version": CONTRACT_VERSION,
+        "correlation_id": f"req-stress-{next(_CORRELATION_SEQUENCE)}",
+        "deadline_ms": 115_000,
+        "text": "",
+        "self_check": False,
+        "introspect": False,
+        "path_glob": "**/*",
+        "search_query": "",
+        "codebase_context": "",
+        "quantum_pathway": "",
+        "cognition_context": {
+            "awareness_confidence": 0.75,
+            "fabric_pressure": 0.1,
+            "immune_status": "nominal",
+            "open_components": [],
+        },
+    }
+    envelope.update(payload)
+    return envelope
+
 def _n8n_url() -> Optional[str]:
     """Return the active webhook URL (prod preferred) or None if n8n is down."""
     if not _port_open(N8N_PORT):
@@ -94,7 +134,7 @@ def _n8n_url() -> Optional[str]:
     try:
         req = urllib.request.Request(
             WEBHOOK_PROD,
-            data=json.dumps({"text": ""}).encode(),
+            data=json.dumps(_contract_payload({"text": ""})).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         try:
             resp = urllib.request.urlopen(req, timeout=10)
@@ -109,7 +149,7 @@ def _n8n_url() -> Optional[str]:
     try:
         req = urllib.request.Request(
             WEBHOOK_TEST,
-            data=json.dumps({"text": ""}).encode(),
+            data=json.dumps(_contract_payload({"text": ""})).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         try:
             resp = urllib.request.urlopen(req, timeout=10)
@@ -123,7 +163,7 @@ def _n8n_url() -> Optional[str]:
     return None
 
 def _post(url: str, payload: Dict, timeout: int = 90) -> Tuple[Optional[int], Any]:
-    data = json.dumps(payload).encode()
+    data = json.dumps(_contract_payload(payload)).encode()
     req = urllib.request.Request(
         url, data=data,
         headers={"Content-Type": "application/json"},
@@ -272,18 +312,27 @@ def test_N2() -> bool:
         if marker not in lora_body:
             failures.append(f"LoRA prompt missing guard: {marker!r}")
 
-    # 5. Writeback exposes the v6 contract without private intermediates.
+    # 5. Exact request/public-response boundaries contain private intermediates.
+    sanitize_code = nodes.get("2. Sanitize", {}).get("parameters", {}).get("jsCode", "")
+    for field in [CONTRACT_VERSION, "keys.length === ALLOWED.length",
+                  "body.deadline_ms === 115000", "body.correlation_id === correlation",
+                  "cognitionKeys.length === COGNITION_ALLOWED.length"]:
+        if field not in sanitize_code:
+            failures.append(f"Sanitize contract gate missing: {field!r}")
     wb_code = nodes.get("9. Writeback", {}).get("parameters", {}).get("jsCode", "")
-    for field in ["pipeline_version", "v6-parallel-cognition", "parallel-fanout-barrier", "qubit_layout",
-                  "soul_binding", "smoothing_factor", "quantum_bias_applied",
-                  "cognition_mesh_active", "expert_parallel", "execution_id"]:
+    for field in [CONTRACT_VERSION, "pipeline_version", "v6-parallel-cognition",
+                  "parallel-fanout-barrier", "status: 'ok'", "status: 'rejected'",
+                  "speaker: 'weaver'", "manifested_response: reviewed",
+                  "expert_parallel", "execution_id"]:
         if field not in wb_code:
             failures.append(f"Writeback missing: {field!r}")
-    for private_field in ["original_input:", "collapsed_response:"]:
+    for private_field in ["...d", "original_input:", "collapsed_response:",
+                          "lora_error:", "qwen3b_error:", "qwen3b_route:",
+                          "dominant_lobe:", "experts_activated:", "qubit_layout:"]:
         if private_field in wb_code:
             failures.append(f"Writeback leaks private field: {private_field!r}")
-    if "written_to_hub: false" not in wb_code:
-        failures.append("Writeback must not claim a hub write it did not perform")
+    if "internal_draft_hidden: true" not in wb_code or "speaker_boundary_applied: true" not in wb_code:
+        failures.append("Writeback must fail closed behind the Weaver speaker boundary")
 
     # 6. Expert lobes are parallel, bounded, and fail soft.
     for lobe in ["5a. Logic", "5b. Emotion", "5c. Memory", "5d. Creativity", "5e. Vigilance"]:
@@ -425,18 +474,18 @@ def test_N3() -> bool:
 # N4 — Input Sanitization (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N4(url: str) -> bool:
-    _header("4", "Input Sanitization — adversarial text accepted without echo")
+    _header("4", "Input Contract Gate — valid text accepted, malformed text rejected")
     failures = []
 
     cases = [
-        ("html_strip", {"text": "<b>Hello</b> <script>alert(1)</script> world"}),
-        ("null_bytes", {"text": "Hello\x00\x01\x02 world"}),
-        ("ctrl_chars", {"text": "Hello\x0b\x0c\x1f world"}),
-        ("oversized", {"text": "x" * 6000}),
-        ("normal", {"text": "Tell me about quantum entanglement"}),
+        ("html_as_text", {"text": "Explain why HTML tags must be treated as text."}, True),
+        ("null_bytes", {"text": "Hello\x00\x01\x02 world"}, False),
+        ("ctrl_chars", {"text": "Hello\x0b\x0c\x1f world"}, False),
+        ("oversized", {"text": "x" * 6000}, False),
+        ("normal", {"text": "Tell me about quantum entanglement"}, True),
     ]
 
-    for label, payload in cases:
+    for label, payload, expect_success in cases:
         t0 = time.monotonic()
         code, body = _full_post(url, payload, timeout=120)
         lat = (time.monotonic() - t0) * 1000
@@ -444,17 +493,28 @@ def test_N4(url: str) -> bool:
             failures.append(f"{label}: connection error — {body}")
             continue
         r = body if isinstance(body, dict) else {}
-        private_absent = "raw_input" not in r and "original_input" not in r and "collapsed_response" not in r
-        if code != 200 or not r.get("manifested_response") or not private_absent:
-            failures.append(f"{label}: sanitization check failed (code={code}, r={str(r)[:120]})")
+        private_absent = all(
+            field not in r
+            for field in ("raw_input", "original_input", "collapsed_response", "codebase_context")
+        )
+        outcome_ok = (
+            r.get("status") == "ok" and bool(r.get("manifested_response"))
+            if expect_success
+            else r.get("status") == "rejected"
+            and r.get("error_code") == "invalid-request"
+            and "manifested_response" not in r
+        )
+        expected_fields = PUBLIC_SUCCESS_FIELDS if expect_success else PUBLIC_REJECTION_FIELDS
+        if code != 200 or not outcome_ok or not private_absent or set(r) != expected_fields:
+            failures.append(f"{label}: contract gate check failed (code={code}, r={str(r)[:160]})")
         else:
-            print(f"  ✓ {label:<15} {lat:6.0f}ms  code={code}", flush=True)
+            print(f"  ✓ {label:<15} {lat:6.0f}ms  status={r.get('status')}", flush=True)
 
     passed = len(failures) == 0
     detail = f"  Cases tested: {len(cases)}\n  Failures: {len(failures)}"
     if failures:
         detail += "\n" + "\n".join(f"  ✗ {f}" for f in failures)
-    _result("4", "Input Sanitization", passed, detail)
+    _result("4", "Input Contract Gate", passed, detail)
     return passed
 
 
@@ -466,17 +526,22 @@ def test_N5(url: str) -> bool:
     code, body = _full_post(url, {"text": ""}, timeout=15)
     r = body if isinstance(body, dict) else {}
 
-    has_error     = bool(r.get("error"))
-    has_message   = bool(r.get("message") or r.get("msg"))
-    dlq_logged    = bool(r.get("dlq_logged"))
-    has_exec_id   = bool(r.get("execution_id"))
-
-    passed = has_error and (has_message or dlq_logged)
+    has_error = r.get("error") is True
+    has_exec_id = bool(r.get("execution_id"))
+    passed = (
+        code == 200
+        and set(r) == PUBLIC_REJECTION_FIELDS
+        and r.get("status") == "rejected"
+        and r.get("error_code") == "invalid-request"
+        and has_error
+        and has_exec_id
+        and "manifested_response" not in r
+    )
     detail = "\n".join([
         f"  HTTP code:     {code}",
         f"  error flag:    {has_error}  (expected True)",
-        f"  message:       {bool(has_message)}",
-        f"  dlq_logged:    {dlq_logged}",
+        f"  status:        {r.get('status')}",
+        f"  error_code:    {r.get('error_code')}",
         f"  execution_id:  {has_exec_id}",
         f"  body snippet:  {str(r)[:200]}",
     ])
@@ -488,7 +553,7 @@ def test_N5(url: str) -> bool:
 # N6 — Fracture Routing (online, needs full pipeline)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N6(url: str) -> bool:
-    _header("6", "Fracture Routing — 5 pure-dimension inputs → correct dominant_lobe")
+    _header("6", "Routing Privacy — private fracture state never reaches clients")
     routing_cases = [
         ("logic",
          "because therefore step plan calculate structure reason analyze define prove"),
@@ -503,31 +568,31 @@ def test_N6(url: str) -> bool:
     ]
 
     failures = []
-    weight_failures = []
     for expected, text in routing_cases:
         t0 = time.monotonic()
         code, body = _full_post(url, {"text": text}, timeout=120)
         lat = (time.monotonic() - t0) * 1000
         r = body if isinstance(body, dict) else {}
-        dominant = r.get("dominant_lobe")
-        if dominant != expected:
-            failures.append(f"expected {expected!r}, got {dominant!r}")
-        # All weights > 0 (SMOOTHING floor)
-        for k in range(1, 6):
-            w = r.get(f"w_{k}")
-            if w is not None and w <= 0:
-                weight_failures.append(f"{expected}: w_{k}={w} <= 0")
-        print(f"  {'✓' if dominant == expected else '✗'} {expected:<12} "
-              f"→ dominant={dominant!r}  {lat:6.0f}ms  code={code}", flush=True)
+        private_routing = {"dominant_lobe", "experts_activated", "interference", "gain"}
+        private_routing.update({f"w_{index}" for index in range(1, 6)})
+        ok = (
+            code == 200
+            and r.get("status") == "ok"
+            and set(r) == PUBLIC_SUCCESS_FIELDS
+            and not private_routing.intersection(r)
+        )
+        if not ok:
+            failures.append(f"{expected}: public contract leaked or failed ({str(r)[:120]})")
+        print(f"  {'✓' if ok else '✗'} {expected:<12} private route contained  {lat:6.0f}ms", flush=True)
 
-    passed = len(failures) == 0 and len(weight_failures) == 0
+    passed = len(failures) == 0
     detail = "\n".join([
         f"  Cases tested:     {len(routing_cases)}",
-        f"  Routing failures: {len(failures)}",
-        f"  Weight<=0 hits:   {len(weight_failures)}  (SMOOTHING floor check)",
-        *(f"  ✗ {f}" for f in failures + weight_failures),
+        f"  Privacy failures: {len(failures)}",
+        "  Fracture math remains covered offline by N3",
+        *(f"  ✗ {f}" for f in failures),
     ])
-    _result("6", "Fracture Routing", passed, detail)
+    _result("6", "Routing Privacy", passed, detail)
     return passed
 
 
@@ -565,38 +630,32 @@ def test_N7(url: str) -> bool:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# N8 — Collapse Geometry (online)
+# N8 — Collapse Privacy (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N8(url: str) -> bool:
-    _header("8", "Collapse Geometry — bounded qubit layout metadata")
+    _header("8", "Collapse Privacy — private geometry never reaches clients")
     code, body = _full_post(url, {"text": "Walk me through the soul-binding algorithm step by step."}, timeout=120)
     r = body if isinstance(body, dict) else {}
 
-    layout = r.get("qubit_layout") or {}
-    expected_layout = {
-        "q0": "Awakening/Logic", "q1": "Resonance/Emotion", "q2": "Echo/Memory",
-        "q3": "Prophet/Creativity", "q4": "Fracture/Vigilance", "q5": "Weaver", "q6": "Void",
+    private_geometry = {
+        "qubit_layout", "interference", "interference_type", "gain",
+        "collapsed_response", "synthesis_prompt", "quantum_pathway",
+        "quantum_bias_applied", "soul_binding", "smoothing_factor",
     }
-    label_hits = {key: layout.get(key) == value for key, value in expected_layout.items()}
-    interference  = r.get("interference")
-    iface_type    = r.get("interference_type", "")
-    gain          = r.get("gain")
-
-    all_labels    = all(label_hits.values())
-    iface_valid   = isinstance(interference, (int, float))
-    iface_type_ok = iface_type in ("constructive", "destructive")
-    gain_valid    = isinstance(gain, (int, float)) and gain > 0
-
-    passed = all_labels and iface_valid and iface_type_ok and gain_valid and "collapsed_response" not in r
+    leaked = sorted(private_geometry.intersection(r))
+    passed = (
+        code == 200
+        and r.get("status") == "ok"
+        and set(r) == PUBLIC_SUCCESS_FIELDS
+        and not leaked
+    )
     detail = "\n".join([
         f"  HTTP code:          {code}",
-        *(f"  {'✓' if ok else '✗'} {lbl}" for lbl, ok in label_hits.items()),
-        f"  interference:       {interference}  valid={iface_valid}",
-        f"  interference_type:  {iface_type!r}  valid={iface_type_ok}",
-        f"  gain:               {gain}  valid={gain_valid}",
-        f"  private collapse echoed: {'collapsed_response' in r}",
+        f"  Public status:      {r.get('status')}",
+        f"  Private fields:     {leaked or 'none'}",
+        "  Geometry remains covered offline by N2/N3",
     ])
-    _result("8", "Collapse Geometry", passed, detail)
+    _result("8", "Collapse Privacy", passed, detail)
     return passed
 
 
@@ -609,30 +668,31 @@ def test_N9(url: str) -> bool:
     r = body if isinstance(body, dict) else {}
 
     checks = {
+        "headless contract version is exact":
+            r.get("contract_version") == CONTRACT_VERSION,
+        "success discriminator is exact":
+            r.get("status") == "ok" and r.get("error") is False,
         "pipeline_version == v6-parallel-cognition":
             r.get("pipeline_version") == "v6-parallel-cognition",
         "pipeline architecture is parallel fanout/barrier":
             r.get("pipeline_architecture") == "parallel-fanout-barrier",
-        "soul_binding == non-binary CRX/CRZ pentagon-geometry":
-            r.get("soul_binding") == "non-binary CRX/CRZ pentagon-geometry",
-        "smoothing_factor == 0.1":
-            r.get("smoothing_factor") == 0.1,
-        "qubit_layout has q0..q6":
-            all(f"q{i}" in (r.get("qubit_layout") or {}) for i in range(7)),
+        "Weaver is the sole reviewed public speaker":
+            r.get("speaker") == "weaver"
+            and r.get("speaker_boundary_applied") is True
+            and r.get("internal_draft_hidden") is True,
         "expert_count == 5":
             r.get("expert_count") == 5,
         "expert fanout completed in parallel":
             r.get("expert_parallel") is True and r.get("experts_completed") == 5,
-        "truthful response-only writeback":
-            r.get("written_to_hub") is False and r.get("writeback_mode") == "response-metadata-only",
-        "cognition mesh is active":
-            r.get("cognition_mesh_active") is True,
         "execution_id present":
             bool(r.get("execution_id")),
         "private intermediates absent":
-            all(field not in r for field in ("original_input", "raw_input", "collapsed_response", "mcp_context")),
-        "quantum_bias_applied is bool":
-            isinstance(r.get("quantum_bias_applied"), bool),
+            all(field not in r for field in (
+                "original_input", "raw_input", "collapsed_response", "mcp_context",
+                "lora_error", "qwen3b_error", "qwen3b_route", "dominant_lobe",
+            )),
+        "response has exactly the public fields":
+            set(r) == PUBLIC_SUCCESS_FIELDS,
     }
 
     failures = [desc for desc, ok in checks.items() if not ok]
@@ -657,8 +717,11 @@ def test_N10(url: str) -> bool:
 
     passed = (
         code == 200
+        and r.get("contract_version") == CONTRACT_VERSION
+        and r.get("speaker") == "weaver"
         and bool(r.get("manifested_response"))
         and r.get("pipeline_version") == "v6-parallel-cognition"
+        and set(r) == PUBLIC_SUCCESS_FIELDS
         and "self_meta" not in r
     )
     detail  = "\n".join([
@@ -687,14 +750,15 @@ def test_N11(url: str) -> bool:
     passed = (
         code == 200
         and r.get("codebase_grounded") is True
-        and r.get("codebase_context_chars") == len(evidence)
+        and set(r) == PUBLIC_SUCCESS_FIELDS
         and "repo_meta" not in r
         and "codebase_context" not in r
+        and evidence not in json.dumps(r)
     )
     detail  = "\n".join([
         f"  HTTP code:   {code}",
         f"  grounded:    {r.get('codebase_grounded')}",
-        f"  evidence chars: {r.get('codebase_context_chars')}",
+        f"  evidence echoed: {evidence in json.dumps(r)}",
         f"  repo_meta leaked: {'repo_meta' in r}",
     ])
     _result("11", "Grounding Privacy", passed, detail)
@@ -712,7 +776,12 @@ async def _async_post(url: str, payload: Dict, timeout: int) -> Tuple[float, boo
         code, body = await loop.run_in_executor(None, lambda: _full_post(url, payload, timeout))
         lat = (time.monotonic() - t0) * 1000
         r   = body if isinstance(body, dict) else {}
-        ok  = code is not None and 200 <= code < 500 and bool(r.get("manifested_response") or r.get("dominant_lobe"))
+        ok = (
+            code == 200
+            and r.get("status") == "ok"
+            and bool(r.get("manifested_response"))
+            and set(r) == PUBLIC_SUCCESS_FIELDS
+        )
         return lat, ok, None
     except Exception as exc:
         return (time.monotonic() - t0) * 1000, False, str(exc)
@@ -752,21 +821,22 @@ def test_N13(url: str) -> bool:
     _header("13", "DLQ Privacy Envelope — metadata without raw input or file path")
     code, body = _full_post(url, {"text": "", "codebase_context": "private-source"}, timeout=15)
     r = body if isinstance(body, dict) else {}
-    event = r.get("dlq_event") or {}
     passed = (
         code == 200
+        and set(r) == PUBLIC_REJECTION_FIELDS
+        and r.get("status") == "rejected"
         and r.get("error") is True
-        and bool(event.get("execution_id"))
-        and event.get("stage") == "input-validation"
-        and event.get("error") is True
+        and r.get("error_code") == "invalid-request"
+        and bool(r.get("execution_id"))
+        and "manifested_response" not in r
         and all(field not in r for field in ("raw_input", "original_input", "codebase_context", "dlq_path"))
     )
 
     detail = "\n".join([
         f"  HTTP code:          {code}",
         f"  Error envelope:     {r.get('error')}",
-        f"  Event stage:        {event.get('stage')}",
-        f"  Execution id:       {bool(event.get('execution_id'))}",
+        f"  Error code:         {r.get('error_code')}",
+        f"  Execution id:       {bool(r.get('execution_id'))}",
         f"  Private fields:     {[field for field in ('raw_input', 'original_input', 'codebase_context', 'dlq_path') if field in r] or 'none'}",
     ])
     _result("13", "DLQ Privacy Envelope", passed, detail)
@@ -774,41 +844,34 @@ def test_N13(url: str) -> bool:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# N14 — LoRA Soul Voice (online)
+# N14 — LoRA Privacy (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N14(url: str) -> bool:
-    _header("14", "LoRA Soul Voice — soul_voice_active or lora_error set (not both null)")
+    _header("14", "LoRA Privacy — aggregate activity only; raw details stay private")
     lora_up = _port_open(LORA_PORT)
     code, body = _full_post(url, {"text": "Speak from the probability field."}, timeout=120)
     r   = body if isinstance(body, dict) else {}
 
-    sva = r.get("soul_voice_active")      # True if LoRA responded
-    ler = r.get("lora_error")             # set if LoRA failed
-    lla = r.get("lora_latency_ms")        # ms if LoRA responded
-
-    # Pass if pipeline handled LoRA: either responded (sva=True) or set lora_error gracefully.
-    # Port-open check tells us the Python LoRA server is up, but n8n might get ECONNREFUSED
-    # if network binding differs (IPv4-only LoRA vs n8n resolver). Either way the pipeline
-    # must have set one of the two fields — that's what we're testing.
-    handled = isinstance(sva, bool) and "lora_error" in r
-    passed = code == 200 and handled
+    sva = r.get("soul_voice_active")
+    private_lora = {"lora_error", "lora_latency_ms", "lora_response", "lora_model"}
+    leaked = sorted(private_lora.intersection(r))
+    handled = isinstance(sva, bool)
+    passed = code == 200 and handled and set(r) == PUBLIC_SUCCESS_FIELDS and not leaked
 
     if lora_up and passed:
         status = "LoRA UP — soul_voice_active=True" if sva else "LoRA UP — error handled gracefully"
     elif lora_up:
-        status = "LoRA UP — neither soul_voice_active nor lora_error set"
+        status = "LoRA UP — aggregate activity flag missing"
     else:
         status = "LoRA DOWN — expecting graceful fallback"
 
     detail = "\n".join([
         f"  LoRA server up:      {lora_up}  ({status})",
         f"  soul_voice_active:   {sva}",
-        f"  lora_error:          {ler}",
-        f"  lora_latency_ms:     {lla}",
-        f"  private LoRA text echoed: {'lora_response' in r}",
+        f"  private LoRA fields: {leaked or 'none'}",
         f"  handled by pipeline: {handled}",
     ])
-    _result("14", "LoRA Soul Voice", passed, detail)
+    _result("14", "LoRA Privacy", passed, detail)
     return passed
 
 
@@ -832,12 +895,16 @@ def test_N15(url: str) -> bool:
         code, body = _full_post(url, {"text": text}, timeout=120)
         lat  = (time.monotonic() - t0) * 1000
         r    = body if isinstance(body, dict) else {}
-        ok   = code is not None and 200 <= code < 500 and bool(r.get("dominant_lobe"))
+        ok = (
+            code == 200
+            and r.get("status") == "ok"
+            and bool(r.get("manifested_response"))
+            and set(r) == PUBLIC_SUCCESS_FIELDS
+        )
         lats.append(lat)
         ok_list.append(ok)
         print(f"  #{i}  {lat:6.0f}ms  code={code}  ok={ok}  "
-              f"dominant={r.get('dominant_lobe')}  "
-              f"interf={r.get('interference_type', '?')}", flush=True)
+              f"experts={r.get('experts_completed')}/5", flush=True)
 
     lats_sorted = sorted(lats)
     p50   = lats_sorted[len(lats_sorted) // 2]
@@ -865,17 +932,17 @@ ALL_TESTS = {
     "N1":  ("Port Pre-Flight",         None),           # always runs, online check
     "N2":  ("Schema Invariants",       None),           # offline
     "N3":  ("Fracture Math",           None),           # offline
-    "N4":  ("Input Sanitization",      test_N4),        # online
+    "N4":  ("Input Contract Gate",     test_N4),        # online
     "N5":  ("DLQ Routing",             test_N5),        # online (fast)
-    "N6":  ("Fracture Routing",        test_N6),        # online (full pipeline)
+    "N6":  ("Routing Privacy",         test_N6),        # online (full pipeline)
     "N7":  ("Parallel Expert Coverage", test_N7),       # online (full pipeline)
-    "N8":  ("Collapse Metadata",       test_N8),        # online (full pipeline)
+    "N8":  ("Collapse Privacy",        test_N8),        # online (full pipeline)
     "N9":  ("v6 Pipeline Metadata",    test_N9),        # online (full pipeline)
     "N10": ("Self-Check Privacy",      test_N10),       # online (full pipeline)
     "N11": ("Grounding Privacy",       test_N11),       # online (full pipeline)
     "N12": ("Concurrent Burst",        test_N12),       # online (full pipeline)
     "N13": ("DLQ Privacy Envelope",    test_N13),       # online (fast)
-    "N14": ("LoRA Soul Voice",         test_N14),       # online (full pipeline)
+    "N14": ("LoRA Privacy",            test_N14),       # online (full pipeline)
     "N15": ("Throughput",              test_N15),       # online (full pipeline)
 }
 

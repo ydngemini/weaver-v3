@@ -1,6 +1,8 @@
 [Unit]
 Description=Weaver TTS (trained OpenVoice clone, Polly fallback, 127.0.0.1:8092)
 After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 User=ubuntu
@@ -16,13 +18,42 @@ Environment=TTS_AWS_REGION=us-east-1
 Environment=TTS_POLLY_ENGINE=generative
 Environment=TTS_POLLY_VOICE=Ruth
 Environment=TTS_POLLY_OUTPUT_FORMAT=mp3
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/home/ubuntu/tts/venv/bin/python /home/ubuntu/tts/tts_server.py
 Restart=on-failure
 RestartSec=10
+TimeoutStartSec=120
+KillSignal=SIGTERM
+TimeoutStopSec=60
 # 2-vCPU box shared with the LLM — keep this service polite
 CPUWeight=60
+CPUQuota=200%
 MemoryHigh=3200M
 MemoryMax=3600M
+OOMPolicy=stop
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=32768
+TasksMax=512
 
 [Install]
 WantedBy=multi-user.target

@@ -32,8 +32,60 @@
 # Ports 80 + 443 must be open in the Security Group (already done by Terraform) —
 # nothing else to open, AWS Ubuntu AMIs ship with no default iptables REJECT.
 
+(weaver_security_headers) {
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		X-Permitted-Cross-Domain-Policies "none"
+		Cross-Origin-Opener-Policy "same-origin"
+		Permissions-Policy "camera=(self), microphone=(self), accelerometer=(self), gyroscope=(self), magnetometer=(self), geolocation=(), payment=(), usb=(), serial=(), browsing-topics=()"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://weaver-avatar-404870839825.s3.amazonaws.com; media-src 'self' blob:; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; connect-src 'self' wss://weaverv3.com wss://headless.weaverv3.com https://weaver-avatar-404870839825.s3.amazonaws.com"
+	}
+}
+
+(weaver_static_cache) {
+	@entry path / /index.html /embodiment.html /headless.html /headless-sw.js /manifest.webmanifest
+	header @entry >Cache-Control "no-store, max-age=0"
+	@serviceworker path /headless-sw.js
+	header @serviceworker >Service-Worker-Allowed "/"
+	@assets {
+		path /headless/* /vendor/* /textures/* /*.js /*.mjs /*.css /*.svg /*.png /*.jpg /*.jpeg /*.webp /*.glb /*.wasm
+		not path /headless-sw.js
+	}
+	header @assets >Cache-Control "public, max-age=86400, stale-while-revalidate=604800"
+}
+
+(weaver_brain_proxy) {
+	reverse_proxy 127.0.0.1:8093 {
+		stream_timeout 15m
+		stream_close_delay 5m
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 130s
+			max_response_header 64KiB
+		}
+	}
+}
+
+(weaver_realtime_proxy) {
+	reverse_proxy 127.0.0.1:8093 {
+		stream_timeout 15m
+		stream_close_delay 5m
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 30s
+			max_response_header 64KiB
+		}
+	}
+}
+
 weaverv3.com {
 	encode zstd gzip
+	import weaver_security_headers
+	import weaver_static_cache
 
 	handle_path /llm/* {
 		@denied {
@@ -42,14 +94,30 @@ weaverv3.com {
 			}
 		}
 		respond @denied 403
-		reverse_proxy 127.0.0.1:8090
+		header >Cache-Control "no-store"
+		reverse_proxy 127.0.0.1:8090 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 130s
+				max_response_header 64KiB
+			}
+		}
 	}
 
 	# Native browser WebSockets cannot attach X-Weaver-Key. The realtime voice
 	# endpoint authenticates its WebSocket subprotocol token inside bedrock_brain_api.py.
 	handle /brain/realtime/* {
 		uri strip_prefix /brain
-		reverse_proxy 127.0.0.1:8093
+		header >Cache-Control "no-store"
+		import weaver_realtime_proxy
+	}
+
+	# Browser sessions are authenticated and CSRF-checked by FastAPI. Keeping
+	# the legacy edge key gate here would block the HttpOnly-cookie flow.
+	handle /brain/headless/v2/* {
+		uri strip_prefix /brain
+		header >Cache-Control "no-store"
+		import weaver_brain_proxy
 	}
 
 	# unified AWS Bedrock cortex: weaver-one coordinates speed, dream, code,
@@ -61,7 +129,8 @@ weaverv3.com {
 			}
 		}
 		respond @bdenied 403
-		reverse_proxy 127.0.0.1:8093
+		header >Cache-Control "no-store"
+		import weaver_brain_proxy
 	}
 
 	# read-only source-code context for Weaver's self-inspection. Same key gate as /llm.
@@ -72,7 +141,14 @@ weaverv3.com {
 			}
 		}
 		respond @cdenied 403
-		reverse_proxy 127.0.0.1:8091
+		header >Cache-Control "no-store"
+		reverse_proxy 127.0.0.1:8091 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+				max_response_header 64KiB
+			}
+		}
 	}
 
 	# her voice — AWS Polly generative TTS behind the local tts_server.py
@@ -84,13 +160,21 @@ weaverv3.com {
 			}
 		}
 		respond @tdenied 403
-		reverse_proxy 127.0.0.1:8092
+		header >Cache-Control "no-store"
+		reverse_proxy 127.0.0.1:8092 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 240s
+				max_response_header 64KiB
+			}
+		}
 	}
 
 	# heavy remote GPU splat renderer. This is visual-only and intentionally not
 	# key-gated so <img src="/gpu-render/stream.mjpg"> can render without custom
 	# headers; if the pod is down the page falls back to the local lite scene.
 	handle_path /gpu-render/* {
+		header >Cache-Control "no-store"
 		reverse_proxy https://arl906d9mi8tpd-8888.proxy.runpod.net {
 			header_up Host arl906d9mi8tpd-8888.proxy.runpod.net
 		}
@@ -104,10 +188,19 @@ weaverv3.com {
 
 headless.weaverv3.com {
 	encode zstd gzip
+	import weaver_security_headers
+	import weaver_static_cache
 
 	handle /brain/realtime/* {
 		uri strip_prefix /brain
-		reverse_proxy 127.0.0.1:8093
+		header >Cache-Control "no-store"
+		import weaver_realtime_proxy
+	}
+
+	handle /brain/headless/v2/* {
+		uri strip_prefix /brain
+		header >Cache-Control "no-store"
+		import weaver_brain_proxy
 	}
 
 	handle_path /brain/* {
@@ -117,7 +210,8 @@ headless.weaverv3.com {
 			}
 		}
 		respond @hbdenied 403
-		reverse_proxy 127.0.0.1:8093
+		header >Cache-Control "no-store"
+		import weaver_brain_proxy
 	}
 
 	handle_path /tts/* {
@@ -127,7 +221,14 @@ headless.weaverv3.com {
 			}
 		}
 		respond @htdenied 403
-		reverse_proxy 127.0.0.1:8092
+		header >Cache-Control "no-store"
+		reverse_proxy 127.0.0.1:8092 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 240s
+				max_response_header 64KiB
+			}
+		}
 	}
 
 	handle_path /codebase/* {
@@ -137,7 +238,14 @@ headless.weaverv3.com {
 			}
 		}
 		respond @hcdenied 403
-		reverse_proxy 127.0.0.1:8091
+		header >Cache-Control "no-store"
+		reverse_proxy 127.0.0.1:8091 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+				max_response_header 64KiB
+			}
+		}
 	}
 
 	handle {
@@ -147,6 +255,9 @@ headless.weaverv3.com {
 }
 
 dash.weaverv3.com {
+	encode zstd gzip
+	import weaver_security_headers
+	header >Cache-Control "no-store"
 	basic_auth {
 		ydnop {$WEAVER_DASH_HASH}
 	}
@@ -154,6 +265,9 @@ dash.weaverv3.com {
 }
 
 status.weaverv3.com {
+	encode zstd gzip
+	import weaver_security_headers
+	header >Cache-Control "no-store"
 	basic_auth {
 		ydnop {$WEAVER_DASH_HASH}
 	}

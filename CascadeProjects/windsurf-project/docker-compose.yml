@@ -16,6 +16,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: weaver-core
+    init: true
     env_file: .env
     environment:
       - WEAVER_INTERNAL_HOST=0.0.0.0
@@ -23,6 +24,7 @@ services:
       - LORA_API_URL=http://localhost:8899/v1/chat/completions
       - QUANTUM_BIAS_URL=http://localhost:9997/quantum/bias
       - N8N_WEBHOOK_URL=http://n8n:5678/webhook/weaver-input
+      - PYTHONDONTWRITEBYTECODE=1
     networks:
       default:
         aliases:
@@ -48,17 +50,30 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 8G
-        reservations:
-          memory: 2G
-
+    stop_grace_period: 60s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 1024
+    mem_limit: 8g
+    mem_reservation: 2g
+    cpus: 4.0
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
   # ── n8n Workflow Engine ────────────────────────────────────
   n8n:
     image: docker.n8n.io/n8nio/n8n:2.25.7@sha256:761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd
     container_name: weaver-n8n
+    init: true
+    user: "1000:1000"
     environment:
       - N8N_HOST=0.0.0.0
       - N8N_LISTEN_ADDRESS=0.0.0.0
@@ -67,14 +82,44 @@ services:
       - N8N_RUNNERS_BROKER_PORT=5680
       - N8N_RUNNERS_ENABLED=true
       - N8N_RUNNERS_MODE=internal
+      - N8N_RUNNERS_BROKER_LISTEN_ADDRESS=127.0.0.1
       - N8N_RUNNERS_MAX_CONCURRENCY=5
+      - N8N_RUNNERS_MAX_PAYLOAD=16777216
+      - N8N_RUNNERS_MAX_OLD_SPACE_SIZE=512
       - N8N_RUNNERS_TASK_TIMEOUT=120
       - N8N_RUNNERS_TASK_REQUEST_TIMEOUT=30
+      - N8N_RUNNERS_HEARTBEAT_INTERVAL=30
       - N8N_RUNNERS_INSECURE_MODE=false
+      - N8N_BLOCK_RUNNER_ENV_ACCESS=true
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
       - N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=true
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_COMMUNITY_PACKAGES_ENABLED=false
+      - N8N_UNVERIFIED_PACKAGES_ENABLED=false
+      - N8N_VERIFIED_PACKAGES_ENABLED=false
+      - N8N_PYTHON_ENABLED=false
+      - N8N_DISABLE_UI=true
+      - N8N_TEMPLATES_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_HIRING_BANNER_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - N8N_PUBLIC_API_DISABLED=true
+      - N8N_PUBLIC_API_SWAGGERUI_DISABLED=true
       - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PAYLOAD_SIZE_MAX=1
+      - N8N_FORMDATA_FILE_SIZE_MAX=1
+      - N8N_METRICS=false
+      - EXECUTIONS_TIMEOUT=115
+      - EXECUTIONS_TIMEOUT_MAX=115
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=none
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=none
+      - EXECUTIONS_DATA_SAVE_ON_PROGRESS=false
+      - EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=false
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=24
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=100
+      - N8N_CONCURRENCY_PRODUCTION_LIMIT=4
+      - N8N_GRACEFUL_SHUTDOWN_TIMEOUT=125
       - N8N_SECURE_COOKIE=false
       - GENERIC_TIMEZONE=America/New_York
     extra_hosts:
@@ -95,21 +140,51 @@ services:
     mem_limit: 2g
     memswap_limit: 2g
     cpus: 2.0
+    mem_reservation: 1536m
+    stop_grace_period: 130s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5678/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
     restart: unless-stopped
 
   # ── ngrok Tunnel (Twilio webhook) ──────────────────────────
   ngrok:
-    image: ngrok/ngrok:latest
+    image: ngrok/ngrok:latest@sha256:14d80d083e5b53145f416bbbd36238336c9de4016c43fd950eb2eb845670583b
     container_name: weaver-ngrok
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
     command: http weaver:8765
     ports:
-      - "4040:4040"     # ngrok dashboard
+      - "127.0.0.1:4040:4040"  # ngrok dashboard stays loopback-only
     depends_on:
       weaver:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: "2"
     profiles:
       - tunnel
 

@@ -2,6 +2,8 @@
 Description=Weaver AWS Bedrock brain router and headless cognition loop
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -12,6 +14,12 @@ EnvironmentFile=-/etc/default/caddy
 EnvironmentFile=-/etc/default/weaver-brain-mantle
 Environment=AWS_REGION=us-east-1
 Environment=WEAVER_HEADLESS_ACTIVE=1
+Environment=WEAVER_HEADLESS_V2_STATE=1
+Environment=WEAVER_HEADLESS_V2_STREAM=1
+Environment=WEAVER_HEADLESS_V2_SESSION=1
+Environment=WEAVER_HEADLESS_V2_SUMMARIES=1
+Environment=WEAVER_HEADLESS_V2_UI=1
+Environment=WEAVER_HEADLESS_V2_PROGRESS=1
 Environment=WEAVER_DEFAULT_BRAIN_ALIAS=weaver-one
 Environment=WEAVER_VAULT_DIR=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault
 Environment=WEAVER_N8N_WEBHOOK_URL=http://127.0.0.1:5678/webhook/weaver-input
@@ -21,26 +29,42 @@ Environment=WEAVER_FABRIC_VOICE_DEADLINE_MS=45000
 Environment=WEAVER_COGNITION_MUTATIONS_PER_MINUTE=240
 Environment=WEAVER_COGNITION_QUERIES_PER_MINUTE=600
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/home/ubuntu/weaver/CascadeProjects/windsurf-project/venv/bin/uvicorn bedrock_brain_api:app --host 127.0.0.1 --port 8093 --log-level warning
+ExecStart=/home/ubuntu/weaver/CascadeProjects/windsurf-project/venv/bin/uvicorn bedrock_brain_api:app --host 127.0.0.1 --port 8093 --log-level warning --limit-concurrency 128 --backlog 256 --timeout-keep-alive 10 --ws-max-size 1048576 --ws-ping-interval 20 --ws-ping-timeout 30 --timeout-graceful-shutdown 125
 Restart=on-failure
 RestartSec=8
 TimeoutStartSec=45
-TimeoutStopSec=30
+TimeoutStopSec=140
+KillSignal=SIGTERM
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/ubuntu/weaver/CascadeProjects/windsurf-project/Nexus_Vault
+ProtectHostname=true
+ProtectClock=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
 RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
 RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
 LimitNOFILE=65536
 TasksMax=512
+CPUQuota=200%
+MemoryHigh=2G
+MemoryMax=3G
+OOMPolicy=stop
 
 [Install]
 WantedBy=multi-user.target

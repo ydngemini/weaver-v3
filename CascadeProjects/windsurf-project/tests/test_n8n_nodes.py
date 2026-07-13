@@ -22,6 +22,17 @@ WEBHOOK_URL = (
     or "http://127.0.0.1:5678/webhook/weaver-input"
 )
 TIMEOUT_S = float(os.environ.get("WEAVER_N8N_TEST_TIMEOUT", "125"))
+CONTRACT_VERSION = "weaver-headless-n8n-v1"
+CORRELATION_ID = "req-live-contract-test"
+PUBLIC_SUCCESS_FIELDS = {
+    "contract_version", "status", "error", "correlation_id",
+    "manifested_response", "speaker", "speaker_boundary_applied",
+    "speaker_model", "internal_draft_hidden", "reflection_applied",
+    "soul_voice_active", "codebase_grounded", "expert_parallel",
+    "expert_count", "experts_completed", "expert_errors",
+    "expert_fanout_elapsed_ms", "execution_id", "timestamp",
+    "pipeline_architecture", "pipeline_version",
+}
 
 
 def mark(ok: bool) -> str:
@@ -58,9 +69,16 @@ started = time.monotonic()
 status, body, error = http_post(
     WEBHOOK_URL,
     {
+        "contract_version": CONTRACT_VERSION,
+        "correlation_id": CORRELATION_ID,
+        "deadline_ms": 115_000,
         "text": "Explain how the cognition mesh keeps an embodied action safe.",
-        "source_file": "integration-test.md",
-        "timestamp": "2026-07-12T00:00:00Z",
+        "self_check": False,
+        "introspect": False,
+        "path_glob": "**/*",
+        "search_query": "",
+        "codebase_context": "",
+        "quantum_pathway": "",
         "cognition_context": {
             "awareness_confidence": 0.95,
             "fabric_pressure": 0.10,
@@ -95,14 +113,38 @@ private_fields = {
     "codebase_context",
     "internet_context",
     "mcp_context",
+    "expert_drafts",
+    "lora_error",
+    "qwen3b_error",
+    "qwen3b_route",
+    "dominant_lobe",
+    "experts_activated",
 }
 leaked = sorted(private_fields.intersection(response))
 check("privacy", not leaked, f"No private intermediate fields leaked ({leaked or 'none'})")
 check(
+    "exact_fields",
+    set(response) == PUBLIC_SUCCESS_FIELDS,
+    f"Response has exactly the public v1 fields (extra={sorted(set(response) - PUBLIC_SUCCESS_FIELDS)})",
+)
+check(
     "response_body",
-    isinstance(response.get("manifested_response"), str)
+    response.get("contract_version") == CONTRACT_VERSION
+    and response.get("status") == "ok"
+    and response.get("error") is False
+    and response.get("correlation_id") == CORRELATION_ID
+    and isinstance(response.get("manifested_response"), str)
     and bool(response.get("manifested_response", "").strip()),
-    "Manifested response is non-empty",
+    "Version, discriminator, correlation, and manifestation are valid",
+)
+check(
+    "speaker_boundary",
+    response.get("speaker") == "weaver"
+    and response.get("speaker_boundary_applied") is True
+    and response.get("speaker_model") == "qwen.qwen3-235b-a22b-2507"
+    and response.get("internal_draft_hidden") is True
+    and response.get("reflection_applied") is True,
+    "Only Weaver's reviewed speaker response crossed the boundary",
 )
 
 print(f"\n{BAR}\nPARALLEL EXPERT PIPELINE\n{BAR}")
@@ -128,27 +170,16 @@ check(
     ),
 )
 
-print(f"\n{BAR}\nCOGNITION, GEOMETRY, AND WRITEBACK\n{BAR}")
-awareness = response.get("awareness_confidence")
+print(f"\n{BAR}\nBOUNDED PUBLIC TELEMETRY\n{BAR}")
 check(
-    "cognition",
-    response.get("cognition_mesh_active") is True
-    and isinstance(awareness, (int, float))
-    and 0 <= awareness <= 1,
-    f"Bounded cognition metadata is active (awareness={awareness!r})",
-)
-layout = response.get("qubit_layout")
-check(
-    "geometry",
-    isinstance(layout, dict) and set(layout) == {f"q{i}" for i in range(7)},
-    "Seven-register geometric layout is present",
-)
-check(
-    "no_writeback",
-    response.get("written_to_hub") is False
-    and response.get("writeback_mode") == "response-metadata-only"
-    and response.get("hub_lobe_id") is None,
-    "Workflow truthfully reports metadata-only response with no vault writeback",
+    "bounded_counts",
+    isinstance(response.get("expert_fanout_elapsed_ms"), int)
+    and 0 <= response.get("expert_fanout_elapsed_ms", -1) <= 115_000
+    and isinstance(response.get("experts_completed"), int)
+    and 0 <= response.get("experts_completed", -1) <= 5
+    and isinstance(response.get("expert_errors"), int)
+    and 0 <= response.get("expert_errors", -1) <= 5,
+    "Only bounded aggregate expert telemetry is public",
 )
 
 print(f"\n{'═' * 64}")

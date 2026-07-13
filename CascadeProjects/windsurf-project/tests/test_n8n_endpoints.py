@@ -19,6 +19,8 @@ N8N_URL = (
     or "http://127.0.0.1:5678/webhook/weaver-input"
 )
 N8N_TIMEOUT_S = float(os.environ.get("WEAVER_N8N_TEST_TIMEOUT", "125"))
+N8N_CONTRACT_VERSION = "weaver-headless-n8n-v1"
+N8N_CORRELATION_ID = "req-endpoint-smoke"
 BRIDGE_HEALTH_URL = os.environ.get(
     "WEAVER_OBSIDIAN_HEALTH_URL", "http://127.0.0.1:5679/health"
 )
@@ -66,9 +68,22 @@ print(f"\n{BAR}\nN8N V6 WEBHOOK\n{BAR}")
 status, body = http_request(
     N8N_URL,
     {
+        "contract_version": N8N_CONTRACT_VERSION,
+        "correlation_id": N8N_CORRELATION_ID,
+        "deadline_ms": 115_000,
         "text": "Return a concise Weaver service smoke-test acknowledgement.",
-        "source_file": "smoke-test.md",
-        "timestamp": "2026-07-12T00:00:00Z",
+        "self_check": False,
+        "introspect": False,
+        "path_glob": "**/*",
+        "search_query": "",
+        "codebase_context": "",
+        "quantum_pathway": "",
+        "cognition_context": {
+            "awareness_confidence": 0.75,
+            "fabric_pressure": 0.1,
+            "immune_status": "nominal",
+            "open_components": [],
+        },
     },
     N8N_TIMEOUT_S,
 )
@@ -76,10 +91,20 @@ try:
     n8n_response = json.loads(body)
 except json.JSONDecodeError:
     n8n_response = {}
-private_fields = {"raw_input", "original_input", "collapsed_response", "codebase_context"}
+private_fields = {
+    "raw_input", "original_input", "collapsed_response", "codebase_context",
+    "expert_drafts", "lora_error", "qwen3b_error", "qwen3b_route",
+}
 record(
     "n8n_webhook",
     status == 200
+    and n8n_response.get("contract_version") == N8N_CONTRACT_VERSION
+    and n8n_response.get("status") == "ok"
+    and n8n_response.get("error") is False
+    and n8n_response.get("correlation_id") == N8N_CORRELATION_ID
+    and n8n_response.get("speaker") == "weaver"
+    and n8n_response.get("speaker_boundary_applied") is True
+    and n8n_response.get("internal_draft_hidden") is True
     and n8n_response.get("pipeline_version") == "v6-parallel-cognition"
     and n8n_response.get("pipeline_architecture") == "parallel-fanout-barrier"
     and not private_fields.intersection(n8n_response),

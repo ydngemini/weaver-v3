@@ -26,6 +26,33 @@ sys.path.insert(0, PROJ)
 BAR = "─" * 62
 
 
+def _read_headless_bundle() -> str:
+    """Read the modular shell as one test-only source projection."""
+    avatar_root = os.path.abspath(os.path.join(PROJ, "..", "..", "avatar"))
+    relative_paths = (
+        "headless.html",
+        "headless/styles/tokens.css",
+        "headless/styles/shell.css",
+        "headless/js/core.js",
+        "headless/js/session.js",
+        "headless/js/voice-support.js",
+        "headless/js/visual-data.js",
+        "headless/js/visual-runtime.js",
+        "headless/js/voice.js",
+        "headless/js/visualization.js",
+        "headless/js/cortex.js",
+        "headless/js/state-channel.js",
+        "headless/js/lifecycle.js",
+        "headless/js/accessibility.js",
+        "headless/js/app.js",
+    )
+    sources = []
+    for relative_path in relative_paths:
+        with open(os.path.join(avatar_root, relative_path), "r", encoding="utf-8") as handle:
+            sources.append(handle.read())
+    return "\n".join(sources)
+
+
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
@@ -983,7 +1010,8 @@ async def test_Z():
         '"455"',
         "470.0",
     )
-    evidence_ok = all(marker in context for marker in required_evidence)
+    missing_evidence = [marker for marker in required_evidence if marker not in context]
+    evidence_ok = not missing_evidence
     implicit_question = (
         "In nexus_bus.py give CACHE_SIZE RATE_LIMIT IDLE_TIMEOUT_S; in weaver.py give the live dashboard, "
         "codebase API, and phone bridge task names; give the matching test labels; then give the default "
@@ -1006,11 +1034,27 @@ async def test_Z():
     def fake_post(url, payload, timeout):
         captured.update({"url": url, "payload": payload, "timeout": timeout})
         return {
+            "contract_version": "weaver-headless-n8n-v1",
+            "status": "ok",
+            "error": False,
+            "correlation_id": payload["correlation_id"],
             "manifested_response": "grounded answer",
-            "pipeline_version": "test-grounded",
-            "codebase_grounded": True,
-            "soul_voice_active": True,
+            "speaker": "weaver",
+            "speaker_boundary_applied": True,
+            "speaker_model": "qwen.qwen3-235b-a22b-2507",
+            "internal_draft_hidden": True,
             "reflection_applied": True,
+            "soul_voice_active": True,
+            "codebase_grounded": True,
+            "expert_parallel": True,
+            "expert_count": 5,
+            "experts_completed": 5,
+            "expert_errors": 0,
+            "expert_fanout_elapsed_ms": 100,
+            "execution_id": "test-grounded",
+            "timestamp": "2026-07-13T12:00:00.000Z",
+            "pipeline_architecture": "parallel-fanout-barrier",
+            "pipeline_version": "v6-parallel-cognition",
         }
 
     try:
@@ -1032,7 +1076,10 @@ async def test_Z():
         and result[0] == "grounded answer"
         and payload.get("self_check") is True
         and payload.get("introspect") is True
-        and payload.get("codebase_context") == context
+        and payload.get("contract_version") == "weaver-headless-n8n-v1"
+        and payload.get("deadline_ms") == 115_000
+        and bool(payload.get("correlation_id"))
+        and payload.get("codebase_context") == context.strip()
         and bool(payload.get("search_query"))
     )
     retrieval_fast = context_elapsed < 3.0
@@ -1041,9 +1088,11 @@ async def test_Z():
         f"  Exact source evidence retrieved: {evidence_ok}",
         f"  Identifier search crosses files:  {identifier_cross_file_ok}",
         f"  Evidence chars:                 {len(context)}",
+        f"  Missing evidence markers:       {missing_evidence}",
         f"  Grounding retrieval under 3s:   {retrieval_fast} ({context_elapsed:.3f}s)",
         f"  n8n introspection flags set:    {payload.get('self_check') is True and payload.get('introspect') is True}",
-        f"  Evidence forwarded unchanged:   {payload.get('codebase_context') == context}",
+        f"  Evidence forwarded normalized:  {payload.get('codebase_context') == context.strip()} "
+        f"({len(str(payload.get('codebase_context') or ''))}/{len(context)} chars)",
     ])
     _result("Z", "Codebase evidence reaches the full n8n cortex", passed, detail)
     return passed
@@ -1092,8 +1141,9 @@ async def test_AA():
         "speaker_boundary_applied: !!reviewed",
         "internal_draft_hidden: true",
     )) and all(marker in writeback_code for marker in (
-        "speaker_boundary_applied: !!d.speaker_boundary_applied",
-        "internal_draft_hidden: d.internal_draft_hidden === true",
+        "speaker: 'weaver'",
+        "speaker_boundary_applied: true",
+        "internal_draft_hidden: true",
     ))
     private_draft_fail_closed = (
         "No codebase evidence was supplied." not in serialized
@@ -1110,9 +1160,7 @@ async def test_AA():
         and "not VOICE_CORTEX_ENABLED" in bridge_source
         and brain._merge_voice_transcript("hello", "hello world") == "hello world"
     )
-    headless = os.path.join(PROJ, "..", "..", "avatar", "headless.html")
-    with open(os.path.abspath(headless), "r", encoding="utf-8") as fh:
-        headless_source = fh.read()
+    headless_source = _read_headless_bundle()
     frontend_unified = "data.type === 'agent_response'" in headless_source and "allowDuringRealtime" in headless_source
 
     passed = all((
@@ -1152,6 +1200,7 @@ async def test_AB():
     import nexus_bus
     import qwen3b_server
     import weaver
+    from headless_scheduler import HeadlessScheduler
 
     workflow_path = os.path.join(PROJ, "n8n_weaver_v5.json")
     with open(workflow_path, "r", encoding="utf-8") as fh:
@@ -1229,6 +1278,10 @@ async def test_AB():
     brain_source = inspect.getsource(brain._cortex_chat) + inspect.getsource(brain._cortex_chat_inner)
     headless_source = inspect.getsource(brain._headless_loop)
     internal_source = inspect.getsource(brain._internal_chat)
+    scheduler_source = (
+        inspect.getsource(HeadlessScheduler.run_cycle)
+        + inspect.getsource(HeadlessScheduler._run_interruptible)
+    )
     local_fallback = (
         brain.LOCAL_LLM_URL.endswith(":8899/v1/chat/completions")
         and brain.N8N_CHAT_TIMEOUT >= 120
@@ -1236,8 +1289,11 @@ async def test_AB():
     )
     headless_yields_to_users = (
         "_interactive_started" in inspect.getsource(brain._cortex_chat)
-        and "if not await _headless_idle_ready()" in headless_source
-        and "last_thought = _now()" in headless_source
+        and "HeadlessScheduler(" in headless_source
+        and "idle_ready=_headless_idle_ready" in headless_source
+        and "priority_event=_interactive_priority_event" in headless_source
+        and "_priority_event.is_set()" in scheduler_source
+        and "work.cancel()" in scheduler_source
         and 'request_class="background"' in internal_source
         and brain.HEADLESS_LOCAL_THOUGHT_TOKENS <= 48
         and brain.HEADLESS_LOCAL_DREAM_TOKENS <= 96
@@ -1685,7 +1741,8 @@ async def test_AE():
         "private var connectionID: UUID?",
         "connectionID == currentConnectionID",
         "callbackRunID == runID",
-        "reconnectAttempt <= 5",
+        "let maxAttempts = policy?.maxAttempts ?? 5",
+        "reconnectAttempt <= maxAttempts",
         "reconnectTask?.cancel()",
         "requestRun == runID",
         "currentSpeechID == self.speechID",
@@ -1793,12 +1850,10 @@ async def test_AF():
 
     repo_root = os.path.abspath(os.path.join(PROJ, "..", ".."))
     embodiment_path = os.path.join(repo_root, "avatar", "embodiment.html")
-    headless_path = os.path.join(repo_root, "avatar", "headless.html")
     ios_root = os.path.join(repo_root, "ios", "WeaverNeural", "WeaverNeural")
     with open(embodiment_path, "r", encoding="utf-8") as fh:
         embodiment = fh.read()
-    with open(headless_path, "r", encoding="utf-8") as fh:
-        headless = fh.read()
+    headless = _read_headless_bundle()
     with open(os.path.join(ios_root, "AppModel.swift"), "r", encoding="utf-8") as fh:
         ios_app = fh.read()
     with open(os.path.join(ios_root, "Models", "WeaverState.swift"), "r", encoding="utf-8") as fh:
@@ -1923,12 +1978,10 @@ async def test_AG():
 
     repo_root = os.path.abspath(os.path.join(PROJ, "..", ".."))
     embodiment_path = os.path.join(repo_root, "avatar", "embodiment.html")
-    headless_path = os.path.join(repo_root, "avatar", "headless.html")
     ios_root = os.path.join(repo_root, "ios", "WeaverNeural")
     with open(embodiment_path, "r", encoding="utf-8") as fh:
         embodiment = fh.read()
-    with open(headless_path, "r", encoding="utf-8") as fh:
-        headless = fh.read()
+    headless = _read_headless_bundle()
     with open(os.path.join(ios_root, "WeaverNeural", "AppModel.swift"), "r", encoding="utf-8") as fh:
         ios_app = fh.read()
     with open(os.path.join(ios_root, "WeaverNeural", "Views", "WeaverRootView.swift"), "r", encoding="utf-8") as fh:
@@ -2865,7 +2918,8 @@ async def test_AJ():
         "_record_cognition_runtime_outcome",
         'component="n8n"',
         'component="voice"',
-        '"cognition_context"',
+        "N8NHeadlessRequest(",
+        "cognition_context={",
     ))
     pinned_n8n_image = (
         "docker.n8n.io/n8nio/n8n:2.25.7@sha256:"
@@ -2903,11 +2957,15 @@ async def test_AJ():
             'sudo docker image inspect "$N8N_IMAGE"',
             "cat > /tmp/n8n_cred.json",
             "cat > /tmp/wf.json",
-            'data.get("lora_latency_ms")',
-            'data.get("qwen3b_latency_ms")',
-            "n8n container: pinned, read-only, capability-dropped, sandboxed",
+            'assert set(data) == expected',
+            'data.get("expert_fanout_elapsed_ms")',
+            'assert data.get("expert_count") == 5',
+            'assert data.get("internal_draft_hidden") is True',
+            "n8n container: pinned, non-root, bounded, read-only, capability-dropped, sandboxed",
         ))
         and "docker cp" not in deploy_source
+        and 'data.get("lora_latency_ms")' not in deploy_source
+        and 'data.get("qwen3b_latency_ms")' not in deploy_source
         and 'assert data.get("soul_voice_active") is True' not in deploy_source
         and 'assert data.get("dual_model_active") is True' not in deploy_source
     )
@@ -3339,8 +3397,7 @@ async def test_AN():
     avatar_root = os.path.join(repo_root, "avatar")
     with open(os.path.join(avatar_root, "embodiment.html"), "r", encoding="utf-8") as fh:
         embodiment = fh.read()
-    with open(os.path.join(avatar_root, "headless.html"), "r", encoding="utf-8") as fh:
-        headless = fh.read()
+    headless = _read_headless_bundle()
     with open(os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"), "r", encoding="utf-8") as fh:
         deploy = fh.read()
 
@@ -3385,10 +3442,11 @@ async def test_AN():
         and "prompt(" in key_request
         and all(marker in headless for marker in (
             "function showCortexLocked()",
-            "if (!key()) {",
+            "if (!key() && state.auth.status !== 'ready')",
             "cortex locked · Wake to connect",
             "error.code = 'WEAVER_CORTEX_LOCKED'",
-            "const hasCortex = Boolean(requestBrainKey())",
+            "ensureSession({ interactive: false })",
+            "ensureSession({ interactive: true })",
         ))
     )
     headless_visual_boot = all(marker in headless for marker in (
@@ -3403,8 +3461,8 @@ async def test_AN():
     compositor_safe = (
         "backdrop-filter" not in headless
         and all(marker in headless for marker in (
-            "height: 44px",
-            "background-color: #f5c451 !important",
+            "min-height: 44px",
+            "background-color: var(--gold) !important",
             "background-image: none !important",
             "appearance: none",
             "isolation: isolate",
@@ -3751,6 +3809,5276 @@ async def test_AO():
     return passed
 
 
+async def test_AP():
+    _header("AP", "Headless v2 contracts preserve capsule, native, and long-turn authority")
+    from weaver_neural_fabric import IntentCompiler
+
+    docs_root = os.path.join(PROJ, "docs", "headless")
+    required_files = {
+        name: os.path.join(docs_root, name)
+        for name in (
+            "BASELINE.md",
+            "ARCHITECTURE.md",
+            "RELEASE_PLAN.md",
+            "performance-budgets.json",
+        )
+    }
+    foundation_present = all(
+        os.path.isfile(path) and os.path.getsize(path) > 500
+        for path in required_files.values()
+    )
+    with open(required_files["BASELINE.md"], "r", encoding="utf-8") as fh:
+        baseline = fh.read()
+    with open(required_files["ARCHITECTURE.md"], "r", encoding="utf-8") as fh:
+        architecture = fh.read()
+    with open(required_files["RELEASE_PLAN.md"], "r", encoding="utf-8") as fh:
+        release_plan = fh.read()
+    with open(required_files["performance-budgets.json"], "r", encoding="utf-8") as fh:
+        budgets = json.load(fh)
+
+    compiler = IntentCompiler("headless-contract-test-secret")
+    capabilities = compiler.capabilities()
+    expected_action_types = {
+        "pose", "bones", "navigate", "interact", "speak", "observe", "remember",
+    }
+    capsule_authority = (
+        set(capabilities["action_types"]) == expected_action_types
+        and capabilities["max_actions"] == budgets["protocol"]["max_capsule_actions"] == 8
+        and capabilities["max_ttl_ms"] == budgets["protocol"]["max_capsule_ttl_ms"] == 60_000
+        and capabilities["signing_algorithm"] == "hmac-sha256"
+        and all(marker in architecture for marker in (
+            "Intent Capsules remain the only declarative mutation authority",
+            "it may not",
+            "accept an arbitrary command",
+            "The socket never applies the",
+            "actions itself.",
+            "IntentCompiler.verify()",
+            "ReflexKernel",
+        ))
+    )
+
+    ios_security_path = os.path.join(
+        os.path.dirname(PROJ), "..", "ios", "WeaverNeural", "SECURITY.md"
+    )
+    ios_scene_path = os.path.join(
+        os.path.dirname(PROJ), "..", "ios", "WeaverNeural", "WeaverNeural",
+        "Views", "WeaverSceneView.swift",
+    )
+    with open(os.path.normpath(ios_security_path), "r", encoding="utf-8") as fh:
+        ios_security = fh.read()
+    with open(os.path.normpath(ios_scene_path), "r", encoding="utf-8") as fh:
+        ios_scene = fh.read()
+    native_boundary = (
+        "The WKWebView never receives authentication material" in ios_security
+        and "websiteDataStore = .nonPersistent()" in ios_scene
+        and all(marker in architecture for marker in (
+            "The native iOS shell owns camera, microphone, Apple Vision, Core ML",
+            "Keychain,",
+            "The native WKWebView remains render-only, nonpersistent, and credential-free",
+            "not a replacement sensor or voice",
+            "authority inside the native shell",
+        ))
+    )
+
+    validator_path = os.path.join(PROJ, "scripts", "validate_n8n_workflow.mjs")
+    with open(validator_path, "r", encoding="utf-8") as fh:
+        validator = fh.read()
+    long_turn_contract = (
+        budgets["reaction"]["acknowledgement_target_ms"] == 200
+        and budgets["reaction"]["n8n_semantic_hard_budget_ms"] == 115_000
+        and budgets["reaction"]["progress_heartbeat_max_interval_ms"] <= 5_000
+        and budgets["reaction"]["transport_heartbeat_max_interval_ms"] <= 10_000
+        and "criticalPathBudgetMs <= 115_000" in validator
+        and all(marker in architecture for marker in (
+            "Heartbeats continue throughout all phases",
+            "does not treat a long `thinking`",
+            "phase as a transport timeout",
+            "The 200 ms target covers an audible or visual reaction acknowledgement",
+        ))
+    )
+
+    flags = (
+        "WEAVER_HEADLESS_V2_STATE",
+        "WEAVER_HEADLESS_V2_STREAM",
+        "WEAVER_HEADLESS_V2_SESSION",
+        "WEAVER_HEADLESS_V2_SUMMARIES",
+        "WEAVER_HEADLESS_V2_UI",
+        "WEAVER_HEADLESS_V2_PROGRESS",
+    )
+    reversible_release = (
+        all(f"| `{flag}` | `0` |" in release_plan for flag in flags)
+        and "Each tranche is independently deployable and reversible" in release_plan
+        and "The legacy polling/chat/voice fallback is unavailable" in release_plan
+    )
+
+    measured_baseline = all(marker in baseline for marker in (
+        "iPhone 16e CSS viewport, 390×844",
+        "13.9",
+        "4.8",
+        "6.34 s",
+        "no monotonic revision",
+        "passed all 44 repository files",
+    ))
+    bounded_budgets = (
+        budgets["web"]["touch_target_min_px"] >= 44
+        and budgets["web"]["critical_accessibility_violations"] == 0
+        and budgets["api"]["snapshot_max_bytes"] <= 65_536
+        and budgets["api"]["event_max_bytes"] <= 32_768
+        and budgets["protocol"]["max_pending_messages_per_connection"] <= 64
+    )
+
+    passed = all((
+        foundation_present,
+        capsule_authority,
+        native_boundary,
+        long_turn_contract,
+        reversible_release,
+        measured_baseline,
+        bounded_budgets,
+    ))
+    detail = "\n".join([
+        f"  Baseline, architecture, release, budgets exist: {foundation_present}",
+        f"  Intent Capsules remain the sole mutation path: {capsule_authority}",
+        f"  Native shell/WKWebView authority stays isolated: {native_boundary}",
+        f"  200ms reaction and 115s long-turn liveness align: {long_turn_contract}",
+        f"  Every migration tranche is flag-reversible:     {reversible_release}",
+        f"  Production and native baseline is recorded:     {measured_baseline}",
+        f"  Public payload and accessibility budgets bound: {bounded_budgets}",
+    ])
+    _result(
+        "AP",
+        "Headless v2 contracts preserve capsule, native, and long-turn authority",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AQ():
+    _header("AQ", "Strict headless v2 schemas, privacy projection, and revisioned shadow state")
+    from copy import deepcopy
+
+    from fastapi import HTTPException, Response
+    from pydantic import TypeAdapter, ValidationError
+    from starlette.requests import Request
+
+    import bedrock_brain_api as brain_api
+    from headless_schemas import ClientMessage, HeadlessPublicState, SignedIntentCapsule
+    from headless_state import HeadlessStateStore, build_public_state
+    from weaver_cognition_mesh import CognitionMesh
+    from weaver_neural_fabric import IntentCompiler, NeuralFabric
+
+    compiler = IntentCompiler("headless-v2-schema-secret")
+    capsule = compiler.compile({
+        "goal": "Set a balanced, aware stance",
+        "actions": [
+            {"type": "pose", "values": {"leftElbow": 0.24, "rightKnee": -0.18}},
+            {"type": "observe", "sensor": "environment"},
+        ],
+        "ttl_ms": 15_000,
+        "priority": "embodiment",
+    })
+    parsed_capsule = SignedIntentCapsule.model_validate(capsule)
+    exact_capsule_contract = (
+        compiler.verify(capsule)
+        and parsed_capsule.capsule_id == capsule["capsule_id"]
+        and [action.type for action in parsed_capsule.actions] == ["pose", "observe"]
+    )
+
+    arbitrary_action = deepcopy(capsule)
+    arbitrary_action["actions"][0]["type"] = "shell"
+    arbitrary_action["actions"][0]["command"] = "do-not-run"
+    extra_capsule_field = {**capsule, "command": "parallel-executor"}
+    schema_rejections = []
+    for candidate in (arbitrary_action, extra_capsule_field):
+        try:
+            SignedIntentCapsule.model_validate(candidate)
+        except ValidationError:
+            schema_rejections.append(True)
+        else:
+            schema_rejections.append(False)
+    try:
+        TypeAdapter(ClientMessage).validate_python({
+            "type": "command",
+            "action": "navigate",
+        })
+    except ValidationError:
+        arbitrary_message_rejected = True
+    else:
+        arbitrary_message_rejected = False
+    transport_is_not_executor = all(schema_rejections) and arbitrary_message_rejected
+
+    fabric = NeuralFabric(capacity_units=8, realtime_reserved_units=2).snapshot()
+    cognition = CognitionMesh().snapshot(fabric=fabric)
+    now = 1_720_000_020.0
+    legacy = {
+        "active": True,
+        "started_at": 1_720_000_000.0,
+        "ticks": 4,
+        "last_tick_at": 1_720_000_019.0,
+        "thoughts": 3,
+        "dreams": 2,
+        "last_thought_at": 1_720_000_010.0,
+        "last_dream_at": 1_720_000_012.0,
+        "last_thought": "PRIVATE-THOUGHT-SENTINEL",
+        "last_dream": "PRIVATE-DREAM-SENTINEL",
+        "models": {"PRIVATE-MODEL-SENTINEL": {"prompt": "PRIVATE-PROMPT"}},
+        "transcript": "PRIVATE-TRANSCRIPT-SENTINEL",
+        "last_error": "",
+        "voice_realtime": {
+            "model_id": "PRIVATE-VOICE-MODEL",
+            "region": "PRIVATE-REGION",
+            "voice_id": "PRIVATE-VOICE-ID",
+            "sessions_started": 1,
+            "last_error": "",
+            "prewarm": {"status": "ready"},
+            "slo": {
+                "status": "no-data",
+                "reaction_target_ms": 200,
+                "queue_target_ms": 120,
+                "semantic_target_ms": 3_000,
+            },
+        },
+    }
+    public_state = build_public_state(legacy, fabric, cognition, now=now)
+    public_json = public_state.model_dump_json()
+    private_sentinels = (
+        "PRIVATE-THOUGHT-SENTINEL",
+        "PRIVATE-DREAM-SENTINEL",
+        "PRIVATE-MODEL-SENTINEL",
+        "PRIVATE-PROMPT",
+        "PRIVATE-TRANSCRIPT-SENTINEL",
+        "PRIVATE-VOICE-MODEL",
+        "PRIVATE-REGION",
+        "PRIVATE-VOICE-ID",
+    )
+    private_state_contained = (
+        all(sentinel not in public_json for sentinel in private_sentinels)
+        and '"last_thought":' not in public_json
+        and '"last_dream":' not in public_json
+        and public_state.cognition.thought_count == 3
+        and public_state.cognition.dream_count == 2
+    )
+
+    store = HeadlessStateStore(max_history=1)
+    first = await store.publish(public_state)
+    unchanged = await store.publish(public_state)
+    changed_payload = public_state.model_dump(mode="python")
+    changed_payload["system"] = {
+        **changed_payload["system"],
+        "ready": False,
+        "status": "degraded",
+        "degraded_reasons": ["headless-degraded"],
+    }
+    second = await store.publish(HeadlessPublicState.model_validate(changed_payload))
+    current_deltas = await store.changes_since(first.revision)
+    expired_deltas = await store.changes_since(0)
+    future_deltas = await store.changes_since(99)
+    revision_contract = (
+        first.revision == unchanged.revision == 1
+        and second.revision == 2
+        and current_deltas is not None
+        and len(current_deltas) == 1
+        and set(current_deltas[0].changes) == {"system"}
+        and expired_deltas is None
+        and future_deltas is None
+        and len(second.model_dump_json()) <= 65_536
+        and len(current_deltas[0].model_dump_json()) <= 16_384
+    )
+
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/headless/v2/state",
+        "headers": [],
+        "query_string": b"",
+        "server": ("test", 80),
+        "client": ("test", 1),
+        "scheme": "http",
+    })
+    original_key = brain_api.WEAVER_KEY
+    original_flag = brain_api.HEADLESS_V2_STATE_ENABLED
+    original_store = brain_api.HEADLESS_V2_STATE_STORE
+    disabled_closed = False
+    endpoint_safe = False
+    default_health_compatible = False
+    try:
+        brain_api.WEAVER_KEY = ""
+        brain_api.HEADLESS_V2_STATE_ENABLED = False
+        default_health_compatible = "headless_v2" not in await brain_api.health()
+        try:
+            await brain_api.headless_v2_state(request, Response())
+        except HTTPException as exc:
+            disabled_closed = exc.status_code == 404
+        brain_api.HEADLESS_V2_STATE_ENABLED = True
+        brain_api.HEADLESS_V2_STATE_STORE = HeadlessStateStore()
+        endpoint_snapshot = await brain_api.headless_v2_state(request, Response())
+        repeat_snapshot = await brain_api.headless_v2_state(request, Response())
+        endpoint_json = endpoint_snapshot.model_dump_json()
+        endpoint_safe = (
+            endpoint_snapshot.schema_version == 2
+            and endpoint_snapshot.revision == repeat_snapshot.revision == 1
+            and all(key not in endpoint_json for key in (
+                '"last_thought":', '"last_dream":', '"transcript":', '"models":',
+            ))
+        )
+    finally:
+        brain_api.WEAVER_KEY = original_key
+        brain_api.HEADLESS_V2_STATE_ENABLED = original_flag
+        brain_api.HEADLESS_V2_STATE_STORE = original_store
+    reversible_shadow_route = disabled_closed and default_health_compatible and endpoint_safe
+
+    with open(os.path.join(PROJ, "headless_schemas.py"), "r", encoding="utf-8") as fh:
+        schema_source = fh.read()
+    source_boundaries = all(marker in schema_source for marker in (
+        'type: Literal["capsule_submit"]',
+        "capsule: SignedIntentCapsule",
+        "extra=\"forbid\"",
+        "frozen=True",
+    ))
+
+    passed = all((
+        exact_capsule_contract,
+        transport_is_not_executor,
+        private_state_contained,
+        revision_contract,
+        reversible_shadow_route,
+        source_boundaries,
+    ))
+    detail = "\n".join([
+        f"  Compiler output satisfies exact signed schema: {exact_capsule_contract}",
+        f"  Arbitrary commands/actions are structurally rejected: {transport_is_not_executor}",
+        f"  Raw cognition, model, voice, and transcript data stays private: {private_state_contained}",
+        f"  Revisions/deltas are monotonic, bounded, and resumable: {revision_contract}",
+        f"  Default-off route preserves legacy health and fails closed: {reversible_shadow_route}",
+        f"  Contracts are closed and immutable at their source: {source_boundaries}",
+    ])
+    _result(
+        "AQ",
+        "Strict headless v2 schemas, privacy projection, and revisioned shadow state",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AR():
+    _header("AR", "Headless scheduler and read-mostly realtime transport remain bounded")
+    from copy import deepcopy
+
+    from headless_scheduler import HeadlessSchedule, HeadlessScheduler
+    from headless_schemas import CapsuleSubmitMessage, HeadlessPublicState
+    from headless_state import HeadlessStateStore, build_public_state
+    from headless_transport import CapsuleReplayGuard, HeadlessTransport, TransportBackpressure
+    from weaver_cognition_mesh import CognitionMesh
+    from weaver_neural_fabric import IntentCompiler, NeuralFabric
+
+    scheduler_clock = [100.0]
+    scheduler_events = []
+
+    async def _idle_ready():
+        return True
+
+    async def _thought(reason):
+        scheduler_events.append(("thought", reason))
+        return "private"
+
+    async def _dream(reason):
+        scheduler_events.append(("dream", reason))
+        return "private"
+
+    async def _tick(now):
+        scheduler_events.append(("tick", now))
+
+    async def _scheduler_error(exc):
+        scheduler_events.append(("error", type(exc).__name__))
+
+    scheduler = HeadlessScheduler(
+        HeadlessSchedule(10, 30, tick_seconds=5),
+        active=lambda: True,
+        idle_ready=_idle_ready,
+        run_thought=_thought,
+        run_dream=_dream,
+        on_tick=_tick,
+        on_error=_scheduler_error,
+        monotonic=lambda: scheduler_clock[0],
+        wall_clock=lambda: 1_700_000_000.0 + scheduler_clock[0],
+    )
+    await scheduler.run_cycle()
+    scheduler_clock[0] = 111.0
+    await scheduler.run_cycle()
+    scheduler_clock[0] = 131.0
+    await scheduler.run_cycle()
+    scheduler_counts = scheduler.snapshot()
+    deterministic_cadence = (
+        scheduler_counts["ticks"] == 3
+        and scheduler_counts["thought_runs"] == 2
+        and scheduler_counts["dream_runs"] == 1
+        and scheduler_counts["errors"] == 0
+        and scheduler_events.count(("thought", "headless-loop")) == 2
+        and scheduler_events.count(("dream", "headless-loop")) == 1
+    )
+
+    stopped_ticks = []
+
+    async def _quick_tick(now):
+        stopped_ticks.append(now)
+
+    stop_scheduler = HeadlessScheduler(
+        HeadlessSchedule(60, 120, tick_seconds=0.01, disabled_seconds=0.01),
+        active=lambda: True,
+        idle_ready=_idle_ready,
+        run_thought=_thought,
+        run_dream=_dream,
+        on_tick=_quick_tick,
+        on_error=_scheduler_error,
+    )
+    scheduler_task = asyncio.create_task(stop_scheduler.run())
+    await asyncio.sleep(0.025)
+    stop_scheduler.stop()
+    await asyncio.wait_for(scheduler_task, timeout=0.25)
+    deterministic_shutdown = bool(stopped_ticks) and not stop_scheduler.running
+
+    compiler = IntentCompiler("headless-v2-transport-secret")
+    fabric = NeuralFabric(capacity_units=8, realtime_reserved_units=2).snapshot()
+    cognition = CognitionMesh().snapshot(fabric=fabric)
+    legacy = {
+        "active": True,
+        "started_at": 1_720_000_000.0,
+        "last_tick_at": 1_720_000_019.0,
+        "thoughts": 0,
+        "dreams": 0,
+        "voice_realtime": {
+            "sessions_started": 0,
+            "prewarm": {"status": "ready"},
+            "slo": {
+                "status": "no-data",
+                "reaction_target_ms": 200,
+                "queue_target_ms": 120,
+                "semantic_target_ms": 3_000,
+            },
+        },
+    }
+    public_state = build_public_state(legacy, fabric, cognition, now=1_720_000_020.0)
+    store = HeadlessStateStore()
+    first_snapshot = await store.publish(public_state)
+    evaluation_calls = []
+
+    async def _evaluate(capsule):
+        evaluation_calls.append(capsule["capsule_id"])
+        return {"decision": "execute", "private_angles": "must-not-cross-transport"}
+
+    replay_guard = CapsuleReplayGuard()
+    transport = HeadlessTransport(
+        store,
+        verify_capsule=compiler.verify,
+        evaluate_capsule=_evaluate,
+        replay_guard=replay_guard,
+        heartbeat_interval_ms=1_000,
+    )
+    capsule = compiler.compile({
+        "goal": "Refresh environment awareness",
+        "actions": [{"type": "observe", "sensor": "environment"}],
+        "ttl_ms": 15_000,
+        "priority": "embodiment",
+    })
+    submission = CapsuleSubmitMessage.model_validate({
+        "type": "capsule_submit",
+        "capsule": capsule,
+    })
+    receipt = await transport.evaluate_submission(submission)
+    replay = await transport.evaluate_submission(submission)
+    capsule_gate = (
+        receipt.type == "capsule_receipt"
+        and receipt.status == "evaluated"
+        and receipt.decision == "allow"
+        and replay.type == "error"
+        and replay.code == "capsule-replayed"
+        and evaluation_calls == [capsule["capsule_id"]]
+        and "private_angles" not in receipt.model_dump_json()
+    )
+
+    class _FakeWebSocket:
+        def __init__(self, incoming):
+            self.incoming = asyncio.Queue()
+            for event in incoming:
+                self.incoming.put_nowait(event)
+            self.sent = []
+            self.closed = []
+
+        async def receive(self):
+            event = await self.incoming.get()
+            delay = float(event.pop("delay", 0))
+            if delay:
+                await asyncio.sleep(delay)
+            return event
+
+        async def send_json(self, payload):
+            self.sent.append(deepcopy(payload))
+
+        async def close(self, code=1000):
+            self.closed.append(code)
+
+    fake_socket = _FakeWebSocket([
+        {
+            "type": "websocket.receive",
+            "text": json.dumps({"type": "ping", "nonce": "long-turn-liveness"}),
+        },
+        {"type": "websocket.disconnect", "delay": 1.08},
+    ])
+
+    async def _publish_delta():
+        await asyncio.sleep(0.05)
+        payload = public_state.model_dump(mode="python")
+        payload["cognition"] = {
+            **payload["cognition"],
+            "thought_count": 1,
+        }
+        await store.publish(HeadlessPublicState.model_validate(payload))
+
+    updater = asyncio.create_task(_publish_delta())
+    await transport.serve(fake_socket)
+    await updater
+    message_types = [message.get("type") for message in fake_socket.sent]
+    heartbeat_liveness = (
+        message_types[:2] == ["hello", "snapshot"]
+        and "delta" in message_types
+        and message_types.count("heartbeat") >= 2
+        and fake_socket.closed[-1:] == [1000]
+        and first_snapshot.revision == 1
+        and store.revision == 2
+    )
+
+    bounded_queue = asyncio.Queue(maxsize=4)
+    backpressure_bounded = False
+    try:
+        for _ in range(5):
+            await transport._enqueue(
+                bounded_queue,
+                transport._error("service-unavailable", retryable=True),
+            )
+    except TransportBackpressure:
+        backpressure_bounded = bounded_queue.qsize() == 4
+
+    with open(os.path.join(PROJ, "headless_transport.py"), "r", encoding="utf-8") as fh:
+        transport_source = fh.read()
+    with open(os.path.join(PROJ, "weaver_cognition_mesh.py"), "r", encoding="utf-8") as fh:
+        mesh_source = fh.read()
+    with open(os.path.join(PROJ, "bedrock_brain_api.py"), "r", encoding="utf-8") as fh:
+        brain_source = fh.read()
+    no_parallel_executor = (
+        "It deliberately has no callback capable of applying" in transport_source
+        and "evaluate_capsule: CapsuleEvaluator" in transport_source
+        and "apply_capsule" not in transport_source
+        and "It does not execute Intent Capsules" in mesh_source
+        and '@app.websocket("/headless/v2/stream")' in brain_source
+    )
+
+    passed = all((
+        deterministic_cadence,
+        deterministic_shutdown,
+        capsule_gate,
+        heartbeat_liveness,
+        backpressure_bounded,
+        no_parallel_executor,
+    ))
+    detail = "\n".join([
+        f"  Private cadence is deterministic and single-flight: {deterministic_cadence}",
+        f"  Scheduler shutdown cancels without orphan work:      {deterministic_shutdown}",
+        f"  Capsules verify, evaluate, redact, and reject replay: {capsule_gate}",
+        f"  Heartbeats survive long work and state arrives as delta: {heartbeat_liveness}",
+        f"  Slow-client outbound memory is strictly bounded:       {backpressure_bounded}",
+        f"  Transport has evaluation but no action executor:       {no_parallel_executor}",
+    ])
+    _result(
+        "AR",
+        "Headless scheduler and read-mostly realtime transport remain bounded",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AS():
+    _header("AS", "Short-lived browser sessions keep the Weaver key out of repeated requests")
+    import base64
+    from http.cookies import SimpleCookie
+
+    from fastapi import HTTPException, Response
+    from starlette.requests import Request
+
+    import bedrock_brain_api as brain_api
+    from headless_auth import SESSION_COOKIE_NAME, HeadlessSessionStore
+    from headless_state import HeadlessStateStore
+
+    clock = [1_700_000_000.0]
+    expiring_store = HeadlessSessionStore(
+        ttl_seconds=60,
+        max_lifetime_seconds=120,
+        max_sessions=8,
+        clock=lambda: clock[0],
+    )
+    expiring_grant = await expiring_store.issue()
+    initially_valid = await expiring_store.authenticate(
+        expiring_grant.token,
+        csrf_token=expiring_grant.csrf_token,
+        require_csrf=True,
+    )
+    raw_registry = repr(expiring_store._sessions)
+    clock[0] += 61
+    expired_closed = not await expiring_store.authenticate(expiring_grant.token)
+    digest_only_storage = (
+        initially_valid
+        and expired_closed
+        and expiring_grant.token not in raw_registry
+        and expiring_grant.csrf_token not in raw_registry
+        and (await expiring_store.snapshot())["active_sessions"] == 0
+    )
+
+    def _request(path, method="GET", headers=None):
+        raw_headers = [
+            (key.lower().encode("latin-1"), value.encode("latin-1"))
+            for key, value in (headers or {}).items()
+        ]
+        return Request({
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": raw_headers,
+            "query_string": b"",
+            "server": ("headless.weaverv3.com", 443),
+            "client": ("test", 1),
+            "scheme": "https",
+        })
+
+    original_values = {
+        "key": brain_api.WEAVER_KEY,
+        "state_flag": brain_api.HEADLESS_V2_STATE_ENABLED,
+        "stream_flag": brain_api.HEADLESS_V2_STREAM_ENABLED,
+        "session_flag": brain_api.HEADLESS_V2_SESSION_ENABLED,
+        "session_store": brain_api.HEADLESS_V2_SESSION_STORE,
+        "state_store": brain_api.HEADLESS_V2_STATE_STORE,
+    }
+    session_key = "headless-session-test-key-012345"
+    cookie_contract = False
+    key_exchanged_once = False
+    csrf_rotation = False
+    websocket_session = False
+    compatibility_bridge = False
+    try:
+        brain_api.WEAVER_KEY = session_key
+        brain_api.HEADLESS_V2_STATE_ENABLED = True
+        brain_api.HEADLESS_V2_STREAM_ENABLED = True
+        brain_api.HEADLESS_V2_SESSION_ENABLED = True
+        brain_api.HEADLESS_V2_SESSION_STORE = HeadlessSessionStore(ttl_seconds=120)
+        brain_api.HEADLESS_V2_STATE_STORE = HeadlessStateStore()
+
+        bootstrap_response = Response()
+        bootstrap = await brain_api.headless_v2_session_bootstrap(
+            _request(
+                "/headless/v2/session",
+                "POST",
+                {"x-weaver-key": session_key},
+            ),
+            bootstrap_response,
+        )
+        set_cookie = bootstrap_response.headers.get("set-cookie", "")
+        parsed_cookie = SimpleCookie()
+        parsed_cookie.load(set_cookie)
+        session_token = parsed_cookie[SESSION_COOKIE_NAME].value
+        lowered_cookie = set_cookie.lower()
+        cookie_contract = (
+            "httponly" in lowered_cookie
+            and "secure" in lowered_cookie
+            and "samesite=strict" in lowered_cookie
+            and "path=/" in lowered_cookie
+            and "domain=" not in lowered_cookie
+            and bootstrap_response.headers.get("cache-control") == "no-store"
+            and session_token not in bootstrap.model_dump_json()
+            and session_key not in set_cookie
+        )
+
+        session_headers = {"cookie": f"{SESSION_COOKIE_NAME}={session_token}"}
+        session_snapshot = await brain_api.headless_v2_state(
+            _request("/headless/v2/state", headers=session_headers),
+            Response(),
+        )
+        key_exchanged_once = (
+            session_snapshot.schema_version == 2
+            and session_snapshot.revision == 1
+            and await brain_api.HEADLESS_V2_SESSION_STORE.authenticate(session_token)
+        )
+
+        renew_response = Response()
+        renewal = await brain_api.headless_v2_session_renew(
+            _request(
+                "/headless/v2/session/renew",
+                "POST",
+                {
+                    **session_headers,
+                    "x-weaver-csrf": bootstrap.csrf_token,
+                },
+            ),
+            renew_response,
+        )
+        old_csrf_invalid = not await brain_api.HEADLESS_V2_SESSION_STORE.authenticate(
+            session_token,
+            csrf_token=bootstrap.csrf_token,
+            require_csrf=True,
+        )
+        new_csrf_valid = await brain_api.HEADLESS_V2_SESSION_STORE.authenticate(
+            session_token,
+            csrf_token=renewal.csrf_token,
+            require_csrf=True,
+        )
+        csrf_rotation = (
+            renewal.csrf_token != bootstrap.csrf_token
+            and old_csrf_invalid
+            and new_csrf_valid
+        )
+
+        class _HandshakeSocket:
+            def __init__(self, *, headers, cookies=None):
+                self.headers = {key.lower(): value for key, value in headers.items()}
+                self.cookies = dict(cookies or {})
+                self.accepted = []
+                self.closed = []
+
+            async def accept(self, subprotocol=None):
+                self.accepted.append(subprotocol)
+
+            async def close(self, code=1000):
+                self.closed.append(code)
+
+        session_socket = _HandshakeSocket(
+            headers={
+                "origin": "https://headless.weaverv3.com",
+                "sec-websocket-protocol": (
+                    f"weaver-headless-v2, weaver-csrf.{renewal.csrf_token}"
+                ),
+            },
+            cookies={SESSION_COOKIE_NAME: session_token},
+        )
+        revalidate = await brain_api._accept_headless_v2_ws(session_socket)
+        session_revalidated = revalidate is not None and await revalidate()
+
+        bad_origin_grant = await brain_api.HEADLESS_V2_SESSION_STORE.issue()
+        bad_origin_socket = _HandshakeSocket(
+            headers={
+                "origin": "https://attacker.invalid",
+                "sec-websocket-protocol": (
+                    f"weaver-headless-v2, weaver-csrf.{bad_origin_grant.csrf_token}"
+                ),
+            },
+            cookies={SESSION_COOKIE_NAME: bad_origin_grant.token},
+        )
+        rejected = await brain_api._accept_headless_v2_ws(bad_origin_socket)
+        websocket_session = (
+            session_revalidated
+            and session_socket.accepted == ["weaver-headless-v2"]
+            and rejected is None
+            and bad_origin_socket.closed == [1008]
+        )
+
+        encoded_key = base64.urlsafe_b64encode(session_key.encode()).decode().rstrip("=")
+        key_socket = _HandshakeSocket(headers={
+            "origin": "",
+            "sec-websocket-protocol": f"weaver-headless-v2, weaver-key.{encoded_key}",
+        })
+        key_revalidate = await brain_api._accept_headless_v2_ws(key_socket)
+        compatibility_bridge = (
+            key_revalidate is not None
+            and await key_revalidate()
+            and key_socket.accepted == ["weaver-headless-v2"]
+        )
+
+        revoked = await brain_api.headless_v2_session_revoke(
+            _request(
+                "/headless/v2/session",
+                "DELETE",
+                {
+                    **session_headers,
+                    "x-weaver-csrf": renewal.csrf_token,
+                },
+            ),
+            Response(),
+        )
+        websocket_session = (
+            websocket_session
+            and revoked.revoked
+            and not await revalidate()
+        )
+    finally:
+        brain_api.WEAVER_KEY = original_values["key"]
+        brain_api.HEADLESS_V2_STATE_ENABLED = original_values["state_flag"]
+        brain_api.HEADLESS_V2_STREAM_ENABLED = original_values["stream_flag"]
+        brain_api.HEADLESS_V2_SESSION_ENABLED = original_values["session_flag"]
+        brain_api.HEADLESS_V2_SESSION_STORE = original_values["session_store"]
+        brain_api.HEADLESS_V2_STATE_STORE = original_values["state_store"]
+
+    with open(os.path.join(PROJ, "headless_auth.py"), "r", encoding="utf-8") as fh:
+        auth_source = fh.read()
+    security_source_contract = all(marker in auth_source for marker in (
+        "stores only token digests",
+        "hmac.compare_digest",
+        "absolute_expires_at",
+        "max_sessions",
+    ))
+
+    passed = all((
+        digest_only_storage,
+        cookie_contract,
+        key_exchanged_once,
+        csrf_rotation,
+        websocket_session,
+        compatibility_bridge,
+        security_source_contract,
+    ))
+    detail = "\n".join([
+        f"  Server stores digests and expires bounded sessions: {digest_only_storage}",
+        f"  Cookie is host-only, Secure, HttpOnly, Strict, no-store: {cookie_contract}",
+        f"  State reads work without resending the long-lived key: {key_exchanged_once}",
+        f"  Renewal rotates CSRF and invalidates the old proof:   {csrf_rotation}",
+        f"  Socket checks origin/CSRF and revalidates expiry:     {websocket_session}",
+        f"  Native/key rollback bridge remains authenticated:     {compatibility_bridge}",
+        f"  Session source retains bounded security invariants:   {security_source_contract}",
+    ])
+    _result(
+        "AS",
+        "Short-lived browser sessions keep the Weaver key out of repeated requests",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AT():
+    _header("AT", "Headless v2 HTTP boundaries are allowlisted, bounded, correlated, and redacted")
+    import httpx
+
+    import bedrock_brain_api as brain_api
+    from headless_state import HeadlessStateStore
+
+    original_values = {
+        "key": brain_api.WEAVER_KEY,
+        "state_flag": brain_api.HEADLESS_V2_STATE_ENABLED,
+        "session_flag": brain_api.HEADLESS_V2_SESSION_ENABLED,
+        "state_store": brain_api.HEADLESS_V2_STATE_STORE,
+        "refresh": brain_api._refresh_headless_v2_state,
+    }
+    stable_errors = False
+    request_bounds = False
+    private_diagnostics_redacted = False
+    origin_allowlist = False
+    legacy_unchanged = False
+    try:
+        brain_api.WEAVER_KEY = "headless-boundary-test-key"
+        brain_api.HEADLESS_V2_STATE_ENABLED = False
+        brain_api.HEADLESS_V2_SESSION_ENABLED = False
+        transport = httpx.ASGITransport(app=brain_api.app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://headless.weaverv3.com",
+        ) as client:
+            disabled = await client.post(
+                "/headless/v2/session",
+                headers={"x-correlation-id": "client-correlation-123"},
+            )
+            stable_errors = (
+                disabled.status_code == 404
+                and disabled.json() == {
+                    "error": {
+                        "code": "feature-disabled",
+                        "retryable": False,
+                        "correlation_id": "client-correlation-123",
+                    }
+                }
+                and disabled.headers.get("x-correlation-id") == "client-correlation-123"
+                and disabled.headers.get("cache-control") == "no-store"
+                and disabled.headers.get("x-content-type-options") == "nosniff"
+            )
+
+            query = await client.get("/headless/v2/state?unexpected=1")
+            body = await client.post("/headless/v2/session", content=b"unexpected")
+            oversized = await client.post(
+                "/headless/v2/session",
+                headers={"content-length": "40000"},
+            )
+            unknown = await client.get("/headless/v2/unknown")
+            bad_correlation = await client.post(
+                "/headless/v2/session",
+                headers={"x-correlation-id": "<private-script>"},
+            )
+            request_bounds = (
+                query.status_code == 400
+                and query.json()["error"]["code"] == "invalid-request"
+                and body.status_code == 400
+                and body.json()["error"]["code"] == "invalid-request"
+                and oversized.status_code == 413
+                and oversized.json()["error"]["code"] == "request-too-large"
+                and unknown.status_code == 404
+                and unknown.json()["error"]["code"] == "invalid-request"
+                and bad_correlation.json()["error"]["correlation_id"].startswith("req-")
+                and "private-script" not in bad_correlation.text
+            )
+
+            brain_api.HEADLESS_V2_STATE_ENABLED = True
+            brain_api.HEADLESS_V2_STATE_STORE = HeadlessStateStore()
+
+            async def _private_failure():
+                raise RuntimeError(
+                    "PRIVATE-PROMPT PRIVATE-MODEL PRIVATE-TRANSCRIPT sk-private-secret"
+                )
+
+            brain_api._refresh_headless_v2_state = _private_failure
+            failure = await client.get(
+                "/headless/v2/state",
+                headers={"x-weaver-key": brain_api.WEAVER_KEY},
+            )
+            private_diagnostics_redacted = (
+                failure.status_code == 503
+                and failure.json()["error"]["code"] == "state-unavailable"
+                and failure.json()["error"]["retryable"] is True
+                and all(marker not in failure.text for marker in (
+                    "PRIVATE-PROMPT",
+                    "PRIVATE-MODEL",
+                    "PRIVATE-TRANSCRIPT",
+                    "sk-private-secret",
+                    "RuntimeError",
+                ))
+            )
+
+            brain_api.HEADLESS_V2_SESSION_ENABLED = True
+            rejected_origin = await client.post(
+                "/headless/v2/session",
+                headers={
+                    "x-weaver-key": brain_api.WEAVER_KEY,
+                    "origin": "https://attacker.invalid",
+                },
+            )
+            origin_allowlist = (
+                rejected_origin.status_code == 403
+                and rejected_origin.json()["error"]["code"] == "authentication-required"
+                and "attacker" not in rejected_origin.text
+            )
+
+            brain_api.HEADLESS_V2_STATE_ENABLED = False
+            health = await client.get("/health")
+            legacy_unchanged = (
+                health.status_code == 200
+                and "x-correlation-id" not in health.headers
+                and "headless_v2" not in health.json()
+                and health.json().get("status") == "ok"
+            )
+    finally:
+        brain_api.WEAVER_KEY = original_values["key"]
+        brain_api.HEADLESS_V2_STATE_ENABLED = original_values["state_flag"]
+        brain_api.HEADLESS_V2_SESSION_ENABLED = original_values["session_flag"]
+        brain_api.HEADLESS_V2_STATE_STORE = original_values["state_store"]
+        brain_api._refresh_headless_v2_state = original_values["refresh"]
+
+    passed = all((
+        stable_errors,
+        request_bounds,
+        private_diagnostics_redacted,
+        origin_allowlist,
+        legacy_unchanged,
+    ))
+    detail = "\n".join([
+        f"  Stable errors preserve safe correlation IDs:        {stable_errors}",
+        f"  Route/query/body/header surfaces are tightly bounded: {request_bounds}",
+        f"  Internal exceptions never reach the client:          {private_diagnostics_redacted}",
+        f"  Browser session origins are allowlisted:              {origin_allowlist}",
+        f"  Legacy API paths retain their existing response shape: {legacy_unchanged}",
+    ])
+    _result(
+        "AT",
+        "Headless v2 HTTP boundaries are allowlisted, bounded, correlated, and redacted",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AU():
+    _header("AU", "Mutation admission deduplicates, rate-limits, replay-guards, and bounds concurrency")
+    import httpx
+
+    import bedrock_brain_api as brain_api
+    from headless_transport import CapsuleReplayGuard
+    from operation_admission import (
+        IdempotencyConflict,
+        OperationAdmission,
+        OperationBusy,
+        OperationRateExceeded,
+    )
+    from weaver_cognition_mesh import CognitionMesh
+    from weaver_neural_fabric import SlidingWindowRateLimiter
+
+    calls = []
+    release = asyncio.Event()
+    started = asyncio.Event()
+    admission = OperationAdmission[dict](
+        rate_limit=10,
+        window_seconds=60,
+        concurrency=1,
+        idempotency_ttl_seconds=60,
+        idempotency_entries=8,
+    )
+
+    async def _single_flight_factory():
+        calls.append("run")
+        started.set()
+        await release.wait()
+        return {"ok": True, "nested": {"count": 1}}
+
+    owner = asyncio.create_task(admission.execute(
+        operation="single-flight",
+        payload={"value": 1},
+        idempotency_key="same-key-123",
+        factory=_single_flight_factory,
+    ))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    duplicate = asyncio.create_task(admission.execute(
+        operation="single-flight",
+        payload={"value": 1},
+        idempotency_key="same-key-123",
+        factory=_single_flight_factory,
+    ))
+    release.set()
+    first_result, replay_result = await asyncio.gather(owner, duplicate)
+    first_result[0]["nested"]["count"] = 9
+    single_flight = (
+        calls == ["run"]
+        and {first_result[1], replay_result[1]} == {False, True}
+        and replay_result[0]["nested"]["count"] == 1
+    )
+
+    conflict_rejected = False
+    try:
+        await admission.execute(
+            operation="single-flight",
+            payload={"value": 2},
+            idempotency_key="same-key-123",
+            factory=_single_flight_factory,
+        )
+    except IdempotencyConflict:
+        conflict_rejected = True
+
+    concurrency_admission = OperationAdmission[dict](
+        rate_limit=10,
+        window_seconds=60,
+        concurrency=1,
+    )
+    hold = asyncio.Event()
+    holding = asyncio.Event()
+
+    async def _hold():
+        holding.set()
+        await hold.wait()
+        return {"ok": True}
+
+    active = asyncio.create_task(concurrency_admission.execute(
+        operation="hold",
+        payload={},
+        idempotency_key=None,
+        factory=_hold,
+    ))
+    await asyncio.wait_for(holding.wait(), timeout=1)
+    busy_rejected = False
+    try:
+        await concurrency_admission.execute(
+            operation="hold-2",
+            payload={},
+            idempotency_key=None,
+            factory=_hold,
+        )
+    except OperationBusy:
+        busy_rejected = True
+    hold.set()
+    await active
+
+    rate_admission = OperationAdmission[dict](
+        rate_limit=1,
+        window_seconds=60,
+        concurrency=1,
+    )
+
+    async def _instant():
+        return {"ok": True}
+
+    await rate_admission.execute(
+        operation="rate",
+        payload={"n": 1},
+        idempotency_key=None,
+        factory=_instant,
+    )
+    rate_rejected = False
+    try:
+        await rate_admission.execute(
+            operation="rate",
+            payload={"n": 2},
+            idempotency_key=None,
+            factory=_instant,
+        )
+    except OperationRateExceeded:
+        rate_rejected = True
+    core_admission = single_flight and conflict_rejected and busy_rejected and rate_rejected
+
+    originals = {
+        "key": brain_api.WEAVER_KEY,
+        "thought": brain_api._run_private_thought,
+        "dream": brain_api._run_private_dream,
+        "persist": brain_api._persist_memory_event,
+        "thought_admission": brain_api.THOUGHT_ADMISSION,
+        "dream_admission": brain_api.DREAM_ADMISSION,
+        "memory_admission": brain_api.MEMORY_SYNC_ADMISSION,
+        "compile_admission": brain_api.INTENT_COMPILE_ADMISSION,
+        "control_admission": brain_api.COGNITION_CONTROL_ADMISSION,
+        "fabric_limiter": brain_api.FABRIC_INTENT_LIMITER,
+        "mutation_limiter": brain_api.COGNITION_MUTATION_LIMITER,
+        "cognition": brain_api.COGNITION,
+        "replay_guard": brain_api.HEADLESS_V2_REPLAY_GUARD,
+    }
+    route_calls = {"thought": 0, "dream": 0, "memory": 0}
+    endpoints_idempotent = False
+    capsule_replay_guarded = False
+    payload_mismatch_rejected = False
+    try:
+        brain_api.WEAVER_KEY = "mutation-admission-test-key"
+        brain_api.THOUGHT_ADMISSION = OperationAdmission(
+            rate_limit=10, window_seconds=60, concurrency=1,
+        )
+        brain_api.DREAM_ADMISSION = OperationAdmission(
+            rate_limit=10, window_seconds=60, concurrency=1,
+        )
+        brain_api.MEMORY_SYNC_ADMISSION = OperationAdmission(
+            rate_limit=10, window_seconds=60, concurrency=1,
+        )
+        brain_api.INTENT_COMPILE_ADMISSION = OperationAdmission(
+            rate_limit=10, window_seconds=60, concurrency=2,
+        )
+        brain_api.COGNITION_CONTROL_ADMISSION = OperationAdmission(
+            rate_limit=20, window_seconds=60, concurrency=2,
+        )
+        brain_api.FABRIC_INTENT_LIMITER = SlidingWindowRateLimiter(100, 60)
+        brain_api.COGNITION_MUTATION_LIMITER = SlidingWindowRateLimiter(100, 60)
+        brain_api.COGNITION = CognitionMesh()
+        brain_api.HEADLESS_V2_REPLAY_GUARD = CapsuleReplayGuard()
+
+        async def _fake_thought(reason="manual"):
+            route_calls["thought"] += 1
+            await asyncio.sleep(0.02)
+            return f"private thought for {reason}"
+
+        async def _fake_dream(reason="manual"):
+            route_calls["dream"] += 1
+            await asyncio.sleep(0.02)
+            return f"private dream for {reason}"
+
+        async def _fake_persist(*args, **kwargs):
+            route_calls["memory"] += 1
+            await asyncio.sleep(0.01)
+
+        brain_api._run_private_thought = _fake_thought
+        brain_api._run_private_dream = _fake_dream
+        brain_api._persist_memory_event = _fake_persist
+
+        transport = httpx.ASGITransport(app=brain_api.app)
+        headers = {"x-weaver-key": brain_api.WEAVER_KEY}
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            thought_headers = {**headers, "idempotency-key": "thought-key-123"}
+            thought_one, thought_two = await asyncio.gather(
+                client.post("/trigger/thought", headers=thought_headers, json={"reason": "test"}),
+                client.post("/trigger/thought", headers=thought_headers, json={"reason": "test"}),
+            )
+            dream_headers = {**headers, "idempotency-key": "dream-key-12345"}
+            dream_one = await client.post(
+                "/trigger/dream", headers=dream_headers, json={"reason": "test"}
+            )
+            dream_two = await client.post(
+                "/trigger/dream", headers=dream_headers, json={"reason": "test"}
+            )
+            memory_headers = {**headers, "idempotency-key": "memory-key-1234"}
+            memory_one = await client.post(
+                "/memory/sync",
+                headers=memory_headers,
+                json={"source": "test", "reason": "same", "evolution": {"turns": 1}},
+            )
+            memory_two = await client.post(
+                "/memory/sync",
+                headers=memory_headers,
+                json={"source": "test", "reason": "same", "evolution": {"turns": 1}},
+            )
+            compile_headers = {**headers, "idempotency-key": "compile-key-123"}
+            compile_payload = {
+                "goal": "Observe safely",
+                "actions": [{"type": "observe", "sensor": "environment"}],
+            }
+            compile_one = await client.post(
+                "/fabric/v1/intent/compile", headers=compile_headers, json=compile_payload
+            )
+            compile_two = await client.post(
+                "/fabric/v1/intent/compile", headers=compile_headers, json=compile_payload
+            )
+            compile_conflict = await client.post(
+                "/fabric/v1/intent/compile",
+                headers=compile_headers,
+                json={
+                    "goal": "Observe differently",
+                    "actions": [{"type": "observe", "sensor": "camera"}],
+                },
+            )
+            capsule = compile_one.json()["capsule"]
+            evaluate_one = await client.post(
+                "/cognition/v1/intent/evaluate",
+                headers=headers,
+                json={"capsule": capsule},
+            )
+            evaluate_two = await client.post(
+                "/cognition/v1/intent/evaluate",
+                headers=headers,
+                json={"capsule": capsule},
+            )
+            observe_headers = {**headers, "idempotency-key": "observe-key-123"}
+            observe_payload = {
+                "body": {"awake": True, "balance": 0.9, "confidence": 0.9}
+            }
+            observe_one = await client.post(
+                "/cognition/v1/observe", headers=observe_headers, json=observe_payload
+            )
+            observe_two = await client.post(
+                "/cognition/v1/observe", headers=observe_headers, json=observe_payload
+            )
+
+        endpoints_idempotent = (
+            thought_one.status_code == thought_two.status_code == 200
+            and {thought_one.json()["idempotent_replay"], thought_two.json()["idempotent_replay"]}
+            == {False, True}
+            and dream_one.status_code == dream_two.status_code == 200
+            and dream_two.json()["idempotent_replay"] is True
+            and memory_one.status_code == memory_two.status_code == 200
+            and memory_two.json()["idempotent_replay"] is True
+            and compile_one.status_code == compile_two.status_code == 200
+            and compile_one.json()["capsule"]["capsule_id"]
+            == compile_two.json()["capsule"]["capsule_id"]
+            and compile_two.json()["idempotent_replay"] is True
+            and observe_one.status_code == observe_two.status_code == 200
+            and observe_two.json()["idempotent_replay"] is True
+            and brain_api.COGNITION.awareness.body_revision == 1
+            and route_calls == {"thought": 1, "dream": 1, "memory": 1}
+        )
+        capsule_replay_guarded = (
+            evaluate_one.status_code == 200
+            and evaluate_two.status_code == 409
+            and "already evaluated" in evaluate_two.json().get("detail", "")
+        )
+        payload_mismatch_rejected = (
+            compile_conflict.status_code == 409
+            and "payload mismatch" in compile_conflict.json().get("detail", "")
+        )
+    finally:
+        brain_api.WEAVER_KEY = originals["key"]
+        brain_api._run_private_thought = originals["thought"]
+        brain_api._run_private_dream = originals["dream"]
+        brain_api._persist_memory_event = originals["persist"]
+        brain_api.THOUGHT_ADMISSION = originals["thought_admission"]
+        brain_api.DREAM_ADMISSION = originals["dream_admission"]
+        brain_api.MEMORY_SYNC_ADMISSION = originals["memory_admission"]
+        brain_api.INTENT_COMPILE_ADMISSION = originals["compile_admission"]
+        brain_api.COGNITION_CONTROL_ADMISSION = originals["control_admission"]
+        brain_api.FABRIC_INTENT_LIMITER = originals["fabric_limiter"]
+        brain_api.COGNITION_MUTATION_LIMITER = originals["mutation_limiter"]
+        brain_api.COGNITION = originals["cognition"]
+        brain_api.HEADLESS_V2_REPLAY_GUARD = originals["replay_guard"]
+
+    passed = all((
+        core_admission,
+        endpoints_idempotent,
+        capsule_replay_guarded,
+        payload_mismatch_rejected,
+    ))
+    detail = "\n".join([
+        f"  Core single-flight, rate, conflict, and concurrency gates work: {core_admission}",
+        f"  Thought, dream, memory, compile, and observe deduplicate: {endpoints_idempotent}",
+        f"  A signed capsule can be evaluated only once across transports: {capsule_replay_guarded}",
+        f"  Reusing a key for a different payload is rejected:           {payload_mismatch_rejected}",
+    ])
+    _result(
+        "AU",
+        "Mutation admission deduplicates, rate-limits, replay-guards, and bounds concurrency",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AV():
+    _header("AV", "Private cognition yields to voice with jitter, token budgets, and cancellation")
+    from headless_scheduler import HeadlessSchedule, HeadlessScheduler, HeadlessTokenBudget
+
+    async def _idle():
+        return True
+
+    async def _noop_reason(reason):
+        return reason
+
+    async def _noop_tick(now):
+        return None
+
+    errors = []
+
+    async def _error(exc):
+        errors.append(type(exc).__name__)
+
+    low_jitter = HeadlessScheduler(
+        HeadlessSchedule(10, 30, jitter_ratio=0.1),
+        active=lambda: True,
+        idle_ready=_idle,
+        run_thought=_noop_reason,
+        run_dream=_noop_reason,
+        on_tick=_noop_tick,
+        on_error=_error,
+        random_unit=lambda: 0.0,
+        monotonic=lambda: 0.0,
+    )
+    high_jitter = HeadlessScheduler(
+        HeadlessSchedule(10, 30, jitter_ratio=0.1),
+        active=lambda: True,
+        idle_ready=_idle,
+        run_thought=_noop_reason,
+        run_dream=_noop_reason,
+        on_tick=_noop_tick,
+        on_error=_error,
+        random_unit=lambda: 1.0,
+        monotonic=lambda: 0.0,
+    )
+    bounded_jitter = (
+        low_jitter._next_thought == 9.0
+        and low_jitter._next_dream == 27.0
+        and high_jitter._next_thought == 11.0
+        and high_jitter._next_dream == 33.0
+    )
+
+    budget_clock = [0.0]
+    thought_runs = []
+
+    async def _budget_thought(reason):
+        thought_runs.append(budget_clock[0])
+        return reason
+
+    budget_scheduler = HeadlessScheduler(
+        HeadlessSchedule(1, 100, tick_seconds=1),
+        active=lambda: True,
+        idle_ready=_idle,
+        run_thought=_budget_thought,
+        run_dream=_noop_reason,
+        on_tick=_noop_tick,
+        on_error=_error,
+        token_budget=HeadlessTokenBudget(
+            thought_tokens=10,
+            dream_tokens=20,
+            tokens_per_hour=20,
+        ),
+        random_unit=lambda: 0.5,
+        monotonic=lambda: budget_clock[0],
+    )
+    for moment in (1.0, 2.0, 3.0):
+        budget_clock[0] = moment
+        await budget_scheduler.run_cycle()
+    budget_state = budget_scheduler.snapshot()
+    token_budget_enforced = (
+        thought_runs == [1.0, 2.0]
+        and budget_state["thought_runs"] == 2
+        and budget_state["tokens_used_last_hour"] == 20
+        and budget_state["budget_deferrals"] == 1
+    )
+
+    priority_event = asyncio.Event()
+    preempt_clock = [0.0]
+    private_started = asyncio.Event()
+    private_cancelled = asyncio.Event()
+
+    async def _long_private(reason):
+        private_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            private_cancelled.set()
+
+    preempt_scheduler = HeadlessScheduler(
+        HeadlessSchedule(1, 100, tick_seconds=1),
+        active=lambda: True,
+        idle_ready=_idle,
+        run_thought=_long_private,
+        run_dream=_noop_reason,
+        on_tick=_noop_tick,
+        on_error=_error,
+        priority_event=priority_event,
+        random_unit=lambda: 0.5,
+        monotonic=lambda: preempt_clock[0],
+    )
+    preempt_clock[0] = 1.0
+    cycle = asyncio.create_task(preempt_scheduler.run_cycle())
+    await asyncio.wait_for(private_started.wait(), timeout=1)
+    priority_event.set()
+    await asyncio.wait_for(cycle, timeout=1)
+    preempt_state = preempt_scheduler.snapshot()
+    voice_preempts_background = (
+        private_cancelled.is_set()
+        and preempt_state["preemptions"] == 1
+        and preempt_state["thought_runs"] == 0
+        and errors == []
+    )
+
+    import bedrock_brain_api as brain_api
+
+    original_interactive = brain_api._interactive_requests
+    original_voice = brain_api._voice_sessions_active
+    original_last = brain_api._last_interactive_at
+    original_event = brain_api._interactive_priority_event.is_set()
+    try:
+        brain_api._interactive_requests = 0
+        brain_api._voice_sessions_active = 0
+        brain_api._interactive_priority_event.clear()
+        await brain_api._voice_session_started()
+        voice_sets_priority = (
+            brain_api._voice_sessions_active == 1
+            and brain_api._interactive_priority_event.is_set()
+            and not await brain_api._headless_idle_ready()
+        )
+        await brain_api._voice_session_finished()
+        voice_sets_priority = (
+            voice_sets_priority
+            and brain_api._voice_sessions_active == 0
+            and not brain_api._interactive_priority_event.is_set()
+        )
+    finally:
+        brain_api._interactive_requests = original_interactive
+        brain_api._voice_sessions_active = original_voice
+        brain_api._last_interactive_at = original_last
+        if original_event:
+            brain_api._interactive_priority_event.set()
+        else:
+            brain_api._interactive_priority_event.clear()
+
+    with open(os.path.join(PROJ, "bedrock_brain_api.py"), "r", encoding="utf-8") as fh:
+        brain_source = fh.read()
+    production_budget_connected = all(marker in brain_source for marker in (
+        "jitter_ratio=0.08",
+        "HeadlessTokenBudget(",
+        "HEADLESS_TOKEN_BUDGET_PER_HOUR",
+        "priority_event=_interactive_priority_event",
+        "await _voice_session_started()",
+        "await _voice_session_finished()",
+    ))
+
+    passed = all((
+        bounded_jitter,
+        token_budget_enforced,
+        voice_preempts_background,
+        voice_sets_priority,
+        production_budget_connected,
+    ))
+    detail = "\n".join([
+        f"  Thought/dream jitter stays inside the configured envelope: {bounded_jitter}",
+        f"  Hourly private token budget defers excess work:         {token_budget_enforced}",
+        f"  Live priority cancels in-flight background cognition:   {voice_preempts_background}",
+        f"  Voice sessions close the headless idle gate:             {voice_sets_priority}",
+        f"  Production scheduler wires every QoS control:            {production_budget_connected}",
+    ])
+    _result(
+        "AV",
+        "Private cognition yields to voice with jitter, token budgets, and cancellation",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AW():
+    _header("AW", "Private cognition stays in a bounded vault while clients receive safe metadata")
+    import copy
+    import httpx
+
+    from headless_privacy import PrivateCognitionVault
+    from operation_admission import OperationAdmission
+
+    vault_clock = [1_700_000_000.0]
+    vault = PrivateCognitionVault(
+        max_entries=2,
+        ttl_seconds=60,
+        max_content_chars=240,
+        clock=lambda: vault_clock[0],
+    )
+    first_private = "PRIVATE-FIRST body pose and voice latency"
+    latest_private = "PRIVATE-LATEST environment memory safety"
+    await vault.store("thought", first_private)
+    vault_clock[0] += 1
+    await vault.store("dream", "PRIVATE-DREAM attention and privacy")
+    vault_clock[0] += 1
+    await vault.store("thought", latest_private)
+    public_metadata = await vault.public_metadata()
+    serialized_metadata = json.dumps(public_metadata, default=str)
+    bounded_vault = (
+        await vault.latest("thought") == latest_private
+        and await vault.latest("dream") == "PRIVATE-DREAM attention and privacy"
+        and public_metadata["retention"]["entries"] == 2
+        and public_metadata["retention"]["max_entries"] == 2
+        and public_metadata["retention"]["ttl_seconds"] == 60
+        and public_metadata["thought"]["content_hidden"] is True
+        and set(public_metadata["thought"]["topics"]).issubset({
+            "attention", "body", "environment", "latency", "memory", "privacy", "safety", "voice",
+        })
+        and all(private not in serialized_metadata for private in (
+            first_private,
+            latest_private,
+            "PRIVATE-DREAM",
+        ))
+    )
+    vault_clock[0] += 61
+    expired_vault = (
+        await vault.latest("thought") == ""
+        and (await vault.public_metadata())["retention"]["entries"] == 0
+    )
+
+    import bedrock_brain_api as brain_api
+
+    originals = {
+        "key": brain_api.WEAVER_KEY,
+        "summaries": brain_api.HEADLESS_V2_SUMMARIES_ENABLED,
+        "state_flag": brain_api.HEADLESS_V2_STATE_ENABLED,
+        "vault": brain_api.PRIVATE_COGNITION,
+        "internal": brain_api._internal_chat,
+        "persist": brain_api._persist_memory_event,
+        "run_thought": brain_api._run_private_thought,
+        "admission": brain_api.THOUGHT_ADMISSION,
+        "state": copy.deepcopy(brain_api.STATE),
+    }
+    raw_sentinel = "PRIVATE-CHAIN-OF-THOUGHT-SENTINEL body voice latency"
+    persisted_events = []
+    safe_persistence = False
+    public_cutover = False
+    compatibility_fallback = False
+    safe_trigger = False
+    try:
+        brain_api.WEAVER_KEY = ""
+        brain_api.HEADLESS_V2_SUMMARIES_ENABLED = True
+        brain_api.HEADLESS_V2_STATE_ENABLED = False
+        brain_api.PRIVATE_COGNITION = PrivateCognitionVault(
+            max_entries=4,
+            ttl_seconds=300,
+        )
+
+        async def _fake_internal(*args, **kwargs):
+            return raw_sentinel
+
+        async def _capture_persist(kind, content, **kwargs):
+            persisted_events.append({"kind": kind, "content": content, "meta": kwargs.get("meta")})
+
+        brain_api._internal_chat = _fake_internal
+        brain_api._persist_memory_event = _capture_persist
+        generated = await brain_api._generate_private_thought("privacy-test")
+        safe_persistence = (
+            generated == raw_sentinel
+            and await brain_api.PRIVATE_COGNITION.latest("thought") == raw_sentinel
+            and len(persisted_events) == 1
+            and raw_sentinel not in persisted_events[0]["content"]
+            and persisted_events[0]["meta"]["content_hidden"] is True
+            and "last_thought" not in brain_api.STATE
+            and bool(brain_api.STATE["last_thought_digest"])
+            and bool(brain_api.STATE["last_thought_topics"])
+        )
+
+        transport = httpx.ASGITransport(app=brain_api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            safe_state = await client.get("/state")
+            public_cutover = (
+                safe_state.status_code == 200
+                and raw_sentinel not in safe_state.text
+                and "last_thought" not in safe_state.json()
+                and safe_state.json()["private_cognition"]["thought"]["content_hidden"] is True
+                and bool(safe_state.json()["private_cognition"]["thought"]["topics"])
+            )
+
+            brain_api.HEADLESS_V2_SUMMARIES_ENABLED = False
+            compatibility_state = await client.get("/state")
+            compatibility_fallback = (
+                compatibility_state.status_code == 200
+                and compatibility_state.json()["last_thought"] == raw_sentinel
+            )
+
+            brain_api.HEADLESS_V2_SUMMARIES_ENABLED = True
+            brain_api.THOUGHT_ADMISSION = OperationAdmission(
+                rate_limit=10,
+                window_seconds=60,
+                concurrency=1,
+            )
+
+            async def _bounded_trigger(reason="manual"):
+                return raw_sentinel
+
+            brain_api._run_private_thought = _bounded_trigger
+            trigger = await client.post("/trigger/thought", json={"reason": "privacy"})
+            safe_trigger = (
+                trigger.status_code == 200
+                and raw_sentinel not in trigger.text
+                and "thought" not in trigger.json()
+                and trigger.json()["private_cognition"]["content_hidden"] is True
+            )
+    finally:
+        brain_api.WEAVER_KEY = originals["key"]
+        brain_api.HEADLESS_V2_SUMMARIES_ENABLED = originals["summaries"]
+        brain_api.HEADLESS_V2_STATE_ENABLED = originals["state_flag"]
+        brain_api.PRIVATE_COGNITION = originals["vault"]
+        brain_api._internal_chat = originals["internal"]
+        brain_api._persist_memory_event = originals["persist"]
+        brain_api._run_private_thought = originals["run_thought"]
+        brain_api.THOUGHT_ADMISSION = originals["admission"]
+        brain_api.STATE.clear()
+        brain_api.STATE.update(originals["state"])
+
+    with open(os.path.join(PROJ, "headless_schemas.py"), "r", encoding="utf-8") as fh:
+        schema_source = fh.read()
+    schema_has_no_raw_cognition = (
+        "private_content_hidden: Literal[True]" in schema_source
+        and "thought_topics:" in schema_source
+        and "dream_topics:" in schema_source
+        and "thought: str" not in schema_source
+        and "dream: str" not in schema_source
+    )
+
+    passed = all((
+        bounded_vault,
+        expired_vault,
+        safe_persistence,
+        public_cutover,
+        compatibility_fallback,
+        safe_trigger,
+        schema_has_no_raw_cognition,
+    ))
+    detail = "\n".join([
+        f"  Raw thought/dream retention is count, size, and TTL bounded: {bounded_vault}",
+        f"  Expired private cognition is removed:                  {expired_vault}",
+        f"  Privacy mode persists metadata instead of model text:  {safe_persistence}",
+        f"  Public state exposes only topic/status metadata:        {public_cutover}",
+        f"  Flag-off legacy fallback remains reversible:            {compatibility_fallback}",
+        f"  Manual triggers cannot return raw cognition in cutover: {safe_trigger}",
+        f"  V2 schemas have no raw thought/dream field:             {schema_has_no_raw_cognition}",
+    ])
+    _result(
+        "AW",
+        "Private cognition stays in a bounded vault while clients receive safe metadata",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AX():
+    _header("AX", "Memory provenance, deduplication, freshness, retention, and deletion are auditable")
+    import tempfile
+    from pathlib import Path
+
+    import httpx
+
+    from memory_lifecycle import MemoryLifecycle
+    from memory_manager import MemoryManager
+
+    lifecycle_clock = [1_700_000_000.0]
+    with tempfile.TemporaryDirectory() as lifecycle_tmp:
+        lifecycle_root = Path(lifecycle_tmp)
+        lifecycle = MemoryLifecycle(
+            lifecycle_root / "index.json",
+            lifecycle_root / "deletions.jsonl",
+            max_records=64,
+            dedupe_window_seconds=300,
+            clock=lambda: lifecycle_clock[0],
+        )
+        fresh = lifecycle.admit(
+            kind="memory",
+            content="PRIVATE-LIFECYCLE-CONTENT",
+            source="test-source",
+            speaker="user",
+            meta={"origin": "unit-test"},
+            retention_days=1,
+        )
+        duplicate = lifecycle.admit(
+            kind="memory",
+            content="PRIVATE-LIFECYCLE-CONTENT",
+            source="test-source",
+            speaker="user",
+            meta={"origin": "unit-test"},
+            retention_days=1,
+        )
+        fresh_state = lifecycle.state()
+        lifecycle_clock[0] += 43_200
+        aging_state = lifecycle.state()
+        lifecycle_clock[0] += 43_201
+        due_ids = lifecycle.due_memory_ids()
+        lifecycle_contract = (
+            fresh["deduplicated"] is False
+            and duplicate["deduplicated"] is True
+            and duplicate["memory_id"] == fresh["memory_id"]
+            and duplicate["occurrences"] == 2
+            and fresh["provenance"]["source"] == "test-source"
+            and fresh["provenance"]["origin"] == "unit-test"
+            and fresh_state["duplicates_consolidated"] == 1
+            and fresh_state["freshness_score"] == 1.0
+            and 0 < aging_state["freshness_score"] < 1
+            and due_ids == [fresh["memory_id"]]
+            and "PRIVATE-LIFECYCLE-CONTENT" not in (lifecycle_root / "index.json").read_text()
+        )
+
+    with tempfile.TemporaryDirectory() as manager_tmp:
+        manager = MemoryManager(manager_tmp)
+        private_content = "PRIVATE-MEMORY-DELETE-SENTINEL blue sculpture preference"
+        first = manager.append_event_sync(
+            "conversation",
+            private_content,
+            source="headless-test",
+            speaker="user",
+            meta={"origin": "browser", "retention_days": 30},
+        )
+        duplicate_event = manager.append_event_sync(
+            "conversation",
+            private_content,
+            source="headless-test",
+            speaker="user",
+            meta={"origin": "browser", "retention_days": 30},
+        )
+        memory_id = first["memory_id"]
+        canonical_lines_before = manager.paths["events"].read_text().splitlines()
+        durable_dedup = (
+            first["deduplicated"] is False
+            and duplicate_event["deduplicated"] is True
+            and duplicate_event["memory"]["occurrences"] == 2
+            and len(canonical_lines_before) == 1
+            and memory_id in manager.paths["transcript"].read_text()
+            and manager.lifecycle.state()["duplicates_consolidated"] == 1
+        )
+
+        import bedrock_brain_api as brain_api
+
+        originals = {
+            "manager": brain_api._memory_manager,
+            "key": brain_api.WEAVER_KEY,
+            "state_flag": brain_api.HEADLESS_V2_STATE_ENABLED,
+            "session_flag": brain_api.HEADLESS_V2_SESSION_ENABLED,
+        }
+        lifecycle_api = False
+        deletion_api = False
+        try:
+            brain_api._memory_manager = manager
+            brain_api.WEAVER_KEY = ""
+            brain_api.HEADLESS_V2_STATE_ENABLED = True
+            brain_api.HEADLESS_V2_SESSION_ENABLED = False
+            transport = httpx.ASGITransport(app=brain_api.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                state_response = await client.get("/headless/v2/memory")
+                lifecycle_api = (
+                    state_response.status_code == 200
+                    and state_response.json()["active_records"] == 1
+                    and state_response.json()["duplicates_consolidated"] == 1
+                    and state_response.json()["freshness_score"] > 0
+                    and private_content not in state_response.text
+                    and str(manager.vault_dir) not in state_response.text
+                )
+                delete_response = await client.delete(
+                    f"/headless/v2/memory/{memory_id}",
+                    headers={"x-weaver-reason": "user requested deletion"},
+                )
+                repeat_delete = await client.delete(
+                    f"/headless/v2/memory/{memory_id}",
+                    headers={"x-weaver-reason": "repeat deletion"},
+                )
+                deletion_api = (
+                    delete_response.status_code == 200
+                    and delete_response.json()["deleted"] is True
+                    and delete_response.json()["already_deleted"] is False
+                    and delete_response.json()["storage_records_removed"] >= 2
+                    and delete_response.json()["storage_complete"] is True
+                    and repeat_delete.status_code == 200
+                    and repeat_delete.json()["already_deleted"] is True
+                    and private_content not in delete_response.text
+                )
+        finally:
+            brain_api._memory_manager = originals["manager"]
+            brain_api.WEAVER_KEY = originals["key"]
+            brain_api.HEADLESS_V2_STATE_ENABLED = originals["state_flag"]
+            brain_api.HEADLESS_V2_SESSION_ENABLED = originals["session_flag"]
+
+        remaining_text = []
+        for path in manager.paths.values():
+            if isinstance(path, Path) and path.is_file() and path.suffix != ".npz":
+                remaining_text.append(path.read_text(encoding="utf-8", errors="replace"))
+        deletion_audit = manager.paths["memory_deletions"].read_text()
+        content_erased = (
+            all(private_content not in text for text in remaining_text)
+            and memory_id in deletion_audit
+            and "user requested deletion" in deletion_audit
+            and manager.lifecycle.state()["deletion_audit_events"] == 1
+            and manager.lifecycle.state()["active_records"] == 0
+        )
+
+    passed = all((
+        lifecycle_contract,
+        durable_dedup,
+        lifecycle_api,
+        deletion_api,
+        content_erased,
+    ))
+    detail = "\n".join([
+        f"  Metadata index tracks provenance, freshness, and retention: {lifecycle_contract}",
+        f"  Duplicate writes consolidate without duplicating content:   {durable_dedup}",
+        f"  Public lifecycle API exposes counts, never content/paths:    {lifecycle_api}",
+        f"  Authenticated deletion is idempotent and reports completion: {deletion_api}",
+        f"  Canonical, derived, and vector content is erased with audit: {content_erased}",
+    ])
+    _result(
+        "AX",
+        "Memory provenance, deduplication, freshness, retention, and deletion are auditable",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AY():
+    _header("AY", "Awareness fusion joins body, world, cognition, fabric, and dependency freshness")
+    import json
+    import time
+
+    from awareness_fusion import fuse_awareness
+    from headless_state import build_public_state
+    from weaver_cognition_mesh import CognitionMesh
+    from weaver_neural_fabric import NeuralFabric
+
+    now = time.time()
+    now_ms = int(now * 1_000)
+    channels = {
+        name: {
+            "fresh": True,
+            "age_ms": 0,
+            "confidence": confidence,
+            "observed_at_ms": now_ms,
+        }
+        for name, confidence in {
+            "body": 0.95,
+            "environment": 0.9,
+            "camera": 0.85,
+            "microphone": 0.85,
+        }.items()
+    }
+    fabric = NeuralFabric(capacity_units=8, realtime_reserved_units=2).snapshot()
+    nominal_cognition = {"status": "nominal"}
+    dependencies = {
+        "cortex": {
+            "enabled": True,
+            "required": True,
+            "status": "ready",
+            "observed_at_ms": now_ms,
+        },
+        "n8n": {
+            "enabled": True,
+            "required": False,
+            "status": "busy",
+            "observed_at_ms": now_ms - 120_000,
+            "ttl_ms": 1_000,
+        },
+        "voice": {
+            "enabled": True,
+            "required": False,
+            "status": "ready",
+            "observed_at_ms": now_ms,
+        },
+    }
+    nominal = fuse_awareness(
+        channels=channels,
+        fabric=fabric,
+        cognition=nominal_cognition,
+        dependencies=dependencies,
+        headless_fresh=True,
+        now_ms=now_ms,
+    )
+    long_turn_survives = (
+        nominal["status"] == "nominal"
+        and nominal["confidence"] >= 0.85
+        and nominal["dependencies"]["status"] == "busy"
+        and nominal["dependencies"]["services"]["n8n"]["fresh"] is True
+        and not nominal["degraded_reasons"]
+    )
+
+    body_stale_channels = {name: dict(value) for name, value in channels.items()}
+    body_stale_channels["body"] = {
+        "fresh": False,
+        "age_ms": 4_000,
+        "confidence": 0.0,
+        "observed_at_ms": now_ms - 4_000,
+    }
+    body_stale = fuse_awareness(
+        channels=body_stale_channels,
+        fabric=fabric,
+        cognition=nominal_cognition,
+        dependencies=dependencies,
+        headless_fresh=True,
+        now_ms=now_ms,
+    )
+    stale_body_fails_closed = (
+        body_stale["status"] == "degraded"
+        and "body-stale" in body_stale["degraded_reasons"]
+        and body_stale["confidence"] < nominal["confidence"]
+    )
+
+    invalid_fabric = {
+        **fabric,
+        "ledger": {**fabric["ledger"], "valid": False},
+    }
+    fabric_guarded = fuse_awareness(
+        channels=channels,
+        fabric=invalid_fabric,
+        cognition=nominal_cognition,
+        dependencies=dependencies,
+        headless_fresh=True,
+        now_ms=now_ms,
+    )
+    invalid_ledger_fails_closed = (
+        fabric_guarded["status"] == "degraded"
+        and fabric_guarded["sources"]["fabric"]["confidence"] == 0
+        and "fabric-ledger-invalid" in fabric_guarded["degraded_reasons"]
+    )
+
+    optional_down = {
+        name: dict(value) for name, value in dependencies.items()
+    }
+    optional_down["n8n"] = {
+        **optional_down["n8n"],
+        "status": "degraded",
+        "observed_at_ms": now_ms,
+    }
+    graceful_fallback = fuse_awareness(
+        channels=channels,
+        fabric=fabric,
+        cognition=nominal_cognition,
+        dependencies=optional_down,
+        headless_fresh=True,
+        now_ms=now_ms,
+    )
+    optional_dependency_is_limited = (
+        graceful_fallback["status"] == "limited"
+        and graceful_fallback["dependencies"]["status"] == "limited"
+        and "dependency-limited" in graceful_fallback["degraded_reasons"]
+    )
+
+    mesh = CognitionMesh()
+    mesh.observe({
+        "observed_at_ms": now_ms,
+        "body": {"awake": True, "balance": 0.98, "confidence": 0.95},
+        "environment": {"zone": "lounge", "confidence": 0.9},
+        "sensors": {
+            "camera": {"confidence": 0.85, "sample_age_ms": 0},
+            "microphone": {"confidence": 0.85, "sample_age_ms": 0},
+        },
+    })
+    cognition = mesh.snapshot(fabric=fabric)
+    legacy = {
+        "active": True,
+        "started_at": now - 20,
+        "last_tick_at": now,
+        "thoughts": 0,
+        "dreams": 0,
+        "last_error": "",
+        "dependency_health": dependencies,
+        "voice_realtime": {
+            "sessions_started": 0,
+            "prewarm": {"status": "ready"},
+            "slo": {
+                "status": "no-data",
+                "reaction_target_ms": 200,
+                "queue_target_ms": 120,
+                "semantic_target_ms": 3_000,
+            },
+        },
+    }
+    public = build_public_state(legacy, fabric, cognition, now=now)
+    public_json = public.model_dump_json()
+    public_contract = (
+        public.awareness.fusion_version == 1
+        and public.awareness.status == "nominal"
+        and public.awareness.sources.body.fresh is True
+        and public.awareness.sources.world.fresh is True
+        and public.awareness.dependencies.services.n8n.status == "busy"
+        and public.freshness.dependencies.fresh is True
+        and public.system.ready is True
+        and len(public_json) < 65_536
+    )
+    public_payload = json.loads(public_json)
+    safe_explanations = (
+        set(public_payload["awareness"]) == {
+            "fusion_version", "status", "confidence", "degraded_reasons",
+            "body_revision", "world_revision", "awake", "zone",
+            "visible_objects", "channels", "sources", "dependencies",
+        }
+        and "url" not in public_json.lower()
+        and "error" not in public_json.lower()
+        and "PRIVATE" not in public_json
+    )
+
+    passed = all((
+        long_turn_survives,
+        stale_body_fails_closed,
+        invalid_ledger_fails_closed,
+        optional_dependency_is_limited,
+        public_contract,
+        safe_explanations,
+    ))
+    detail = "\n".join([
+        f"  A 115-second n8n busy state remains live and nominal:       {long_turn_survives}",
+        f"  Stale body data lowers confidence and fails closed:         {stale_body_fails_closed}",
+        f"  Invalid Fabric proof ledger degrades unified awareness:     {invalid_ledger_fails_closed}",
+        f"  Optional dependency loss preserves a limited fallback:      {optional_dependency_is_limited}",
+        f"  Public v2 state carries the complete bounded fusion model:   {public_contract}",
+        f"  Degraded explanations contain no raw errors or endpoints:   {safe_explanations}",
+    ])
+    _result(
+        "AY",
+        "Awareness fusion joins body, world, cognition, fabric, and dependency freshness",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_AZ():
+    _header("AZ", "Realtime voice is sequenced, resumable, interruptible, and telemetry-bounded")
+    import json
+    from pathlib import Path
+
+    from voice_reliability import (
+        VoiceFrame,
+        VoiceProtocolError,
+        VoiceResumeRegistry,
+        VoiceSessionReliability,
+        decode_voice_frame,
+        encode_voice_frame,
+    )
+
+    audio = b"\x01\x02" * 1_024
+    encoded = encode_voice_frame(1, 1_720_000_000_000, audio)
+    decoded = decode_voice_frame(encoded, max_audio_bytes=32_000)
+    envelope_contract = (
+        encoded[:4] == b"WVR2"
+        and decoded.sequence == 1
+        and decoded.captured_at_ms == 1_720_000_000_000
+        and decoded.audio == audio
+    )
+
+    session = VoiceSessionReliability(max_jitter_ms=120)
+    first = session.ingress.ingest(VoiceFrame(1, 1_000, b"one"), arrival_ms=1_000)
+    third = session.ingress.ingest(VoiceFrame(3, 1_040, b"three"), arrival_ms=1_040)
+    second = session.ingress.ingest(VoiceFrame(2, 1_020, b"two"), arrival_ms=1_060)
+    duplicate = session.ingress.ingest(VoiceFrame(2, 1_020, b"two"), arrival_ms=1_080)
+    fifth = session.ingress.ingest(VoiceFrame(5, 1_100, b"five"), arrival_ms=1_100)
+    sixth = session.ingress.ingest(VoiceFrame(6, 1_120, b"six"), arrival_ms=1_230)
+    jitter_contract = (
+        [frame.sequence for frame in first["frames"]] == [1]
+        and not third["frames"]
+        and [frame.sequence for frame in second["frames"]] == [2, 3]
+        and duplicate["duplicate"] is True
+        and not fifth["frames"]
+        and [frame.sequence for frame in sixth["frames"]] == [5, 6]
+        and sixth["missing"] == 1
+        and session.ingress.ack_sequence == 6
+        and session.ingress.snapshot()["max_buffer_depth"] <= 24
+    )
+
+    telemetry = session.record_telemetry({
+        "rttMs": 28.4,
+        "packetLoss": 0.01,
+        "captureJitterMs": 4.2,
+        "audioRoute": "built-in",
+        "thermalState": "nominal",
+        "lowPowerMode": False,
+        "deviceClass": "iphone-16e",
+    })
+    telemetry_rejected = False
+    try:
+        session.record_telemetry({"deviceIdentifier": "PRIVATE-DEVICE-ID"})
+    except VoiceProtocolError:
+        telemetry_rejected = True
+    telemetry_contract = (
+        telemetry["deviceClass"] == "iphone-16e"
+        and telemetry["packetLoss"] == 0.01
+        and telemetry_rejected
+        and "PRIVATE-DEVICE-ID" not in json.dumps(session.snapshot())
+    )
+
+    generation = session.interrupt()
+    server_sequence = session.next_server_sequence()
+    output_ack = session.acknowledge_output(server_sequence)
+    interrupt_contract = (
+        generation == 1
+        and session.interruptions == 1
+        and output_ack == server_sequence
+        and session.last_output_ack == server_sequence
+    )
+
+    resume_clock = [1_700_000_000.0]
+    registry = VoiceResumeRegistry(ttl_seconds=60, max_entries=16, clock=lambda: resume_clock[0])
+    ticket = registry.issue(session.resume_state())
+    registry.update(ticket, {**session.resume_state(), "expected_sequence": 7})
+    restored = registry.consume(ticket)
+    replayed = registry.consume(ticket)
+    resume_contract = (
+        restored is not None
+        and restored["expected_sequence"] == 7
+        and replayed is None
+        and len(registry) == 0
+    )
+
+    import bedrock_brain_api as brain_api
+
+    class _FakeVoiceWebSocket:
+        def __init__(self, incoming):
+            self.headers = {"sec-websocket-protocol": "weaver-realtime"}
+            self.incoming = list(incoming)
+            self.sent = []
+            self.accepted = False
+            self.closed = None
+
+        async def accept(self, subprotocol=None):
+            self.accepted = subprotocol == "weaver-realtime"
+
+        async def receive(self):
+            if self.incoming:
+                return self.incoming.pop(0)
+            return {"type": "websocket.disconnect"}
+
+        async def send_json(self, value):
+            self.sent.append(value)
+
+        async def close(self, code=1000):
+            self.closed = code
+
+    websocket = _FakeVoiceWebSocket([
+        {
+            "type": "websocket.receive",
+            "text": json.dumps({
+                "type": "start",
+                "protocolVersion": 2,
+                "inputSampleRate": brain_api.VOICE_INPUT_RATE,
+                "outputSampleRate": brain_api.VOICE_OUTPUT_RATE,
+                "device": {
+                    "audioRoute": "built-in",
+                    "thermalState": "nominal",
+                    "lowPowerMode": False,
+                    "deviceClass": "iphone-16e",
+                },
+            }),
+        },
+        {
+            "type": "websocket.receive",
+            "bytes": encode_voice_frame(1, 1_720_000_000_000, audio),
+        },
+        {
+            "type": "websocket.receive",
+            "text": json.dumps({"type": "interrupt"}),
+        },
+        {
+            "type": "websocket.receive",
+            "text": json.dumps({"type": "ping", "t": 123}),
+        },
+        {
+            "type": "websocket.receive",
+            "text": json.dumps({"type": "stop"}),
+        },
+    ])
+    originals = {
+        "mode": brain_api._voice_mode,
+        "cortex": brain_api.VOICE_CORTEX_ENABLED,
+        "key": brain_api.WEAVER_KEY,
+    }
+    endpoint_contract = False
+    try:
+        brain_api._voice_mode = lambda: "mock"
+        brain_api.VOICE_CORTEX_ENABLED = False
+        brain_api.WEAVER_KEY = ""
+        await brain_api.realtime_voice(websocket)
+        event_types = [event.get("type") for event in websocket.sent]
+        server_sequences = [
+            event.get("serverSeq") for event in websocket.sent
+            if isinstance(event.get("serverSeq"), int)
+        ]
+        ready = next((event for event in websocket.sent if event.get("type") == "ready"), {})
+        input_ack = next(
+            (event for event in websocket.sent if event.get("type") == "input_ack"), {}
+        )
+        endpoint_contract = (
+            websocket.accepted
+            and ready.get("protocolVersion") == 2
+            and isinstance(ready.get("resumeToken"), str)
+            and input_ack.get("ackSeq") == 1
+            and input_ack.get("receivedSeq") == 1
+            and "session_ready" in event_types
+            and "interrupted" in event_types
+            and "pong" in event_types
+            and server_sequences == sorted(set(server_sequences))
+            and websocket.closed == 1000
+        )
+    finally:
+        brain_api._voice_mode = originals["mode"]
+        brain_api.VOICE_CORTEX_ENABLED = originals["cortex"]
+        brain_api.WEAVER_KEY = originals["key"]
+
+    repo_root = Path(PROJ).parents[1]
+    realtime_source = (
+        repo_root / "ios/WeaverNeural/WeaverNeural/Services/RealtimeVoiceClient.swift"
+    ).read_text()
+    app_source = (
+        repo_root / "ios/WeaverNeural/WeaverNeural/AppModel.swift"
+    ).read_text()
+    native_contract = all(marker in realtime_source + app_source for marker in (
+        "VoiceBinaryFrame.encode",
+        '"protocolVersion": VoiceBinaryFrame.protocolVersion',
+        '"type": "output_ack"',
+        '"type": "telemetry"',
+        "resumeToken",
+        "sendPing()",
+        "Double.random",
+        'case "interrupted"',
+        'case "renew_required"',
+    ))
+
+    passed = all((
+        envelope_contract,
+        jitter_contract,
+        telemetry_contract,
+        interrupt_contract,
+        resume_contract,
+        endpoint_contract,
+        native_contract,
+    ))
+    detail = "\n".join([
+        f"  Native-efficient binary frames carry sequence and capture time: {envelope_contract}",
+        f"  Jitter buffer reorders, deduplicates, and bounds packet loss:  {jitter_contract}",
+        f"  Device telemetry is useful, bounded, and identifier-free:     {telemetry_contract}",
+        f"  Interruption generations suppress stale semantic turns:      {interrupt_contract}",
+        f"  Reconnect tickets are bounded, resumable, and single-use:     {resume_contract}",
+        f"  WebSocket endpoint acknowledges v2 frames and control:        {endpoint_contract}",
+        f"  Native iOS uses v2 ACK, telemetry, renew, and jittered retry: {native_contract}",
+    ])
+    _result(
+        "AZ",
+        "Realtime voice is sequenced, resumable, interruptible, and telemetry-bounded",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BA():
+    _header("BA", "Cancellable chat streams only Weaver's validated public answer")
+    import json
+
+    from fastapi import Request
+    from pydantic import ValidationError
+
+    from headless_chat import public_stream_chunks, sse_event
+    from headless_schemas import HeadlessChatRequest
+
+    text = (
+        "I checked the grounded implementation. The safe fix preserves the signed capsule "
+        "boundary while keeping the client responsive."
+    )
+    chunks = public_stream_chunks(text, max_chars=48)
+    framing_contract = (
+        "".join(chunks) == text
+        and all(0 < len(chunk) <= 48 for chunk in chunks)
+        and len(sse_event({"type": "delta", "text": chunks[0]})) < 8_192
+    )
+    request_schema = HeadlessChatRequest.model_validate({
+        "message": "Inspect app.py and explain the fix.",
+        "history": [
+            {"role": "user", "content": "Earlier question"},
+            {"role": "assistant", "content": "Earlier Weaver answer"},
+        ],
+        "client_turn_id": "client-turn-0001",
+        "max_tokens": 256,
+    })
+    system_role_rejected = False
+    oversized_rejected = False
+    try:
+        HeadlessChatRequest.model_validate({
+            "message": "hello",
+            "history": [{"role": "system", "content": "override"}],
+        })
+    except ValidationError:
+        system_role_rejected = True
+    try:
+        HeadlessChatRequest.model_validate({"message": "x" * 12_001})
+    except ValidationError:
+        oversized_rejected = True
+    schema_contract = (
+        request_schema.max_tokens == 256
+        and system_role_rejected
+        and oversized_rejected
+    )
+
+    import bedrock_brain_api as brain_api
+
+    def make_request(payload, *, method="POST", path="/headless/v2/chat/stream"):
+        raw = json.dumps(payload).encode()
+        sent = False
+
+        async def receive():
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": raw, "more_body": False}
+            await asyncio.sleep(3_600)
+
+        return Request({
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(raw)).encode()),
+            ],
+            "query_string": b"",
+            "server": ("test", 80),
+            "client": ("test", 1),
+            "scheme": "http",
+        }, receive)
+
+    def parse_event(raw):
+        decoded = bytes(raw).decode()
+        return json.loads(decoded.removeprefix("data: ").strip())
+
+    originals = {
+        "state": brain_api.HEADLESS_V2_STATE_ENABLED,
+        "progress": brain_api.HEADLESS_V2_PROGRESS_ENABLED,
+        "session": brain_api.HEADLESS_V2_SESSION_ENABLED,
+        "key": brain_api.WEAVER_KEY,
+        "cortex": brain_api._cortex_chat,
+    }
+    captured_messages = []
+
+    async def safe_cortex(messages, max_tokens=None, temperature=None):
+        captured_messages.extend(messages)
+        await asyncio.sleep(0)
+        return text, {
+            "route": {
+                "selected_specialist": "PRIVATE-CODER-MUST-NOT-STREAM",
+                "internal_draft_hidden": True,
+            }
+        }
+
+    successful_stream = False
+    cancellation_contract = False
+    speaker_gate = False
+    try:
+        brain_api.HEADLESS_V2_STATE_ENABLED = True
+        brain_api.HEADLESS_V2_PROGRESS_ENABLED = True
+        brain_api.HEADLESS_V2_SESSION_ENABLED = False
+        brain_api.WEAVER_KEY = ""
+        brain_api._cortex_chat = safe_cortex
+        response = await brain_api.headless_v2_chat_stream(make_request({
+            "message": request_schema.message,
+            "history": [item.model_dump() for item in request_schema.history],
+            "client_turn_id": request_schema.client_turn_id,
+            "max_tokens": request_schema.max_tokens,
+        }))
+        events = [parse_event(event) async for event in response.body_iterator]
+        streamed_text = "".join(
+            event.get("text", "") for event in events if event.get("type") == "delta"
+        )
+        serialized = json.dumps(events)
+        successful_stream = (
+            events[0]["type"] == "accepted"
+            and events[0]["speaker"] == "weaver"
+            and events[-1]["type"] == "completed"
+            and streamed_text == text
+            and "PRIVATE-CODER-MUST-NOT-STREAM" not in serialized
+            and all(
+                event.get("speaker", "weaver") == "weaver"
+                for event in events
+                if event["type"] in {"accepted", "delta", "completed"}
+            )
+            and captured_messages[-1] == {
+                "role": "user",
+                "content": request_schema.message,
+            }
+        )
+
+        slow_started = asyncio.Event()
+
+        async def slow_cortex(messages, max_tokens=None, temperature=None):
+            slow_started.set()
+            await asyncio.sleep(60)
+            return "must not complete", {}
+
+        brain_api._cortex_chat = slow_cortex
+        slow_response = await brain_api.headless_v2_chat_stream(make_request({
+            "message": "Wait until I cancel this turn.",
+            "client_turn_id": "client-turn-cancel",
+        }))
+        iterator = slow_response.body_iterator.__aiter__()
+        first_event = parse_event(await iterator.__anext__())
+        queued_event = parse_event(await iterator.__anext__())
+        await asyncio.wait_for(slow_started.wait(), timeout=1)
+        turn_id = slow_response.headers["x-weaver-turn-id"]
+        cancel_request = make_request({}, method="DELETE", path=f"/headless/v2/chat/{turn_id}")
+        cancel_response = await brain_api.headless_v2_chat_cancel(turn_id, cancel_request)
+        remaining = [parse_event(event) async for event in iterator]
+        cancellation_contract = (
+            first_event["type"] == "accepted"
+            and queued_event["type"] == "progress"
+            and cancel_response.cancelled is True
+            and remaining[-1]["type"] == "cancelled"
+            and await brain_api.HEADLESS_CHAT_TURNS.active() == 0
+        )
+
+        async def leaking_cortex(messages, max_tokens=None, temperature=None):
+            return "I'm a coding assistant and can only help with programming.", {}
+
+        brain_api._cortex_chat = leaking_cortex
+        leak_response = await brain_api.headless_v2_chat_stream(make_request({
+            "message": "How are you today?",
+            "client_turn_id": "client-turn-leak",
+        }))
+        leak_events = [parse_event(event) async for event in leak_response.body_iterator]
+        speaker_gate = (
+            leak_events[-1]["type"] == "failed"
+            and not any(event["type"] == "delta" for event in leak_events)
+            and "coding assistant" not in json.dumps(leak_events).lower()
+        )
+    finally:
+        brain_api.HEADLESS_V2_STATE_ENABLED = originals["state"]
+        brain_api.HEADLESS_V2_PROGRESS_ENABLED = originals["progress"]
+        brain_api.HEADLESS_V2_SESSION_ENABLED = originals["session"]
+        brain_api.WEAVER_KEY = originals["key"]
+        brain_api._cortex_chat = originals["cortex"]
+
+    passed = all((
+        framing_contract,
+        schema_contract,
+        successful_stream,
+        cancellation_contract,
+        speaker_gate,
+    ))
+    detail = "\n".join([
+        f"  Final text chunks preserve exact approved Weaver content: {framing_contract}",
+        f"  Chat input/history contracts are strict and bounded:        {schema_contract}",
+        f"  Stream emits progress plus Weaver-only deltas/completion:   {successful_stream}",
+        f"  Explicit stop cancels Fabric work and ends the stream:      {cancellation_contract}",
+        f"  Specialist identity drift fails before any public delta:    {speaker_gate}",
+    ])
+    _result(
+        "BA",
+        "Cancellable chat streams only Weaver's validated public answer",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BB():
+    _header("BB", "Prewarming, coalescing, ETags, cache bounds, and circuit recovery")
+    import contextlib
+    from copy import deepcopy
+
+    from fastapi import Response
+    from starlette.requests import Request
+
+    import bedrock_brain_api as brain_api
+    from headless_state import HeadlessStateStore
+    from runtime_resilience import (
+        AsyncCircuitBreaker,
+        BoundedTTLCache,
+        CircuitOpen,
+        RequestCoalescer,
+        etag_for,
+    )
+
+    clock = [100.0]
+    breaker = AsyncCircuitBreaker(
+        "contract-dependency",
+        failure_threshold=2,
+        recovery_seconds=2,
+        timeout_seconds=1,
+        clock=lambda: clock[0],
+    )
+
+    async def fail_dependency():
+        raise RuntimeError("private dependency detail")
+
+    failures_observed = 0
+    for _ in range(2):
+        try:
+            await breaker.call(fail_dependency)
+        except RuntimeError:
+            failures_observed += 1
+    opened = await breaker.snapshot()
+    rejected_while_open = False
+    try:
+        await breaker.call(fail_dependency)
+    except CircuitOpen:
+        rejected_while_open = True
+    clock[0] += 3
+    recovered_value = await breaker.call(lambda: asyncio.sleep(0, result="ready"))
+    recovered = await breaker.snapshot()
+    circuit_contract = (
+        failures_observed == 2
+        and opened["status"] == "open"
+        and opened["failures"] == 2
+        and rejected_while_open
+        and recovered_value == "ready"
+        and recovered["status"] == "closed"
+        and recovered["failures"] == 0
+        and set(recovered) == {
+            "name", "status", "failures", "successes", "retry_after_ms", "probe_active",
+        }
+    )
+
+    cancelled_breaker = AsyncCircuitBreaker(
+        "cancel-safe",
+        failure_threshold=1,
+        recovery_seconds=2,
+        timeout_seconds=1,
+    )
+
+    async def cancel_dependency():
+        raise asyncio.CancelledError
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await cancelled_breaker.call(cancel_dependency)
+    cancel_snapshot = await cancelled_breaker.snapshot()
+
+    timeout_breaker = AsyncCircuitBreaker(
+        "deadline",
+        failure_threshold=1,
+        recovery_seconds=2,
+        timeout_seconds=0.05,
+    )
+    timed_out = False
+    try:
+        await timeout_breaker.call(lambda: asyncio.sleep(5))
+    except asyncio.TimeoutError:
+        timed_out = True
+    timeout_snapshot = await timeout_breaker.snapshot()
+    bounded_deadlines = (
+        cancel_snapshot["status"] == "closed"
+        and cancel_snapshot["failures"] == 0
+        and timed_out
+        and timeout_snapshot["status"] == "open"
+    )
+
+    coalescer: RequestCoalescer[dict[str, int]] = RequestCoalescer(max_keys=4)
+    release = asyncio.Event()
+    calls = 0
+
+    async def shared_work():
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return {"revision": 7}
+
+    waiters = [
+        asyncio.create_task(coalescer.run("same-safe-read", shared_work))
+        for _ in range(8)
+    ]
+    await asyncio.sleep(0)
+    release.set()
+    shared_results = await asyncio.gather(*waiters)
+
+    shield_coalescer: RequestCoalescer[str] = RequestCoalescer(max_keys=2)
+    shield_started = asyncio.Event()
+    shield_release = asyncio.Event()
+    shield_calls = 0
+
+    async def shielded_work():
+        nonlocal shield_calls
+        shield_calls += 1
+        shield_started.set()
+        await shield_release.wait()
+        return "survived"
+
+    cancelling_waiter = asyncio.create_task(
+        shield_coalescer.run("shielded", shielded_work)
+    )
+    await shield_started.wait()
+    surviving_waiter = asyncio.create_task(
+        shield_coalescer.run("shielded", shielded_work)
+    )
+    await asyncio.sleep(0)
+    cancelling_waiter.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await cancelling_waiter
+    shield_release.set()
+    surviving_result = await surviving_waiter
+    coalescing_contract = (
+        calls == 1
+        and len(shared_results) == 8
+        and all(result == {"revision": 7} for result in shared_results)
+        and coalescer.coalesced_waiters == 7
+        and await coalescer.active() == 0
+        and shield_calls == 1
+        and surviving_result == "survived"
+        and await shield_coalescer.active() == 0
+    )
+
+    cache_clock = [1_000.0]
+    cache: BoundedTTLCache[dict[str, list[int]]] = BoundedTTLCache(
+        ttl_seconds=5,
+        max_entries=2,
+        clock=lambda: cache_clock[0],
+    )
+    cache.put("one", {"values": [1]})
+    first_read = cache.get("one")
+    if first_read is not None:
+        first_read["values"].append(99)
+    isolated_read = cache.get("one")
+    cache.put("two", {"values": [2]})
+    cache.put("three", {"values": [3]})
+    bounded_snapshot = cache.snapshot()
+    cache_clock[0] += 6
+    expired = cache.get("three")
+    cache_contract = (
+        isolated_read == {"values": [1]}
+        and bounded_snapshot["entries"] == bounded_snapshot["max_entries"] == 2
+        and bounded_snapshot["hits"] == 2
+        and expired is None
+    )
+
+    first_tag = etag_for({"revision": 7, "status": "ready"}, prefix="headless-v2")
+    same_tag = etag_for({"status": "ready", "revision": 7}, prefix="headless-v2")
+    changed_tag = etag_for({"revision": 8, "status": "ready"}, prefix="headless-v2")
+    etag_is_content_addressed = (
+        first_tag == same_tag
+        and first_tag != changed_tag
+        and first_tag.startswith('"headless-v2-')
+        and first_tag.endswith('"')
+    )
+
+    def make_request(headers: dict[str, str] | None = None) -> Request:
+        raw_headers = [
+            (key.lower().encode("latin-1"), value.encode("latin-1"))
+            for key, value in (headers or {}).items()
+        ]
+        return Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/headless/v2/state",
+            "headers": raw_headers,
+            "query_string": b"",
+            "server": ("test", 443),
+            "client": ("test", 1),
+            "scheme": "https",
+        })
+
+    original_state_flag = brain_api.HEADLESS_V2_STATE_ENABLED
+    original_session_flag = brain_api.HEADLESS_V2_SESSION_ENABLED
+    original_key = brain_api.WEAVER_KEY
+    original_store = brain_api.HEADLESS_V2_STATE_STORE
+    conditional_state_contract = False
+    try:
+        brain_api.HEADLESS_V2_STATE_ENABLED = True
+        brain_api.HEADLESS_V2_SESSION_ENABLED = False
+        brain_api.WEAVER_KEY = ""
+        brain_api.HEADLESS_V2_STATE_STORE = HeadlessStateStore()
+        response_headers = Response()
+        snapshot = await brain_api.headless_v2_state(make_request(), response_headers)
+        endpoint_tag = response_headers.headers.get("etag", "")
+        not_modified = await brain_api.headless_v2_state(
+            make_request({"if-none-match": endpoint_tag}),
+            Response(),
+        )
+        conditional_state_contract = (
+            snapshot.schema_version == 2
+            and endpoint_tag.startswith('"headless-v2-r1-')
+            and response_headers.headers.get("vary") == "Cookie, X-Weaver-Key"
+            and isinstance(not_modified, Response)
+            and not_modified.status_code == 304
+            and not_modified.headers.get("etag") == endpoint_tag
+            and not_modified.headers.get("cache-control") == "no-store"
+            and not not_modified.body
+        )
+    finally:
+        brain_api.HEADLESS_V2_STATE_ENABLED = original_state_flag
+        brain_api.HEADLESS_V2_SESSION_ENABLED = original_session_flag
+        brain_api.WEAVER_KEY = original_key
+        brain_api.HEADLESS_V2_STATE_STORE = original_store
+
+    original_prewarm_enabled = brain_api.VOICE_PREWARM_ENABLED
+    original_client = brain_api._client
+    original_initializer = brain_api._initialize_runtime_clients
+    voice_state = brain_api._voice_route_state()
+    original_prewarm = deepcopy(voice_state.get("prewarm"))
+    initialized_regions: list[str] = []
+
+    def initialize_only(region: str):
+        initialized_regions.append(region)
+        return object()
+
+    async def initialize_without_inference(regions: tuple[str, ...]):
+        return [initialize_only(region) for region in regions]
+
+    prewarm_contract = False
+    try:
+        brain_api.VOICE_PREWARM_ENABLED = True
+        brain_api._client = initialize_only
+        brain_api._initialize_runtime_clients = initialize_without_inference
+        await brain_api._prewarm_voice_runtime()
+        prewarm = deepcopy(brain_api._voice_route_state().get("prewarm") or {})
+        prewarm_contract = (
+            prewarm.get("status") == "ready"
+            and prewarm.get("clients_initialized") == len(initialized_regions)
+            and 1 <= len(initialized_regions) <= 3
+            and len(initialized_regions) == len(set(initialized_regions))
+            and isinstance(prewarm.get("checked_at"), float)
+            and prewarm.get("latency_ms", -1) >= 0
+        )
+    finally:
+        brain_api.VOICE_PREWARM_ENABLED = original_prewarm_enabled
+        brain_api._client = original_client
+        brain_api._initialize_runtime_clients = original_initializer
+        if original_prewarm is None:
+            brain_api._voice_route_state().pop("prewarm", None)
+        else:
+            brain_api._voice_route_state()["prewarm"] = original_prewarm
+
+    passed = all((
+        circuit_contract,
+        bounded_deadlines,
+        coalescing_contract,
+        cache_contract,
+        etag_is_content_addressed,
+        conditional_state_contract,
+        prewarm_contract,
+    ))
+    detail = "\n".join([
+        f"  Breakers open, reject, half-open, and recover safely:     {circuit_contract}",
+        f"  Timeouts count while caller cancellation stays neutral:   {bounded_deadlines}",
+        f"  Identical reads coalesce and survive waiter cancellation:  {coalescing_contract}",
+        f"  TTL cache is bounded, expiring, and copy-isolated:          {cache_contract}",
+        f"  ETags are deterministic and content-addressed:              {etag_is_content_addressed}",
+        f"  State supports authenticated empty-body 304 validation:     {conditional_state_contract}",
+        f"  Startup prewarm initializes clients only within a deadline: {prewarm_contract}",
+    ])
+    _result(
+        "BB",
+        "Prewarming, coalescing, ETags, cache bounds, and circuit recovery",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BC():
+    _header("BC", "Liveness, readiness, and authenticated deep health stay distinct and private")
+    import json
+
+    from fastapi import HTTPException, Response
+    from pydantic import ValidationError
+    from starlette.requests import Request
+
+    import bedrock_brain_api as brain_api
+    from headless_schemas import HealthReport
+    from headless_state import HeadlessStateStore
+    from health_runtime import component, report, utc_now
+    from weaver_neural_fabric import SlidingWindowRateLimiter
+
+    def request(headers: dict[str, str] | None = None) -> Request:
+        return Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/health/deep",
+            "headers": [
+                (key.lower().encode("latin-1"), value.encode("latin-1"))
+                for key, value in (headers or {}).items()
+            ],
+            "query_string": b"",
+            "server": ("test", 443),
+            "client": ("test", 1),
+            "scheme": "https",
+        })
+
+    liveness_response = Response()
+    liveness_started = time.perf_counter()
+    liveness = await brain_api.health_live(liveness_response)
+    liveness_ms = (time.perf_counter() - liveness_started) * 1_000
+    liveness_contract = (
+        liveness.kind == "liveness"
+        and liveness.status == "alive"
+        and liveness.ready is True
+        and set(liveness.components) == {"process"}
+        and not liveness.reasons
+        and liveness_response.headers.get("cache-control") == "no-store"
+        and liveness_ms < 50
+    )
+
+    checked_at = utc_now()
+    busy_report = report(
+        "readiness",
+        {
+            "process": component(
+                enabled=True,
+                required=True,
+                status="ready",
+                source="local",
+                checked_at=checked_at,
+            ),
+            "n8n": component(
+                enabled=True,
+                required=False,
+                status="busy",
+                checked_at=checked_at,
+            ),
+        },
+        started_at=time.perf_counter(),
+        checked_at=checked_at,
+    )
+    failed_report = report(
+        "readiness",
+        {
+            "process": component(
+                enabled=True,
+                required=True,
+                status="ready",
+                source="local",
+                checked_at=checked_at,
+            ),
+            "fabric": component(
+                enabled=True,
+                required=True,
+                status="degraded",
+                reason="fabric-ledger-invalid",
+                checked_at=checked_at,
+            ),
+        },
+        started_at=time.perf_counter(),
+        checked_at=checked_at,
+    )
+    aggregation_contract = (
+        busy_report.ready is True
+        and busy_report.status == "ready"
+        and failed_report.ready is False
+        and failed_report.status == "not-ready"
+        and failed_report.reasons == ["fabric-ledger-invalid"]
+    )
+
+    strict_contract = False
+    try:
+        HealthReport.model_validate({
+            **busy_report.model_dump(mode="json"),
+            "raw_error": "PRIVATE model failure",
+        })
+    except ValidationError:
+        strict_contract = True
+
+    originals = {
+        "state_flag": brain_api.HEADLESS_V2_STATE_ENABLED,
+        "state_store": brain_api.HEADLESS_V2_STATE_STORE,
+        "n8n_enabled": brain_api.N8N_CHAT_ENABLED,
+        "n8n_active": brain_api._n8n_active_requests,
+        "local_url": brain_api.LOCAL_LLM_URL,
+        "codebase_enabled": brain_api.CODEBASE_GROUNDING_ENABLED,
+        "key": brain_api.WEAVER_KEY,
+        "probe_http": brain_api.probe_http,
+        "client": brain_api._client,
+        "limiter": brain_api.DEEP_HEALTH_LIMITER,
+    }
+    empty_state_blocks_readiness = False
+    long_turn_stays_live = False
+    deep_failure_is_safe = False
+    authentication_contract = False
+    no_inference_calls = False
+    probe_calls: list[str] = []
+    inference_calls = 0
+
+    async def safe_failed_probe(url: str, *, timeout_seconds: float = 1.5):
+        probe_calls.append(url)
+        return False, 7.5
+
+    def inference_forbidden(region: str):
+        nonlocal inference_calls
+        inference_calls += 1
+        raise AssertionError("health must not initialize or invoke a model client")
+
+    try:
+        brain_api.HEADLESS_V2_STATE_ENABLED = True
+        brain_api.HEADLESS_V2_STATE_STORE = HeadlessStateStore()
+        brain_api.N8N_CHAT_ENABLED = False
+        brain_api._n8n_active_requests = 0
+        brain_api.LOCAL_LLM_URL = ""
+        brain_api.CODEBASE_GROUNDING_ENABLED = False
+        brain_api._client = inference_forbidden
+        readiness_response = Response()
+        readiness = await brain_api.health_ready(readiness_response)
+        empty_state_blocks_readiness = (
+            readiness.ready is False
+            and readiness.status == "not-ready"
+            and readiness.components["state"].status == "warming"
+            and "startup-incomplete" in readiness.reasons
+            and readiness_response.status_code == 503
+            and readiness_response.headers.get("cache-control") == "no-store"
+        )
+
+        brain_api.HEADLESS_V2_STATE_ENABLED = False
+        brain_api.N8N_CHAT_ENABLED = True
+        brain_api._n8n_active_requests = 1
+        brain_api.probe_http = safe_failed_probe
+        busy_components = await brain_api._health_components(deep=True)
+        busy_health = report(
+            "deep",
+            busy_components,
+            started_at=time.perf_counter(),
+        )
+        long_turn_stays_live = (
+            busy_components["n8n"].status == "busy"
+            and busy_components["n8n"].source == "control-plane"
+            and not probe_calls
+            and busy_health.ready is True
+            and busy_health.status in {"ready", "degraded"}
+        )
+
+        brain_api._n8n_active_requests = 0
+        deep_components = await brain_api._health_components(deep=True)
+        deep_health = report(
+            "deep",
+            deep_components,
+            started_at=time.perf_counter(),
+        )
+        serialized = deep_health.model_dump_json()
+        deep_failure_is_safe = (
+            len(probe_calls) == 1
+            and deep_components["n8n"].status == "degraded"
+            and deep_components["n8n"].source == "active-probe"
+            and deep_components["n8n"].reason == "n8n-degraded"
+            and "n8n-degraded" in deep_health.reasons
+            and all(marker not in serialized for marker in (
+                "PRIVATE", "http://", "https://", "webhook", "model_id",
+                "transcript", "prompt", "last_error",
+            ))
+        )
+
+        brain_api.WEAVER_KEY = "health-contract-key"
+        brain_api.DEEP_HEALTH_LIMITER = SlidingWindowRateLimiter(limit=4, window_seconds=60)
+        unauthorized = False
+        try:
+            await brain_api.health_deep(request(), Response())
+        except HTTPException as exc:
+            unauthorized = exc.status_code == 403
+        deep_response = Response()
+        authorized_report = await brain_api.health_deep(
+            request({"x-weaver-key": "health-contract-key"}),
+            deep_response,
+        )
+        authorization_json = json.dumps(authorized_report.model_dump(mode="json"))
+        authentication_contract = (
+            unauthorized
+            and authorized_report.kind == "deep"
+            and deep_response.status_code == 200
+            and deep_response.headers.get("cache-control") == "no-store"
+            and "health-contract-key" not in authorization_json
+        )
+        no_inference_calls = inference_calls == 0
+    finally:
+        brain_api.HEADLESS_V2_STATE_ENABLED = originals["state_flag"]
+        brain_api.HEADLESS_V2_STATE_STORE = originals["state_store"]
+        brain_api.N8N_CHAT_ENABLED = originals["n8n_enabled"]
+        brain_api._n8n_active_requests = originals["n8n_active"]
+        brain_api.LOCAL_LLM_URL = originals["local_url"]
+        brain_api.CODEBASE_GROUNDING_ENABLED = originals["codebase_enabled"]
+        brain_api.WEAVER_KEY = originals["key"]
+        brain_api.probe_http = originals["probe_http"]
+        brain_api._client = originals["client"]
+        brain_api.DEEP_HEALTH_LIMITER = originals["limiter"]
+
+    legacy_health = await brain_api.health()
+    legacy_compatibility = (
+        legacy_health.get("status") == "ok"
+        and "voice_realtime" in legacy_health
+        and "fabric" in legacy_health
+        and "cognition" in legacy_health
+        and "components" not in legacy_health
+    )
+
+    passed = all((
+        liveness_contract,
+        aggregation_contract,
+        strict_contract,
+        empty_state_blocks_readiness,
+        long_turn_stays_live,
+        deep_failure_is_safe,
+        authentication_contract,
+        no_inference_calls,
+        legacy_compatibility,
+    ))
+    detail = "\n".join([
+        f"  Liveness is cheap, local, cache-free, and process-only:      {liveness_contract}",
+        f"  Busy optional work stays ready; required failure does not:   {aggregation_contract}",
+        f"  Health payload contracts reject undeclared diagnostics:      {strict_contract}",
+        f"  Empty enabled state reports startup 503 without guessing:     {empty_state_blocks_readiness}",
+        f"  A 115-second n8n turn remains busy and is never reprobed:      {long_turn_stays_live}",
+        f"  Deep probe failure yields only stable, endpoint-free reasons: {deep_failure_is_safe}",
+        f"  Deep health requires the operator key and stays no-store:     {authentication_contract}",
+        f"  Health checks initialize or invoke no inference client:       {no_inference_calls}",
+        f"  Existing /health response remains backward compatible:        {legacy_compatibility}",
+    ])
+    _result(
+        "BC",
+        "Liveness, readiness, and authenticated deep health stay distinct and private",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BD():
+    _header("BD", "Correlated telemetry is redacted, bounded, and governed by SLO error budgets")
+    import inspect
+    import json
+    import logging
+
+    from fastapi import HTTPException, Response
+    from pydantic import ValidationError
+    from starlette.requests import Request
+
+    import bedrock_brain_api as brain_api
+    from headless_schemas import BoundedTrace
+    from observability_runtime import (
+        CURRENT_CORRELATION_ID,
+        ObservabilityMiddleware,
+        ObservabilityStore,
+        bind_correlation,
+        current_correlation_id,
+        reset_correlation,
+    )
+    from weaver_neural_fabric import SlidingWindowRateLimiter
+
+    voice_nominal = {
+        "status": "nominal",
+        "samples": 8,
+        "success_rate": 1.0,
+        "error_budget_remaining_pct": 100.0,
+        "reaction_target_ms": 200,
+        "queue_target_ms": 120,
+        "semantic_target_ms": 3_000,
+        "reaction_p95_ms": 85.0,
+        "queue_p95_ms": 40.0,
+        "semantic_p95_ms": 2_400.0,
+    }
+
+    logged: list[str] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record):
+            logged.append(record.getMessage())
+
+    logger = logging.getLogger("weaver.observability")
+    handler = CaptureHandler()
+    original_level = logger.level
+    original_propagate = logger.propagate
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    logger.addHandler(handler)
+
+    store = ObservabilityStore(
+        trace_limit=16,
+        samples_per_operation=16,
+        max_operations=8,
+    )
+    try:
+        for index in range(20):
+            store.record(
+                "runtime.contract",
+                duration_ms=10 + index,
+                outcome="server-error" if index == 19 else "success",
+                result_code=503 if index == 19 else 200,
+                correlation="req-bounded-contract",
+                attributes={
+                    "route": "/headless/v2/state",
+                    "phase": "failed" if index == 19 else "completed",
+                    "prompt": "PRIVATE-PROMPT-MUST-DROP",
+                    "transcript": "PRIVATE-TRANSCRIPT-MUST-DROP",
+                },
+            )
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+
+    for index in range(20):
+        store.record(f"runtime.cardinality.{index}", duration_ms=1)
+    bounded_report = store.snapshot(voice_slo=voice_nominal)
+    bounded_json = bounded_report.model_dump_json()
+    log_payloads = [json.loads(item) for item in logged]
+    trace_and_log_contract = (
+        len(bounded_report.recent_traces) == 16
+        and bounded_report.retention_traces == 16
+        and bounded_report.retention_samples_per_operation == 16
+        and len(bounded_report.metrics) <= 8
+        and any(metric.operation == "runtime.other" for metric in bounded_report.metrics)
+        and all(len(trace.attributes) <= 8 for trace in bounded_report.recent_traces)
+        and all(set(trace.attributes) <= {"route", "phase"} for trace in bounded_report.recent_traces)
+        and "PRIVATE-PROMPT-MUST-DROP" not in bounded_json
+        and "PRIVATE-TRANSCRIPT-MUST-DROP" not in bounded_json
+        and '"prompt"' not in bounded_json
+        and '"transcript"' not in bounded_json
+        and bool(log_payloads)
+        and all(set(item) == {
+            "event", "trace_id", "correlation_id", "operation",
+            "duration_ms", "outcome", "result_code", "attributes",
+        } for item in log_payloads)
+        and all("PRIVATE" not in json.dumps(item) for item in log_payloads)
+    )
+
+    budget_store = ObservabilityStore(trace_limit=16, samples_per_operation=16)
+    for duration in (40, 60, 80, 120):
+        budget_store.record("headless.chat.reaction", duration_ms=duration)
+    budget_store.record("headless.chat.reaction", duration_ms=260)
+    budget_store.record(
+        "headless.chat.reaction",
+        duration_ms=30,
+        outcome="cancelled",
+    )
+    budget_report = budget_store.snapshot(voice_slo=voice_nominal)
+    reaction_budget = next(
+        item for item in budget_report.error_budgets
+        if item.operation == "headless.chat.reaction"
+    )
+    budget_contract = (
+        reaction_budget.samples == 5
+        and reaction_budget.good == 4
+        and reaction_budget.bad == 1
+        and reaction_budget.status == "exhausted"
+        and reaction_budget.error_budget_remaining_pct == 0
+        and reaction_budget.burn_rate > 1
+        and budget_report.voice_slo.status == "nominal"
+        and budget_report.voice_slo.reaction_target_ms == 200
+        and budget_report.voice_slo.semantic_target_ms == 3_000
+    )
+
+    saturation_store = ObservabilityStore(trace_limit=16, samples_per_operation=16)
+    first = saturation_store.begin("runtime.concurrent", correlation="req-concurrency")
+    second = saturation_store.begin("runtime.concurrent", correlation="req-concurrency")
+    midflight = saturation_store.snapshot(voice_slo=voice_nominal)
+    saturation_store.end(first, outcome="success", duration_ms=5)
+    saturation_store.end(second, outcome="client-error", result_code=400, duration_ms=8)
+    saturation_store.record(
+        "runtime.concurrent",
+        duration_ms=12,
+        outcome="server-error",
+        result_code=503,
+    )
+    saturation_store.record(
+        "runtime.concurrent",
+        duration_ms=2,
+        outcome="cancelled",
+    )
+    final_saturation = saturation_store.snapshot(voice_slo=voice_nominal)
+    golden = next(item for item in final_saturation.metrics if item.operation == "runtime.concurrent")
+    saturation_contract = (
+        midflight.current_in_flight == 2
+        and golden.requests == 4
+        and golden.successes == 2
+        and golden.client_errors == 1
+        and golden.server_errors == 1
+        and golden.cancelled == 1
+        and golden.max_in_flight == 2
+        and golden.in_flight == 0
+        and golden.duration_p50_ms is not None
+        and golden.duration_p95_ms is not None
+    )
+
+    rejected_trace_schema = False
+    try:
+        BoundedTrace.model_validate({
+            "trace_id": "trc-" + "a" * 24,
+            "correlation_id": "req-schema",
+            "operation": "runtime.schema",
+            "started_at": "2026-07-13T12:00:00Z",
+            "duration_ms": 1.0,
+            "outcome": "success",
+            "result_code": 200,
+            "attributes": {"prompt": "private"},
+        })
+    except ValidationError:
+        rejected_trace_schema = True
+
+    middleware_store = ObservabilityStore(trace_limit=16, samples_per_operation=16)
+    observed: dict[str, str] = {}
+    sent: list[dict] = []
+    receive_calls = 0
+
+    async def application(scope, receive, send):
+        observed["context"] = current_correlation_id()
+        await send({
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"application/json")],
+        })
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    async def private_receive():
+        nonlocal receive_calls
+        receive_calls += 1
+        return {
+            "type": "http.request",
+            "body": b"PRIVATE-REQUEST-BODY-MUST-NOT-BE-READ",
+            "more_body": False,
+        }
+
+    async def capture_send(message):
+        sent.append(message)
+
+    middleware = ObservabilityMiddleware(application, store=middleware_store)
+    await middleware(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/headless/v2/state",
+            "query_string": b"",
+            "headers": [(b"x-correlation-id", b"req-client-chain")],
+            "state": {},
+        },
+        private_receive,
+        capture_send,
+    )
+    response_start = next(item for item in sent if item["type"] == "http.response.start")
+    response_headers = {
+        key.decode("latin-1").lower(): value.decode("latin-1")
+        for key, value in response_start["headers"]
+    }
+    middleware_report = middleware_store.snapshot(voice_slo=voice_nominal)
+    middleware_trace = middleware_report.recent_traces[-1]
+    middleware_contract = (
+        observed.get("context") == "req-client-chain"
+        and response_headers.get("x-correlation-id") == "req-client-chain"
+        and middleware_trace.correlation_id == "req-client-chain"
+        and middleware_trace.operation == "http.get.headless.v2.state"
+        and middleware_trace.attributes == {
+            "method": "GET",
+            "route": "/headless/v2/state",
+        }
+        and receive_calls == 0
+        and CURRENT_CORRELATION_ID.get("") == ""
+        and "PRIVATE-REQUEST-BODY" not in middleware_report.model_dump_json()
+    )
+
+    context_token = bind_correlation("req-async-chain")
+    try:
+        async def read_child_context():
+            await asyncio.sleep(0)
+            return current_correlation_id()
+
+        propagated = await asyncio.create_task(read_child_context())
+    finally:
+        reset_correlation(context_token)
+    n8n_source = inspect.getsource(brain_api._n8n_moe_chat)
+    chat_source = inspect.getsource(brain_api.headless_v2_chat_stream)
+    state_stream_source = inspect.getsource(brain_api.headless_v2_stream)
+    voice_source = inspect.getsource(brain_api.realtime_voice)
+    end_to_end_contract = (
+        propagated == "req-async-chain"
+        and '"correlationId": turn_correlation' in chat_source
+        and '"correlationId": session_correlation' in voice_source
+        and '"correlation_id": session_correlation' in voice_source
+        and "correlation_id=current_correlation_id()" in state_stream_source
+        and "correlation_id=current_correlation_id()" in n8n_source
+    )
+
+    def make_request(key: str = "") -> Request:
+        headers = [(b"x-weaver-key", key.encode("latin-1"))] if key else []
+        return Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/health/observability",
+            "headers": headers,
+            "query_string": b"",
+            "server": ("test", 443),
+            "client": ("test", 1),
+            "scheme": "https",
+        })
+
+    original_store = brain_api.OBSERVABILITY
+    original_key = brain_api.WEAVER_KEY
+    original_limiter = brain_api.OBSERVABILITY_LIMITER
+    endpoint_contract = False
+    try:
+        brain_api.OBSERVABILITY = store
+        brain_api.WEAVER_KEY = "observability-contract-key"
+        brain_api.OBSERVABILITY_LIMITER = SlidingWindowRateLimiter(
+            limit=4,
+            window_seconds=60,
+        )
+        unauthorized = False
+        try:
+            await brain_api.health_observability(make_request(), Response())
+        except HTTPException as exc:
+            unauthorized = (
+                exc.status_code == 403
+                and exc.headers.get("Cache-Control") == "no-store"
+            )
+        endpoint_response = Response()
+        endpoint_report = await brain_api.health_observability(
+            make_request("observability-contract-key"),
+            endpoint_response,
+        )
+        endpoint_json = endpoint_report.model_dump_json()
+        endpoint_contract = (
+            unauthorized
+            and endpoint_response.headers.get("cache-control") == "no-store"
+            and endpoint_report.schema_version == 1
+            and endpoint_report.retention_traces == 16
+            and len(endpoint_report.recent_traces) <= 16
+            and "observability-contract-key" not in endpoint_json
+            and all(marker not in endpoint_json.lower() for marker in (
+                "prompt", "transcript", "message", "model_id", "webhook",
+                "http://", "https://", "traceback",
+            ))
+        )
+    finally:
+        brain_api.OBSERVABILITY = original_store
+        brain_api.WEAVER_KEY = original_key
+        brain_api.OBSERVABILITY_LIMITER = original_limiter
+
+    passed = all((
+        trace_and_log_contract,
+        budget_contract,
+        saturation_contract,
+        rejected_trace_schema,
+        middleware_contract,
+        end_to_end_contract,
+        endpoint_contract,
+    ))
+    detail = "\n".join([
+        f"  Structured logs/traces are categorical, redacted, and bounded: {trace_and_log_contract}",
+        f"  Latency and availability consume an explicit error budget:    {budget_contract}",
+        f"  Golden traffic/error/latency/saturation metrics are exact:    {saturation_contract}",
+        f"  Public trace schemas reject undeclared diagnostic fields:     {rejected_trace_schema}",
+        f"  HTTP correlation propagates without inspecting request data:  {middleware_contract}",
+        f"  Correlation reaches async chat, voice, state, and n8n edges:   {end_to_end_contract}",
+        f"  Operator telemetry is authenticated, no-store, and private:   {endpoint_contract}",
+    ])
+    _result(
+        "BD",
+        "Correlated telemetry is redacted, bounded, and governed by SLO error budgets",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BE():
+    _header("BE", "Versioned n8n boundary keeps specialists private and Weaver public")
+    from copy import deepcopy
+
+    from pydantic import TypeAdapter, ValidationError
+
+    import bedrock_brain_api as brain
+    from headless_schemas import (
+        N8NHeadlessRequest,
+        N8NPublicResponse,
+    )
+    from runtime_resilience import AsyncCircuitBreaker
+
+    contract_version = "weaver-headless-n8n-v1"
+    request_fields = {
+        "contract_version", "correlation_id", "deadline_ms", "text",
+        "self_check", "introspect", "path_glob", "search_query",
+        "codebase_context", "quantum_pathway", "cognition_context",
+    }
+    request = {
+        "contract_version": contract_version,
+        "correlation_id": "req-schema-contract",
+        "deadline_ms": 115_000,
+        "text": "Explain the safe Intent Capsule transport boundary.",
+        "self_check": True,
+        "introspect": True,
+        "path_glob": "**/*",
+        "search_query": "IntentCapsule reflex kernel",
+        "codebase_context": "bounded read-only source",
+        "quantum_pathway": "Awakening and Fracture remain in tension.",
+        "cognition_context": {
+            "awareness_confidence": 0.9,
+            "fabric_pressure": 0.1,
+            "immune_status": "nominal",
+            "open_components": [],
+        },
+    }
+    request_model = N8NHeadlessRequest.model_validate(request)
+    request_rejections = []
+    for mutation in (
+        {**request, "private_prompt": "PRIVATE"},
+        {**request, "contract_version": "legacy"},
+        {**request, "deadline_ms": 114_999},
+        {**request, "correlation_id": "unsafe correlation"},
+        {**request, "search_query": "x" * 241},
+        {
+            **request,
+            "cognition_context": {
+                **request["cognition_context"],
+                "private_state": "PRIVATE",
+            },
+        },
+    ):
+        try:
+            N8NHeadlessRequest.model_validate(mutation)
+            request_rejections.append(False)
+        except ValidationError:
+            request_rejections.append(True)
+    request_contract = (
+        set(request_model.model_dump(mode="json")) == request_fields
+        and all(request_rejections)
+    )
+
+    success_fields = {
+        "contract_version", "status", "error", "correlation_id",
+        "manifested_response", "speaker", "speaker_boundary_applied",
+        "speaker_model", "internal_draft_hidden", "reflection_applied",
+        "soul_voice_active", "codebase_grounded", "expert_parallel",
+        "expert_count", "experts_completed", "expert_errors",
+        "expert_fanout_elapsed_ms", "execution_id", "timestamp",
+        "pipeline_architecture", "pipeline_version",
+    }
+    success = {
+        "contract_version": contract_version,
+        "status": "ok",
+        "error": False,
+        "correlation_id": request["correlation_id"],
+        "manifested_response": "Weaver's reviewed public answer.",
+        "speaker": "weaver",
+        "speaker_boundary_applied": True,
+        "speaker_model": "qwen.qwen3-235b-a22b-2507",
+        "internal_draft_hidden": True,
+        "reflection_applied": True,
+        "soul_voice_active": False,
+        "codebase_grounded": True,
+        "expert_parallel": True,
+        "expert_count": 5,
+        "experts_completed": 5,
+        "expert_errors": 0,
+        "expert_fanout_elapsed_ms": 102_500,
+        "execution_id": "contract-test",
+        "timestamp": "2026-07-13T12:00:00.000Z",
+        "pipeline_architecture": "parallel-fanout-barrier",
+        "pipeline_version": "v6-parallel-cognition",
+    }
+    adapter = TypeAdapter(N8NPublicResponse)
+    parsed_success = adapter.validate_python(success)
+    private_response_rejections = []
+    for mutation in (
+        {**success, "expert_drafts": ["PRIVATE-DRAFT"]},
+        {**success, "lora_error": "PRIVATE-ERROR"},
+        {**success, "speaker": "coder"},
+        {**success, "speaker_boundary_applied": False},
+        {**success, "internal_draft_hidden": False},
+        {**success, "speaker_model": "private-specialist"},
+        {**success, "manifested_response": ""},
+    ):
+        try:
+            adapter.validate_python(mutation)
+            private_response_rejections.append(False)
+        except ValidationError:
+            private_response_rejections.append(True)
+    rejection = {
+        "contract_version": contract_version,
+        "status": "rejected",
+        "error": True,
+        "error_code": "speaker-boundary-failed",
+        "correlation_id": request["correlation_id"],
+        "execution_id": "contract-test",
+        "timestamp": "2026-07-13T12:00:00.000Z",
+        "pipeline_version": "v6-parallel-cognition",
+    }
+    parsed_rejection = adapter.validate_python(rejection)
+    rejection_with_speech_blocked = False
+    try:
+        adapter.validate_python({**rejection, "manifested_response": "PRIVATE-DRAFT"})
+    except ValidationError:
+        rejection_with_speech_blocked = True
+    response_contract = (
+        set(parsed_success.model_dump(mode="json")) == success_fields
+        and parsed_success.speaker == "weaver"
+        and parsed_success.internal_draft_hidden is True
+        and parsed_rejection.status == "rejected"
+        and all(private_response_rejections)
+        and rejection_with_speech_blocked
+    )
+
+    captured_requests: list[dict] = []
+    recorded_state: list[dict] = []
+    response_mode = "valid"
+
+    def fake_post(_url, payload, _timeout):
+        captured_requests.append(deepcopy(payload))
+        public = {**success, "correlation_id": payload["correlation_id"]}
+        if response_mode == "private-extra":
+            return {**public, "expert_drafts": ["PRIVATE-DRAFT-MUST-NOT-CROSS"]}
+        if response_mode == "wrong-correlation":
+            return {**public, "correlation_id": "req-wrong-correlation"}
+        return public
+
+    async def capture_state(**updates):
+        recorded_state.append(deepcopy(updates))
+
+    original_post = brain._json_post_sync
+    original_enabled = brain.N8N_CHAT_ENABLED
+    original_url = brain.N8N_WEBHOOK_URL
+    original_breaker = dict(brain._n8n_breaker)
+    original_runtime_circuit = brain.N8N_RUNTIME_CIRCUIT
+    original_record_state = brain._record_state
+    runtime_contract = False
+    runtime_facts: dict[str, bool] = {}
+    try:
+        brain._json_post_sync = fake_post
+        brain.N8N_CHAT_ENABLED = True
+        brain.N8N_WEBHOOK_URL = "http://n8n.contract.test/webhook"
+        brain._n8n_breaker.update({"fails": 0, "skip_until": 0.0})
+        brain.N8N_RUNTIME_CIRCUIT = AsyncCircuitBreaker(
+            "n8n-contract-test",
+            failure_threshold=2,
+            recovery_seconds=1,
+            timeout_seconds=2,
+        )
+        brain._record_state = capture_state
+
+        valid_result = await brain._n8n_moe_chat(
+            "Inspect whole_codebase_tests.py and explain IntentCapsule reflex-kernel safety.",
+            "bounded source evidence\n",
+        )
+        response_mode = "private-extra"
+        private_result = await brain._n8n_moe_chat("Do not expose drafts.", "")
+        response_mode = "wrong-correlation"
+        mismatched_result = await brain._n8n_moe_chat("Keep correlation exact.", "")
+
+        sent = captured_requests[0] if captured_requests else {}
+        safe_route = valid_result[1].get("route", {}) if valid_result else {}
+        runtime_facts = {
+            "valid_result": valid_result is not None,
+            "public_text": valid_result is not None and valid_result[0] == success["manifested_response"],
+            "request_fields": set(sent) == request_fields,
+            "contract_version": sent.get("contract_version") == contract_version,
+            "deadline": sent.get("deadline_ms") == 115_000,
+            "search_bound": len(sent.get("search_query", "")) <= 240,
+            "source_normalized": sent.get("codebase_context") == "bounded source evidence",
+            "private_rejected": private_result is None,
+            "correlation_rejected": mismatched_result is None,
+            "stable_error": any(item.get("last_n8n_error") == "invalid-contract" for item in recorded_state),
+            "safe_route": set(safe_route) == {
+                "alias", "purpose", "contract_version", "pipeline",
+                "pipeline_architecture", "soul_voice_active", "reflection_applied",
+                "speaker_boundary_applied", "speaker_model", "internal_draft_hidden",
+                "codebase_grounded", "expert_parallel", "experts_completed", "expert_errors",
+            },
+            "private_absent": "PRIVATE-DRAFT-MUST-NOT-CROSS" not in json.dumps(valid_result),
+        }
+        runtime_contract = all(runtime_facts.values())
+    finally:
+        brain._json_post_sync = original_post
+        brain.N8N_CHAT_ENABLED = original_enabled
+        brain.N8N_WEBHOOK_URL = original_url
+        brain._n8n_breaker.clear()
+        brain._n8n_breaker.update(original_breaker)
+        brain.N8N_RUNTIME_CIRCUIT = original_runtime_circuit
+        brain._record_state = original_record_state
+
+    workflow_path = os.path.join(PROJ, "n8n_weaver_v5.json")
+    with open(workflow_path, "r", encoding="utf-8") as handle:
+        workflow = json.load(handle)
+    nodes = {node["name"]: node for node in workflow["nodes"]}
+    sanitize_code = nodes["2. Sanitize"]["parameters"]["jsCode"]
+    writeback_code = nodes["9. Writeback"]["parameters"]["jsCode"]
+    deploy_path = os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh")
+    with open(deploy_path, "r", encoding="utf-8") as handle:
+        deploy_source = handle.read()
+    workflow_contract = (
+        contract_version in sanitize_code
+        and "keys.length === ALLOWED.length" in sanitize_code
+        and "body.deadline_ms === 115000" in sanitize_code
+        and "body.correlation_id === correlation" in sanitize_code
+        and contract_version in writeback_code
+        and "manifested_response: reviewed" in writeback_code
+        and "speaker: 'weaver'" in writeback_code
+        and "...d" not in writeback_code
+        and all(field not in writeback_code for field in (
+            "lora_error:", "qwen3b_error:", "dominant_lobe:",
+            "experts_activated:", "collapsed_response:",
+        ))
+        and "n8n_weaver_v5.json" in deploy_source
+        and "n8n_weaver_final.json" not in deploy_source
+    )
+
+    validator = await asyncio.create_subprocess_exec(
+        "node",
+        os.path.join(PROJ, "scripts", "validate_n8n_workflow.mjs"),
+        "--json",
+        cwd=PROJ,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    validator_stdout, validator_stderr = await validator.communicate()
+    try:
+        validator_report = json.loads(validator_stdout.decode("utf-8"))
+    except json.JSONDecodeError:
+        validator_report = {}
+    validator_contract = (
+        validator.returncode == 0
+        and not validator_stderr
+        and validator_report.get("valid") is True
+        and validator_report.get("version") == 2
+        and validator_report.get("critical_path_budget_ms", 115_001) <= 115_000
+        and validator_report.get("workflow_timeout_ms") == 115_000
+        and validator_report.get("errors") == []
+        and validator_report.get("warnings") == []
+    )
+
+    passed = all((
+        request_contract,
+        response_contract,
+        runtime_contract,
+        workflow_contract,
+        validator_contract,
+    ))
+    detail = "\n".join([
+        f"  Exact typed request rejects aliases, extras, and bad bounds: {request_contract}",
+        f"  Public union accepts only Weaver success or silent rejection: {response_contract}",
+        f"  Brain enforces correlation and drops malformed n8n output:    {runtime_contract}",
+        f"    Runtime subchecks failing: {[key for key, value in runtime_facts.items() if not value]}",
+        f"  Canonical workflow/deploy paths contain no parallel contract: {workflow_contract}",
+        f"  Validator v2 passes 102.5s/115s topology and privacy gates:   {validator_contract}",
+    ])
+    _result(
+        "BE",
+        "Versioned n8n boundary keeps specialists private and Weaver public",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BF():
+    _header("BF", "Edge, service, container, and deployment hardening remain coherent")
+
+    def read(relative_path: str) -> str:
+        with open(os.path.join(PROJ, relative_path), "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    caddy = read("deploy/Caddyfile")
+    main_site = caddy.split("weaverv3.com {", 1)[1].split(
+        "headless.weaverv3.com {", 1
+    )[0]
+    headless_site = caddy.split("headless.weaverv3.com {", 1)[1].split(
+        "dash.weaverv3.com {", 1
+    )[0]
+    caddy_contract = (
+        caddy.count("import weaver_security_headers") == 4
+        and "Strict-Transport-Security \"max-age=31536000; includeSubDomains\"" in caddy
+        and "X-Content-Type-Options \"nosniff\"" in caddy
+        and "frame-ancestors 'none'" in caddy
+        and "Permissions-Policy" in caddy
+        and 'header @entry >Cache-Control "no-store, max-age=0"' in caddy
+        and 'header @assets >Cache-Control "public, max-age=86400, stale-while-revalidate=604800"' in caddy
+        and "response_header_timeout 130s" in caddy
+        and "stream_timeout 15m" in caddy
+        and "stream_close_delay 5m" in caddy
+        and all(
+            site.count("handle /brain/headless/v2/*") == 1
+            and site.index("handle /brain/headless/v2/*")
+            < site.index("handle_path /brain/*")
+            for site in (main_site, headless_site)
+        )
+    )
+
+    unit_names = (
+        "deploy/weaver.service",
+        "deploy/weaver-brain.service",
+        "deploy/weaver-llm.service",
+        "deploy/tts/weaver-tts.service",
+        "deploy/n8n.service",
+    )
+    units = {name: read(name) for name in unit_names}
+    common_markers = (
+        "NoNewPrivileges=true",
+        "PrivateTmp=true",
+        "PrivateDevices=true",
+        "ProtectSystem=strict",
+        "ProtectProc=invisible",
+        "ProcSubset=pid",
+        "RestrictNamespaces=true",
+        "RestrictSUIDSGID=true",
+        "LockPersonality=true",
+        "RestrictRealtime=true",
+        "CapabilityBoundingSet=",
+        "AmbientCapabilities=",
+    )
+    systemd_contract = (
+        all(all(marker in source for marker in common_markers) for source in units.values())
+        and all("StartLimitBurst=" in source for source in units.values())
+        and all("UMask=0077" in source for source in units.values())
+        and all("RestrictAddressFamilies=" in source for source in units.values())
+        and all("OOMPolicy=stop" in source for name, source in units.items() if name != "deploy/n8n.service")
+        and "TimeoutStopSec=140" in units["deploy/weaver-brain.service"]
+        and "--timeout-graceful-shutdown 125" in units["deploy/weaver-brain.service"]
+        and all(
+            f"Environment=WEAVER_HEADLESS_V2_{flag}=1" in units["deploy/weaver-brain.service"]
+            for flag in ("STATE", "STREAM", "SESSION", "SUMMARIES", "UI", "PROGRESS")
+        )
+    )
+
+    n8n_unit = units["deploy/n8n.service"]
+    compose = read("docker-compose.yml")
+    n8n_image = (
+        "docker.n8n.io/n8nio/n8n:2.25.7@sha256:"
+        "761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd"
+    )
+    n8n_controls = (
+        n8n_image in n8n_unit
+        and n8n_image in compose
+        and all(marker in n8n_unit for marker in (
+            "--init",
+            "--read-only",
+            "--cap-drop ALL",
+            "--security-opt no-new-privileges:true",
+            "--pids-limit 512",
+            "--memory 2g",
+            "--memory-reservation 1536m",
+            "--memory-swap 2g",
+            "--cpus 2",
+            "N8N_RUNNERS_BROKER_LISTEN_ADDRESS=127.0.0.1",
+            "N8N_BLOCK_RUNNER_ENV_ACCESS=true",
+            "N8N_COMMUNITY_PACKAGES_ENABLED=false",
+            "N8N_PYTHON_ENABLED=false",
+            "N8N_DISABLE_UI=true",
+            "EXECUTIONS_TIMEOUT_MAX=115",
+            "EXECUTIONS_DATA_SAVE_ON_ERROR=none",
+            "EXECUTIONS_DATA_SAVE_ON_SUCCESS=none",
+            "N8N_GRACEFUL_SHUTDOWN_TIMEOUT=125",
+            "docker stop -t 130 n8n",
+            "TimeoutStopSec=150",
+        ))
+        and all(marker in compose for marker in (
+            "read_only: true",
+            "no-new-privileges:true",
+            "pids_limit: 512",
+            "mem_limit: 2g",
+            "mem_reservation: 1536m",
+            "stop_grace_period: 130s",
+            "N8N_GRACEFUL_SHUTDOWN_TIMEOUT=125",
+            "127.0.0.1:5678:5678",
+            "127.0.0.1:4040:4040",
+            "ngrok/ngrok:latest@sha256:14d80d083e5b53145f416bbbd36238336c9de4016c43fd950eb2eb845670583b",
+        ))
+    )
+
+    dockerignore = read(".dockerignore")
+    build_context_contract = all(
+        marker in dockerignore.splitlines()
+        for marker in (".env", ".env.*", "Nexus_Vault", "Weaver_Vault", "venv", "models", "*.sqlite*")
+    )
+
+    deploy = read("deploy/deploy_voice_fullstack_fix.sh")
+    deploy_contract = (
+        'sudo cp -a /etc/caddy/Caddyfile "$BACKUP/Caddyfile"' in deploy
+        and 'sudo install -m 0644 "$APP/deploy/Caddyfile" /etc/caddy/Caddyfile' in deploy
+        and "systemd-analyze verify" in deploy
+        and deploy.count("deploy/validate_caddy.sh") >= 2
+        and "sudo systemctl reload caddy || sudo systemctl restart caddy" in deploy
+        and '"contract_version": "weaver-headless-n8n-v1"' in deploy
+        and '"deadline_ms": 115000' in deploy
+        and deploy.count("--data-binary @/tmp/n8n-webhook-request.json") == 2
+        and 'assert set(data) == expected' in deploy
+        and 'assert data.get("speaker") == "weaver"' in deploy
+        and "qwen3b_active" not in deploy
+        and "/brain/headless/v2/session" in deploy
+        and "HttpOnly" in deploy
+        and "X-Weaver-CSRF" in deploy
+        and "/health/live" in deploy
+    )
+
+    compose_proc = await asyncio.create_subprocess_exec(
+        "docker", "compose", "config", "--quiet",
+        cwd=PROJ,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, compose_stderr = await compose_proc.communicate()
+    compose_contract = compose_proc.returncode == 0 and not compose_stderr
+
+    shell_proc = await asyncio.create_subprocess_exec(
+        "bash", "-n", os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"),
+        cwd=PROJ,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, shell_stderr = await shell_proc.communicate()
+    shell_contract = shell_proc.returncode == 0 and not shell_stderr
+
+    unit_parser_contract = True
+    unit_parser_detail = "systemd-analyze unavailable; static production gate retained"
+    if shutil.which("systemd-analyze"):
+        unit_proc = await asyncio.create_subprocess_exec(
+            "systemd-analyze", "verify",
+            *(os.path.join(PROJ, path) for path in unit_names),
+            cwd=PROJ,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, unit_stderr = await unit_proc.communicate()
+        unit_lines = [line for line in unit_stderr.decode("utf-8").splitlines() if line.strip()]
+        missing_remote_paths_only = bool(unit_lines) and all(
+            "is not executable: No such file or directory" in line
+            and "/home/ubuntu/" in line
+            for line in unit_lines
+        )
+        unit_parser_contract = unit_proc.returncode == 0 or missing_remote_paths_only
+        unit_parser_detail = (
+            "valid"
+            if unit_proc.returncode == 0
+            else "valid directives; only production /home/ubuntu executables are absent locally"
+        )
+
+    passed = all((
+        caddy_contract,
+        systemd_contract,
+        n8n_controls,
+        build_context_contract,
+        deploy_contract,
+        compose_contract,
+        shell_contract,
+        unit_parser_contract,
+    ))
+    detail = "\n".join([
+        f"  Caddy state route, long streams, headers, and caches:       {caddy_contract}",
+        f"  systemd least privilege, bounds, and v2 cutover flags:      {systemd_contract}",
+        f"  n8n/ngrok images and runtime resources stay immutable:      {n8n_controls}",
+        f"  Docker build context excludes secrets, vaults, and state:   {build_context_contract}",
+        f"  Deploy/rollback verifies exact n8n, session, Caddy contracts:{deploy_contract}",
+        f"  Docker Compose resolves without conflicting limits:         {compose_contract}",
+        f"  Deployment shell parses with strict Bash:                    {shell_contract}",
+        f"  systemd unit parser: {unit_parser_contract} ({unit_parser_detail})",
+    ])
+    _result(
+        "BF",
+        "Edge, service, container, and deployment hardening remain coherent",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BG():
+    _header("BG", "Headless shell is modular, CSP-strict, dependency-light, and rollback-safe")
+    import re
+
+    avatar_root = os.path.abspath(os.path.join(PROJ, "..", "..", "avatar"))
+    module_relatives = (
+        "headless/js/core.js",
+        "headless/js/session.js",
+        "headless/js/voice-support.js",
+        "headless/js/visual-data.js",
+        "headless/js/visual-runtime.js",
+        "headless/js/voice.js",
+        "headless/js/visualization.js",
+        "headless/js/cortex.js",
+        "headless/js/state-channel.js",
+        "headless/js/lifecycle.js",
+        "headless/js/accessibility.js",
+        "headless/js/app.js",
+    )
+    style_relatives = (
+        "headless/styles/tokens.css",
+        "headless/styles/shell.css",
+    )
+
+    def read_avatar(relative: str) -> str:
+        with open(os.path.join(avatar_root, relative), "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    html = read_avatar("headless.html")
+    legacy = read_avatar("headless-legacy.html")
+    modules = {relative: read_avatar(relative) for relative in module_relatives}
+    styles = {relative: read_avatar(relative) for relative in style_relatives}
+    caddy = open(os.path.join(PROJ, "deploy", "Caddyfile"), "r", encoding="utf-8").read()
+    deploy = open(
+        os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"),
+        "r",
+        encoding="utf-8",
+    ).read()
+
+    entry_contract = (
+        len(html.encode("utf-8")) < 16_384
+        and "<style" not in html
+        and html.count("<script") == 1
+        and '<script type="module" src="/headless/js/app.js"></script>' in html
+        and not re.search(r"\son(?:click|load|error|submit|change)=", html, re.IGNORECASE)
+        and all(f'href="/{relative}"' in html for relative in style_relatives)
+        and all(
+            f'href="/{relative}"' in html
+            for relative in module_relatives
+            if relative not in {"headless/js/visual-data.js", "headless/js/app.js"}
+        )
+    )
+
+    token_css = styles["headless/styles/tokens.css"]
+    shell_css = styles["headless/styles/shell.css"]
+    style_contract = (
+        token_css.count(":root") == 1
+        and all(token in token_css for token in (
+            "--bg:", "--surface:", "--stroke:", "--gold:", "--blue:", "--green:", "--text:", "--muted:",
+        ))
+        and ":root" not in shell_css
+        and "@media (prefers-reduced-motion: reduce)" in shell_css
+        and "env(safe-area-inset-bottom)" in shell_css
+        and "backdrop-filter" not in shell_css
+    )
+
+    dependency_contract = True
+    for relative, source in modules.items():
+        if len(source.splitlines()) >= 1_000 or re.search(r"^\+", source, re.MULTILINE):
+            dependency_contract = False
+        if re.search(r"(?:from|import\s*\()\s*['\"](?:https?:|//|[^./])", source):
+            dependency_contract = False
+        for imported in re.findall(r"from\s+['\"](\./[^'\"]+)['\"]", source):
+            target = os.path.normpath(os.path.join(os.path.dirname(relative), imported))
+            if target not in modules:
+                dependency_contract = False
+    dependency_contract = dependency_contract and all(marker in "\n".join(modules.values()) for marker in (
+        "export {",
+        "from './core.js'",
+        "from './voice.js'",
+        "from './visualization.js'",
+        "import(THREE_MODULE_URL)",
+    ))
+
+    legacy_contract = (
+        len(legacy.encode("utf-8")) > 80_000
+        and legacy.count("<style>") == 1
+        and legacy.count("<script>") == 1
+        and "globalThis.__weaverHeadlessVisualAudit" in legacy
+        and 'test -s "$DEPLOY_ROOT/avatar/headless-legacy.html"' in deploy
+    )
+
+    strict_edge_contract = (
+        "script-src 'self'; style-src 'self';" in caddy
+        and "'unsafe-inline'" not in caddy
+        and "@assets {" in caddy
+        and "path /headless/* /vendor/*" in caddy
+        and "not path /headless-sw.js" in caddy
+        and all(relative in deploy for relative in (*module_relatives, *style_relatives))
+        and 'sudo cp -a "$DEPLOY_ROOT/avatar/headless/."' in deploy
+        and "modular headless CSS/ES modules match deployed checksums" in deploy
+    )
+
+    syntax_contract = True
+    syntax_errors = []
+    for relative in module_relatives:
+        process = await asyncio.create_subprocess_exec(
+            "node", "--check", os.path.join(avatar_root, relative),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            syntax_contract = False
+            syntax_errors.append(f"{relative}: {stderr.decode('utf-8').strip()}")
+
+    passed = all((
+        entry_contract,
+        style_contract,
+        dependency_contract,
+        legacy_contract,
+        strict_edge_contract,
+        syntax_contract,
+    ))
+    detail = "\n".join([
+        f"  Semantic HTML entry is under 16 KiB with no inline code:   {entry_contract}",
+        f"  Design tokens, safe areas, and reduced motion are external:{style_contract}",
+        f"  Twelve local ES modules are bounded and dependency-light:  {dependency_contract}",
+        f"  Original monolith remains a tracked rollback artifact:     {legacy_contract}",
+        f"  CSP is no-inline and deployment hashes every module:       {strict_edge_contract}",
+        f"  Every JavaScript module parses independently:              {syntax_contract}",
+        f"    Syntax errors: {syntax_errors}",
+    ])
+    _result(
+        "BG",
+        "Headless shell is modular, CSP-strict, dependency-light, and rollback-safe",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BH():
+    _header("BH", "Headless workspace makes conversation primary and private awareness explicit")
+    import re
+
+    avatar_root = os.path.abspath(os.path.join(PROJ, "..", "..", "avatar"))
+
+    def read_avatar(relative: str) -> str:
+        with open(os.path.join(avatar_root, relative), "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    html = read_avatar("headless.html")
+    css = read_avatar("headless/styles/shell.css")
+    core = read_avatar("headless/js/core.js")
+    cortex = read_avatar("headless/js/cortex.js")
+    app = read_avatar("headless/js/app.js")
+    accessibility = read_avatar("headless/js/accessibility.js")
+
+    ids = re.findall(r'\bid="([A-Za-z][A-Za-z0-9_-]*)"', html)
+    unique_ids = len(ids) == len(set(ids)) and len(ids) >= 40
+    semantic_workspace = all(marker in html for marker in (
+        'class="status-header"',
+        '<main class="workspace"',
+        'id="conversation"',
+        'role="log"',
+        'aria-relevant="additions text"',
+        'class="panel awareness-rail"',
+        'id="awarenessConfidence"',
+        'class="privacy-notice"',
+        'class="composer-dock"',
+        '<textarea id="text"',
+        'id="diagnosticsDrawer"',
+        'role="dialog"',
+        'aria-modal="true"',
+        'aria-hidden="true" tabindex="-1" inert',
+        'Weaver is the only public speaker',
+        'private specialists stay silent',
+    ))
+
+    wired_ids = (
+        unique_ids
+        and all(f"document.getElementById('{identifier}')" in core for identifier in (
+            "transcript", "heardTime", "turnStatus", "reactionReadout",
+            "copyLast", "retryTurn", "stopTurn", "connectionAnnouncement",
+            "awarenessState", "awarenessConfidence", "awarenessConfidenceFill",
+            "awarenessReason", "diagnosticsToggle", "diagnosticsClose",
+            "diagnosticsDrawer", "diagnosticsScrim", "diagnosticRevision",
+            "diagnosticFreshness", "diagnosticReaction",
+        ))
+    )
+
+    privacy_projection = (
+        "function privateActivitySummary(" in cortex
+        and "Content remains hidden." in cortex
+        and "cognition.thought_topics" in cortex
+        and "cognition.dream_topics" in cortex
+        and "s.last_thought" not in cortex
+        and "s.last_dream" not in cortex
+        and "compact(r.dream" not in cortex
+        and "Private dream activity completed. Content remains hidden." in cortex
+        and all(marker in html for marker in (
+            "Safe thought summary", "Safe dream summary", "content hidden",
+            "Private cognition stays private",
+        ))
+    )
+
+    drawer_contract = all(marker in accessibility + app for marker in (
+        "function setDiagnosticsOpen(open)",
+        "ui.diagnosticsDrawer.inert = !next",
+        "ui.appShell.inert = next",
+        "aria-hidden",
+        "aria-expanded",
+        "priorFocus?.isConnected",
+        "handleDiagnosticsKeydown(event)",
+        "event.key === 'Escape'",
+        "ui.diagnosticsScrim.addEventListener('click'",
+    ))
+
+    responsive_layout = all(marker in css for marker in (
+        "grid-template-columns: minmax(420px, 700px) minmax(270px, 330px)",
+        "grid-template-rows: auto minmax(0, 1fr) auto",
+        "@media (max-width: 760px)",
+        "grid-template-columns: 1fr;",
+        "overflow-y: auto",
+        "env(safe-area-inset-top)",
+        "env(safe-area-inset-bottom)",
+        ".diagnostics-drawer[data-open=\"true\"]",
+        "@media (prefers-reduced-motion: reduce)",
+    )) and "backdrop-filter" not in css
+
+    passed = all((
+        semantic_workspace,
+        wired_ids,
+        privacy_projection,
+        drawer_contract,
+        responsive_layout,
+    ))
+    detail = "\n".join([
+        f"  Conversation, awareness, diagnostics, and composer are semantic: {semantic_workspace}",
+        f"  More than 40 unique IDs are wired through the shared UI map:    {wired_ids}",
+        f"  V2 state projection cannot render raw thought/dream content:     {privacy_projection}",
+        f"  Diagnostics is inert when closed and returns keyboard focus:    {drawer_contract}",
+        f"  Desktop/mobile grids, safe areas, and reduced motion are bound: {responsive_layout}",
+    ])
+    _result(
+        "BH",
+        "Headless workspace makes conversation primary and private awareness explicit",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BI():
+    _header("BI", "Authenticated transcript streams only Weaver and survives long cognition turns")
+
+    avatar_root = os.path.abspath(os.path.join(PROJ, "..", "..", "avatar"))
+
+    def read_avatar(relative: str) -> str:
+        with open(os.path.join(avatar_root, relative), "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    html = read_avatar("headless.html")
+    core = read_avatar("headless/js/core.js")
+    session = read_avatar("headless/js/session.js")
+    cortex = read_avatar("headless/js/cortex.js")
+    app = read_avatar("headless/js/app.js")
+    deploy = open(
+        os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"),
+        "r",
+        encoding="utf-8",
+    ).read()
+    caddy = open(os.path.join(PROJ, "deploy", "Caddyfile"), "r", encoding="utf-8").read()
+
+    one_time_session = (
+        "sessionStorage.removeItem('weaver_llm_key')" in core
+        and "localStorage.removeItem('weaver_llm_key')" in core
+        and "sessionStorage.setItem('weaver_llm_key'" not in core + session
+        and session.count("'X-Weaver-Key': brainKey") == 1
+        and all(marker in session for marker in (
+            "const SESSION_PATH = '/brain/headless/v2/session'",
+            "const SESSION_RENEW_PATH = '/brain/headless/v2/session/renew'",
+            "credentials: 'same-origin'",
+            "'X-Weaver-CSRF': state.auth.csrfToken",
+            "function scheduleRenewal(",
+            "HttpOnly cookie + rotating CSRF",
+        ))
+    )
+
+    v2_stream_boundary = (
+        "/brain/v1/chat/completions" not in cortex
+        and "/brain/state" not in cortex
+        and all(marker in cortex for marker in (
+            "/brain/headless/v2/state",
+            "/brain/headless/v2/chat/stream",
+            "event.speaker !== 'weaver'",
+            "speaker-boundary-rejected",
+            "event.index",
+            "index !== active.nextChunk",
+            "MAX_SSE_BUFFER = 64 * 1024",
+            "response.body.getReader()",
+            "new TextDecoder()",
+            "contentType.toLowerCase().startsWith('text/event-stream')",
+        ))
+        and "innerHTML" not in cortex
+    )
+
+    turn_lifecycle = all(marker in html + cortex + app for marker in (
+        'id="copyLast"',
+        'id="retryTurn"',
+        'id="stopTurn"',
+        "createMessage('user', text)",
+        "createMessage('assistant', 'Acknowledging…', { pending: true })",
+        "new AbortController()",
+        "/brain/headless/v2/chat/${active.serverTurnId}",
+        "copyLastReply",
+        "retryLastTurn",
+        "event.key === 'Enter' && !event.shiftKey",
+        "event.key.toLowerCase() === 'k'",
+        "event.key === 'Escape' && conversationAudit().active",
+    ))
+
+    bounded_context = all(marker in cortex for marker in (
+        "MAX_HISTORY_MESSAGES = 20",
+        "MAX_HISTORY_CHARACTERS = 22_000",
+        "MAX_PUBLIC_REPLY = 32 * 1024",
+        "message: text",
+        "history,",
+        "max_tokens: 512",
+        "trimConversationHistory()",
+    ))
+
+    long_turn_contract = (
+        "maxSemanticWaitMs: null" in cortex
+        and "setInterval(() => updateElapsed(active), 1_000)" in cortex
+        and all(label in cortex for label in (
+            "queued: 'Weaver is preparing'",
+            "thinking: 'Weaver is thinking'",
+            "synthesizing: 'Weaver is forming her response'",
+        ))
+        and "setTimeout(active.controller.abort" not in cortex
+        and "response_header_timeout 130s" in caddy
+    )
+
+    deploy_contract = (
+        "headless/js/session.js" in deploy
+        and 'href="/headless/js/session.js"' in html
+        and "globalThis.__weaverHeadlessSessionAudit = authAudit" in app
+        and "globalThis.__weaverHeadlessConversationAudit = conversationAudit" in app
+    )
+
+    passed = all((
+        one_time_session,
+        v2_stream_boundary,
+        turn_lifecycle,
+        bounded_context,
+        long_turn_contract,
+        deploy_contract,
+    ))
+    detail = "\n".join([
+        f"  Long key is exchanged once for cookie + rotating CSRF:       {one_time_session}",
+        f"  V2 SSE parser rejects non-Weaver or malformed public output: {v2_stream_boundary}",
+        f"  Optimistic, stop, retry, copy, and keyboard states are wired:{turn_lifecycle}",
+        f"  History, SSE buffer, reply, and token budgets remain bounded:{bounded_context}",
+        f"  Generic progress has no client semantic timeout:             {long_turn_contract}",
+        f"  Session module is preloaded, audited, and deployed atomically:{deploy_contract}",
+    ])
+    _result(
+        "BI",
+        "Authenticated transcript streams only Weaver and survives long cognition turns",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BJ():
+    _header("BJ", "Voice UX uses session auth, v2 framing, native ownership, and safe fallbacks")
+    import base64
+    from http.cookies import SimpleCookie
+
+    import httpx
+    from pydantic import ValidationError
+
+    import bedrock_brain_api as brain_api
+    from headless_auth import SESSION_COOKIE_NAME, HeadlessSessionStore
+    from headless_schemas import HeadlessVoiceSynthesisRequest
+
+    request_schema = HeadlessVoiceSynthesisRequest.model_validate({"text": "Hello from Weaver."})
+    invalid_voice_text = False
+    try:
+        HeadlessVoiceSynthesisRequest.model_validate({"text": "x" * 801})
+    except ValidationError:
+        invalid_voice_text = True
+    schema_contract = request_schema.text == "Hello from Weaver." and invalid_voice_text
+
+    originals = {
+        "key": brain_api.WEAVER_KEY,
+        "session_flag": brain_api.HEADLESS_V2_SESSION_ENABLED,
+        "session_store": brain_api.HEADLESS_V2_SESSION_STORE,
+        "synth": brain_api._headless_voice_synth_sync,
+    }
+    session_tts = False
+    websocket_auth = False
+    captured_text = []
+    try:
+        brain_api.WEAVER_KEY = "voice-session-test-key"
+        brain_api.HEADLESS_V2_SESSION_ENABLED = True
+        brain_api.HEADLESS_V2_SESSION_STORE = HeadlessSessionStore(ttl_seconds=120)
+
+        def fake_synth(text):
+            captured_text.append(text)
+            return b"RIFF-safe-audio", "audio/wav"
+
+        brain_api._headless_voice_synth_sync = fake_synth
+        transport = httpx.ASGITransport(app=brain_api.app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://headless.weaverv3.com",
+        ) as client:
+            bootstrap_response = await client.post(
+                "/headless/v2/session",
+                headers={"x-weaver-key": brain_api.WEAVER_KEY},
+            )
+            bootstrap = bootstrap_response.json()
+            parsed_cookie = SimpleCookie()
+            parsed_cookie.load(bootstrap_response.headers["set-cookie"])
+            session_token = parsed_cookie[SESSION_COOKIE_NAME].value
+            csrf = bootstrap["csrf_token"]
+
+            missing_csrf = await client.post(
+                "/headless/v2/voice/synth",
+                json={"text": "must not synthesize"},
+            )
+            synthesis = await client.post(
+                "/headless/v2/voice/synth",
+                headers={"x-weaver-csrf": csrf},
+                json={"text": request_schema.text},
+            )
+            invalid = await client.post(
+                "/headless/v2/voice/synth",
+                headers={"x-weaver-csrf": csrf},
+                json={"text": ""},
+            )
+            session_tts = (
+                missing_csrf.status_code == 403
+                and synthesis.status_code == 200
+                and synthesis.content == b"RIFF-safe-audio"
+                and synthesis.headers["content-type"] == "audio/wav"
+                and synthesis.headers["x-weaver-voice-source"] == "trained"
+                and invalid.status_code == 400
+                and captured_text == [request_schema.text]
+                and brain_api.WEAVER_KEY not in synthesis.request.headers.values()
+            )
+
+            class _VoiceHandshake:
+                def __init__(self, headers, cookies=None):
+                    self.headers = {key.lower(): value for key, value in headers.items()}
+                    self.cookies = dict(cookies or {})
+                    self.accepted = []
+                    self.closed = []
+
+                async def accept(self, subprotocol=None):
+                    self.accepted.append(subprotocol)
+
+                async def close(self, code=1000):
+                    self.closed.append(code)
+
+            browser_socket = _VoiceHandshake(
+                {
+                    "origin": "https://headless.weaverv3.com",
+                    "sec-websocket-protocol": f"weaver-realtime, weaver-csrf.{csrf}",
+                },
+                {SESSION_COOKIE_NAME: session_token},
+            )
+            revalidate = await brain_api._accept_voice_ws(browser_socket)
+
+            hostile_grant = await brain_api.HEADLESS_V2_SESSION_STORE.issue()
+            hostile_socket = _VoiceHandshake(
+                {
+                    "origin": "https://attacker.invalid",
+                    "sec-websocket-protocol": (
+                        f"weaver-realtime, weaver-csrf.{hostile_grant.csrf_token}"
+                    ),
+                },
+                {SESSION_COOKIE_NAME: hostile_grant.token},
+            )
+            hostile_result = await brain_api._accept_voice_ws(hostile_socket)
+
+            encoded_key = base64.urlsafe_b64encode(brain_api.WEAVER_KEY.encode()).decode().rstrip("=")
+            native_socket = _VoiceHandshake({
+                "origin": "",
+                "sec-websocket-protocol": f"weaver-realtime, weaver-key.{encoded_key}",
+            })
+            native_revalidate = await brain_api._accept_voice_ws(native_socket)
+
+            revoked = await client.delete(
+                "/headless/v2/session",
+                headers={"x-weaver-csrf": csrf},
+            )
+            websocket_auth = (
+                revalidate is not None
+                and browser_socket.accepted == ["weaver-realtime"]
+                and hostile_result is None
+                and hostile_socket.closed == [1008]
+                and native_revalidate is not None
+                and await native_revalidate()
+                and native_socket.accepted == ["weaver-realtime"]
+                and revoked.status_code == 200
+                and not await revalidate()
+            )
+    finally:
+        brain_api.WEAVER_KEY = originals["key"]
+        brain_api.HEADLESS_V2_SESSION_ENABLED = originals["session_flag"]
+        brain_api.HEADLESS_V2_SESSION_STORE = originals["session_store"]
+        brain_api._headless_voice_synth_sync = originals["synth"]
+
+    avatar_root = os.path.abspath(os.path.join(PROJ, "..", "..", "avatar"))
+
+    def read_avatar(relative):
+        with open(os.path.join(avatar_root, relative), "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    html = read_avatar("headless.html")
+    css = read_avatar("headless/styles/shell.css")
+    core = read_avatar("headless/js/core.js")
+    support = read_avatar("headless/js/voice-support.js")
+    voice = read_avatar("headless/js/voice.js")
+    app = read_avatar("headless/js/app.js")
+    backend = open(os.path.join(PROJ, "bedrock_brain_api.py"), "r", encoding="utf-8").read()
+
+    explicit_voice_ux = all(marker in html + css + core + app for marker in (
+        'id="voiceTray"',
+        'id="voiceMeterFill"',
+        'id="voicePermission"',
+        'id="voiceDevice"',
+        'id="voiceLatency"',
+        'id="voiceUserCaption"',
+        'id="voiceWeaverCaption"',
+        'id="voiceReplay"',
+        'id="voiceInterrupt"',
+        '.voice-tray[data-state="listening"]',
+        '.voice-tray[data-state="denied"]',
+        "ui.voiceReplay.addEventListener",
+        "ui.voiceInterrupt.addEventListener",
+    ))
+
+    browser_transport = (
+        "weaver-key." not in voice
+        and "/tts/synth" not in voice
+        and all(marker in voice + support for marker in (
+            "`weaver-csrf.${state.auth.csrfToken}`",
+            "'/brain/headless/v2/voice/synth'",
+            "frame.set([0x57, 0x56, 0x52, 0x32]",
+            "protocolVersion: 2",
+            "type: 'output_ack'",
+            "type: 'telemetry'",
+            "type: 'interrupt'",
+            "type: 'ping'",
+            "data.type === 'renew_required'",
+            "scheduleVoiceReconnect(",
+            "VOICE_RECONNECT_POLICY.maxAttempts",
+        ))
+    )
+
+    privacy_and_native = all(marker in voice + support + core for marker in (
+        "data.speaker !== 'weaver'",
+        "voice speaker boundary rejected",
+        "state.nativeShell",
+        "Native iOS cortex bridge · AVFoundation owns capture",
+        "deviceClass: browserDeviceClass()",
+        "deviceAvailable: Boolean(state.realtime.deviceLabel)",
+        "pendingVoiceTextAvailable: Boolean(state.pendingVoiceText)",
+    )) and "deviceIdentifier" not in voice + support
+
+    backend_proxy_bounds = all(marker in backend for marker in (
+        "parsed.hostname not in {\"127.0.0.1\", \"localhost\"}",
+        "HEADLESS_TTS_MAX_BYTES + 1",
+        "HEADLESS_TTS_TIMEOUT_SECONDS",
+        "HEADLESS_VOICE_SYNTH_LIMITER",
+        "await _require_headless_v2_request(request, require_csrf=True)",
+        '"X-Weaver-Voice-Source": "trained"',
+    ))
+
+    passed = all((
+        schema_contract,
+        session_tts,
+        websocket_auth,
+        explicit_voice_ux,
+        browser_transport,
+        privacy_and_native,
+        backend_proxy_bounds,
+    ))
+    detail = "\n".join([
+        f"  Trained-voice request schema rejects empty/oversized text: {schema_contract}",
+        f"  TTS requires session CSRF and never returns the browser key:{session_tts}",
+        f"  Browser WS uses origin/session/CSRF; native key bridge stays:{websocket_auth}",
+        f"  Permission, level, captions, replay, interrupt UI is wired: {explicit_voice_ux}",
+        f"  Browser uses v2 frames, ACK, telemetry, renewal, and retry:  {browser_transport}",
+        f"  Weaver-only captions and native sensor ownership are explicit:{privacy_and_native}",
+        f"  Loopback TTS proxy is rate/time/size/content-type bounded:    {backend_proxy_bounds}",
+    ])
+    _result(
+        "BJ",
+        "Voice UX uses session auth, v2 framing, native ownership, and safe fallbacks",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BK():
+    _header("BK", "Semantic visuals adapt on iPhone and the offline shell never caches private traffic")
+
+    avatar_root = os.path.abspath(os.path.join(PROJ, "..", "..", "avatar"))
+
+    def read_avatar(relative):
+        with open(os.path.join(avatar_root, relative), "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    html = read_avatar("headless.html")
+    core = read_avatar("headless/js/core.js")
+    runtime = read_avatar("headless/js/visual-runtime.js")
+    visual = read_avatar("headless/js/visualization.js")
+    lifecycle = read_avatar("headless/js/lifecycle.js")
+    app = read_avatar("headless/js/app.js")
+    css = read_avatar("headless/styles/shell.css")
+    worker = read_avatar("headless-sw.js")
+    with open(os.path.join(avatar_root, "manifest.webmanifest"), "r", encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    caddy = open(os.path.join(PROJ, "deploy", "Caddyfile"), "r", encoding="utf-8").read()
+    deploy = open(
+        os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"),
+        "r",
+        encoding="utf-8",
+    ).read()
+
+    deterministic_projection = (
+        "Math.random" not in runtime + visual
+        and "snapshot?.schema_version === 2" in runtime
+        and "ACTIVE_PHASES.has(phase)" in runtime
+        and "cognition.thought_count" not in runtime + visual
+        and "private_cognition" not in runtime + visual
+        and all(marker in runtime + visual for marker in (
+            "stableUnit(",
+            "deriveVisualSignals(",
+            "fabric.pressure",
+            "awareness.confidence",
+            "fabric.ledger_valid",
+            "state.visualSignals = signals",
+            "signals.revision",
+        ))
+    )
+
+    adaptive_rendering = all(marker in core + runtime + visual for marker in (
+        "serverDevice === 'iphone-16e'",
+        "shortSide >= 385",
+        "longSide >= 835",
+        "iPhone16e ? 1.25",
+        "state.targetFps = state.reducedMotion ? 18",
+        "render.renderScale > 0.65",
+        "render.recoveryFrames >= 240",
+        "recordRenderedFrame(",
+        "effectiveDpr(",
+        "qualityChanges",
+        "frameEmaMs",
+    ))
+
+    public_shell_only = (
+        "if (request.method !== 'GET') return;" in worker
+        and "url.origin !== self.location.origin || isPrivateRequest(url)" in worker
+        and all(prefix in worker for prefix in (
+            "'/brain/'", "'/tts/'", "'/llm/'", "'/codebase/'", "'/gpu-render/'",
+        ))
+        and all(asset in worker for asset in (
+            "'/headless/js/visual-runtime.js'", "'/headless/js/lifecycle.js'",
+            "'/headless/styles/shell.css'", "'/vendor/three.module.js'",
+        ))
+        and not any(prefix in worker.split("const PRIVATE_PREFIXES", 1)[0] for prefix in (
+            "'/brain/'", "'/tts/'", "'/llm/'", "'/codebase/'",
+        ))
+        and "networkFirstNavigation(request)" in worker
+        and "cacheFirstStatic(request)" in worker
+    )
+
+    mobile_lifecycle = all(marker in html + lifecycle + app + css for marker in (
+        'rel="manifest" href="/manifest.webmanifest"',
+        'href="/headless/js/visual-runtime.js"',
+        'href="/headless/js/lifecycle.js"',
+        'id="networkStatus"',
+        'id="installApp"',
+        "globalThis.visualViewport?.addEventListener('resize'",
+        "globalThis.screen?.orientation?.addEventListener",
+        "if (!('serviceWorker' in navigator) || state.nativeShell)",
+        "globalThis.__weaverHeadlessLifecycleAudit = lifecycleAudit",
+        "--app-viewport-height",
+        "env(safe-area-inset-bottom)",
+        "@media (orientation: landscape) and (max-height: 500px)",
+    ))
+
+    manifest_contract = (
+        manifest.get("id") == "/"
+        and manifest.get("scope") == "/"
+        and manifest.get("display") == "standalone"
+        and manifest.get("orientation") == "any"
+        and manifest.get("theme_color") == "#08090c"
+        and any(icon.get("src") == "/weaver-logo.svg" for icon in manifest.get("icons", []))
+    )
+
+    edge_deploy_contract = all(marker in caddy + deploy for marker in (
+        "/headless-sw.js /manifest.webmanifest",
+        'header @serviceworker >Service-Worker-Allowed "/"',
+        'header @entry >Cache-Control "no-store, max-age=0"',
+        "headless/js/visual-runtime.js",
+        "headless/js/lifecycle.js",
+        "HEADLESS_ROOT_ASSETS=(",
+        "manifest.webmanifest",
+        "headless-sw.js",
+        'sudo install -m 0644 "$DEPLOY_ROOT/avatar/$asset" "/var/www/weaver-headless/$asset"',
+        "modular headless CSS/ES modules match deployed checksums; offline shell matches too",
+    ))
+
+    functional_runtime = False
+    runtime_error = ""
+    script = runtime + r'''
+const snapshot = {
+  schema_version: 2, revision: 7,
+  system: {ready: true}, awareness: {status: 'nominal', confidence: 0.91, degraded_reasons: []},
+  cognition: {phase: 'thinking', thought_count: 999},
+  fabric: {status: 'watch', pressure: 0.4, ledger_valid: true, lanes: {interactive: {active: 1, queued: 2}}},
+  voice: {status: 'ready'}, freshness: {headless: {fresh: true}, body: {fresh: true}},
+};
+const first = deriveVisualSignals(snapshot, {live: false, speaking: false});
+const second = deriveVisualSignals(snapshot, {live: false, speaking: false});
+const idle = deriveVisualSignals({...snapshot, cognition: {phase: 'idle', thought_count: 999}}, {});
+if (!first.verified || !first.activeCognition || idle.activeCognition) throw new Error('phase projection');
+if (JSON.stringify(first) !== JSON.stringify(second) || first.energy <= idle.energy) throw new Error('determinism');
+const render = {lastRenderedAt: 0, renderedFrames: 0, frameEmaMs: 0, workEmaMs: 0,
+  longFrames: 0, pressureFrames: 0, recoveryFrames: 0, lastQualityAt: 0,
+  renderScale: 1, qualityChanges: 0};
+for (let index = 1; index <= 20; index += 1) recordRenderedFrame(render, index * 50, 20, 60);
+if (render.renderScale >= 1 || render.qualityChanges < 1) throw new Error('quality governor');
+'''
+    with tempfile.NamedTemporaryFile("w", suffix=".mjs", encoding="utf-8", delete=False) as handle:
+        handle.write(script)
+        runtime_path = handle.name
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "node", runtime_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        runtime_error = stderr.decode("utf-8").strip()
+        functional_runtime = process.returncode == 0
+    finally:
+        os.unlink(runtime_path)
+
+    syntax_contract = True
+    syntax_errors = []
+    for relative in (
+        "headless/js/core.js", "headless/js/visual-runtime.js",
+        "headless/js/visualization.js", "headless/js/lifecycle.js",
+        "headless/js/app.js", "headless-sw.js",
+    ):
+        process = await asyncio.create_subprocess_exec(
+            "node", "--check", os.path.join(avatar_root, relative),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            syntax_contract = False
+            syntax_errors.append(f"{relative}: {stderr.decode('utf-8').strip()}")
+
+    passed = all((
+        deterministic_projection,
+        adaptive_rendering,
+        public_shell_only,
+        mobile_lifecycle,
+        manifest_contract,
+        edge_deploy_contract,
+        functional_runtime,
+        syntax_contract,
+    ))
+    detail = "\n".join([
+        f"  V2 phase/awareness/fabric signals replace visual randomness: {deterministic_projection}",
+        f"  iPhone 16e keeps 60-FPS intent and sheds DPR before cadence: {adaptive_rendering}",
+        f"  Service worker caches public GET shell assets only:          {public_shell_only}",
+        f"  Safe viewport, orientation, install, and native boundary:   {mobile_lifecycle}",
+        f"  Standalone manifest is same-origin and scope-bounded:        {manifest_contract}",
+        f"  Caddy/deploy no-store and checksum the offline lifecycle:    {edge_deploy_contract}",
+        f"  Deterministic mapper and quality governor execute correctly: {functional_runtime} ({runtime_error})",
+        f"  Runtime, lifecycle, and service-worker syntax parses:        {syntax_contract} ({syntax_errors})",
+    ])
+    _result(
+        "BK",
+        "Semantic visuals adapt on iPhone and the offline shell never caches private traffic",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BL():
+    _header("BL", "Realtime recovery, accessibility preferences, focus containment, and diagnostics stay safe")
+
+    avatar_root = os.path.abspath(os.path.join(PROJ, "..", "..", "avatar"))
+
+    def read_avatar(relative):
+        with open(os.path.join(avatar_root, relative), "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    html = read_avatar("headless.html")
+    css = read_avatar("headless/styles/shell.css")
+    core = read_avatar("headless/js/core.js")
+    cortex = read_avatar("headless/js/cortex.js")
+    channel = read_avatar("headless/js/state-channel.js")
+    lifecycle = read_avatar("headless/js/lifecycle.js")
+    accessibility = read_avatar("headless/js/accessibility.js")
+    app = read_avatar("headless/js/app.js")
+    transport = open(os.path.join(PROJ, "headless_transport.py"), "r", encoding="utf-8").read()
+    backend = open(os.path.join(PROJ, "bedrock_brain_api.py"), "r", encoding="utf-8").read()
+    deploy = open(
+        os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"),
+        "r",
+        encoding="utf-8",
+    ).read()
+
+    realtime_read_only = (
+        "capsule_submit" not in channel
+        and all(marker in channel for marker in (
+            "/brain/headless/v2/stream",
+            "'weaver-headless-v2'",
+            "`weaver-csrf.${state.auth.csrfToken}`",
+            "MAX_MESSAGE_CHARACTERS = 65_536",
+            "exactKeys(",
+            "validSnapshot(",
+            "validDelta(",
+            "type: 'resume'",
+            "armWatchdog()",
+            "MAX_RECONNECT_ATTEMPTS = 8",
+            "schedulePoll(0)",
+            "pollingFallback:",
+            "canExecuteCapsules: false",
+            "maxSemanticWaitMs: null",
+        ))
+        and all(marker in transport + backend for marker in (
+            "relay state and submit an already-signed Intent Capsule for",
+            "deliberately has no callback capable of applying",
+            "verify_capsule=INTENT_COMPILER.verify",
+            "evaluate_capsule=_evaluate_headless_v2_capsule",
+            '@app.websocket("/headless/v2/stream")',
+        ))
+    )
+
+    ordered_fallback = all(marker in cortex + channel + lifecycle + app for marker in (
+        "if (snapshot.revision < priorRevision) return false",
+        "delta.base_revision !== currentRevision",
+        "sendResume(ws)",
+        "authenticated realtime state",
+        "realtime stream + polling safety",
+        "if (state.channel.status === 'connected') return 60_000",
+        "Realtime state is reconnecting",
+        "Polling remains active",
+        "weaver:network-restored",
+        "startStateChannel({ force: true })",
+        "stopStateChannel({ permanent: false })",
+    ))
+
+    dialog_and_keyboard = all(marker in html + accessibility + app for marker in (
+        'role="dialog"',
+        'aria-modal="true"',
+        'aria-hidden="true" tabindex="-1" inert',
+        "ui.appShell.inert = next",
+        "visibleFocusableElements()",
+        "event.key !== 'Tab'",
+        "event.shiftKey",
+        "handleDiagnosticsKeydown(event)",
+        "priorFocus?.isConnected",
+        "if (handleDiagnosticsKeydown(event)) return",
+    ))
+
+    sensory_preferences = all(marker in html + css + core + accessibility for marker in (
+        'id="motionToggle"',
+        'id="contrastToggle"',
+        'id="fieldToggle"',
+        'aria-describedby="motionStatus"',
+        "weaver_accessibility_v1",
+        "state.systemReducedMotion || state.userReducedMotion",
+        'body[data-reduce-motion="true"]',
+        'body[data-high-contrast="true"]',
+        'body[data-field-hidden="true"] canvas',
+        "@media (prefers-contrast: more)",
+        "@media (forced-colors: active)",
+        "@media (pointer: coarse)",
+        "min-height: 44px",
+    ))
+
+    recovery_and_live_regions = (
+        html.count('id="connectionAnnouncement"') == 1
+        and 'aria-live="polite"' in html
+        and all(marker in html + core + cortex + lifecycle + app for marker in (
+            'id="connectionBanner"',
+            'id="reconnectNow"',
+            "setConnectionState('offline'",
+            "setConnectionState('reconnecting'",
+            "state.connection.lastAnnouncement !== safeMessage",
+            "ui.reconnectNow.addEventListener",
+            "ui.transcript.setAttribute('aria-busy'",
+        ))
+    )
+
+    redacted_diagnostics = all(marker in html + accessibility for marker in (
+        'id="diagnosticConnection"',
+        'id="diagnosticSession"',
+        'id="diagnosticNetwork"',
+        'id="diagnosticRender"',
+        'id="diagnosticVoice"',
+        'id="diagnosticPrivacy"',
+        "private content hidden · Weaver-only output",
+        "preferencesStoredWithoutCredentials: true",
+        "privateCognitionInDiagnostics: false",
+    )) and not any(marker in accessibility for marker in (
+        "lastVoiceText", "pendingVoiceText", "lastHeard", "lastSaid", "thought_topics", "dream_topics",
+    ))
+
+    native_and_deploy = (
+        "if (state.nativeShell" in channel
+        and "if (!('serviceWorker' in navigator) || state.nativeShell)" in lifecycle
+        and all(marker in deploy for marker in (
+            "headless/js/state-channel.js",
+            "headless/js/accessibility.js",
+        ))
+        and 'href="/headless/js/state-channel.js"' in html
+        and 'href="/headless/js/accessibility.js"' in html
+    )
+
+    syntax_contract = True
+    syntax_errors = []
+    for relative in (
+        "headless/js/core.js", "headless/js/cortex.js", "headless/js/state-channel.js",
+        "headless/js/lifecycle.js", "headless/js/accessibility.js", "headless/js/app.js",
+    ):
+        process = await asyncio.create_subprocess_exec(
+            "node", "--check", os.path.join(avatar_root, relative),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            syntax_contract = False
+            syntax_errors.append(f"{relative}: {stderr.decode('utf-8').strip()}")
+
+    passed = all((
+        realtime_read_only,
+        ordered_fallback,
+        dialog_and_keyboard,
+        sensory_preferences,
+        recovery_and_live_regions,
+        redacted_diagnostics,
+        native_and_deploy,
+        syntax_contract,
+    ))
+    detail = "\n".join([
+        f"  State WS validates exact public messages and cannot execute: {realtime_read_only}",
+        f"  Ordered resume, heartbeat, reconnect, and polling fallback:  {ordered_fallback}",
+        f"  Modal inertness, focus trap, Escape, and restoration are wired:{dialog_and_keyboard}",
+        f"  Motion, contrast, field, forced-color, and touch controls:    {sensory_preferences}",
+        f"  Deduplicated live recovery status and manual reconnect:       {recovery_and_live_regions}",
+        f"  Operator metadata is useful, bounded, and content-redacted:   {redacted_diagnostics}",
+        f"  Native render ownership and atomic asset deployment remain:  {native_and_deploy}",
+        f"  All Step 29 browser modules parse independently:              {syntax_contract} ({syntax_errors})",
+    ])
+    _result(
+        "BL",
+        "Realtime recovery, accessibility preferences, focus containment, and diagnostics stay safe",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BM():
+    _header("BM", "Headless v2 survives concurrent state, admission, cancellation, and packet chaos")
+    import copy
+
+    from headless_chat import ChatTurnBusy, ChatTurnRegistry
+    from headless_scheduler import HeadlessSchedule, HeadlessScheduler
+    from headless_state import HeadlessStateStore, build_public_state
+    from operation_admission import OperationAdmission, OperationBusy
+    from voice_reliability import VoiceFrame, VoiceIngressSequencer, VoiceProtocolError
+    from weaver_cognition_mesh import CognitionMesh
+    from weaver_neural_fabric import NeuralFabric
+
+    fabric = NeuralFabric(capacity_units=8, realtime_reserved_units=2).snapshot()
+    cognition = CognitionMesh().snapshot(fabric=fabric)
+    public = build_public_state(
+        {
+            "active": True,
+            "started_at": 1_720_000_000.0,
+            "last_tick_at": 1_720_000_019.0,
+            "thoughts": 0,
+            "dreams": 0,
+            "voice_realtime": {
+                "prewarm": {"status": "ready"},
+                "slo": {"status": "nominal", "reaction_target_ms": 200},
+            },
+        },
+        fabric,
+        cognition,
+        now=1_720_000_020.0,
+    )
+    state_store = HeadlessStateStore(max_history=32)
+    waiter = asyncio.create_task(state_store.wait_for_revision(0, timeout=1.0))
+    await asyncio.sleep(0)
+
+    async def _publish(index):
+        payload = copy.deepcopy(public.model_dump(mode="python"))
+        payload["cognition"]["thought_count"] = index
+        return await state_store.publish(payload)
+
+    published = await asyncio.gather(*(_publish(index) for index in range(1, 257)))
+    notified = await waiter
+    latest = await state_store.snapshot()
+    recent = await state_store.changes_since(240)
+    expired = await state_store.changes_since(0)
+    public_json = latest.model_dump_json() if latest is not None else ""
+    state_storm = (
+        {item.revision for item in published} == set(range(1, 257))
+        and notified is not None
+        and latest is not None
+        and latest.revision == 256
+        and recent is not None
+        and [item.revision for item in recent] == list(range(241, 257))
+        and expired is None
+        and all(marker not in public_json.lower() for marker in (
+            "prompt", "transcript", "chain_of_thought", "api_key",
+        ))
+    )
+
+    single_flight = OperationAdmission[dict](
+        rate_limit=1_000,
+        window_seconds=60,
+        concurrency=4,
+        idempotency_entries=16,
+    )
+    factory_calls = 0
+
+    async def _one_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        await asyncio.sleep(0.02)
+        return {"ok": True, "revision": 256}
+
+    storm_results = await asyncio.gather(*(
+        single_flight.execute(
+            operation="state-refresh",
+            payload={"revision": 256},
+            idempotency_key="release-storm-key",
+            factory=_one_factory,
+        )
+        for _ in range(128)
+    ))
+    admission_snapshot = await single_flight.snapshot()
+    idempotency_storm = (
+        factory_calls == 1
+        and sum(1 for _, replayed in storm_results if not replayed) == 1
+        and sum(1 for _, replayed in storm_results if replayed) == 127
+        and all(value == {"ok": True, "revision": 256} for value, _ in storm_results)
+        and admission_snapshot["concurrency"]["active"] == 0
+        and admission_snapshot["idempotency"]["entries"] == 1
+    )
+
+    shedding = OperationAdmission[dict](
+        rate_limit=1_000,
+        window_seconds=60,
+        concurrency=4,
+    )
+    release_capacity = asyncio.Event()
+    active_count = 0
+    peak_active = 0
+
+    async def _bounded_factory():
+        nonlocal active_count, peak_active
+        active_count += 1
+        peak_active = max(peak_active, active_count)
+        try:
+            await release_capacity.wait()
+            return {"ok": True}
+        finally:
+            active_count -= 1
+
+    capacity_tasks = [
+        asyncio.create_task(shedding.execute(
+            operation=f"capacity-{index}",
+            payload={"index": index},
+            idempotency_key=None,
+            factory=_bounded_factory,
+        ))
+        for index in range(40)
+    ]
+    await asyncio.sleep(0.02)
+    release_capacity.set()
+    capacity_results = await asyncio.gather(*capacity_tasks, return_exceptions=True)
+    shedding_snapshot = await shedding.snapshot()
+    capacity_guard = (
+        sum(1 for item in capacity_results if not isinstance(item, BaseException)) == 4
+        and sum(isinstance(item, OperationBusy) for item in capacity_results) == 36
+        and peak_active == 4
+        and active_count == 0
+        and shedding_snapshot["concurrency"]["active"] == 0
+    )
+
+    registry = ChatTurnRegistry(max_active=4)
+    never = asyncio.Event()
+    turn_tasks = [asyncio.create_task(never.wait()) for _ in range(5)]
+    turn_ids = [f"turn-{index}" for index in range(5)]
+    registered = []
+    overflow_rejected = False
+    for turn_id, task in zip(turn_ids, turn_tasks):
+        try:
+            await registry.register(turn_id, task)
+            registered.append((turn_id, task))
+        except ChatTurnBusy:
+            overflow_rejected = True
+            task.cancel()
+    for turn_id, _ in registered:
+        await registry.cancel(turn_id)
+    await asyncio.gather(*turn_tasks, return_exceptions=True)
+    for turn_id, task in registered:
+        await registry.forget(turn_id, task)
+    cancellation_guard = (
+        overflow_rejected
+        and len(registered) == 4
+        and all(task.done() for task in turn_tasks)
+        and await registry.active() == 0
+    )
+
+    scheduler_clock = [100.0]
+    priority_event = asyncio.Event()
+    thought_started = asyncio.Event()
+    thought_cancelled = asyncio.Event()
+
+    async def _idle():
+        return True
+
+    async def _blocking_thought(_reason):
+        thought_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            thought_cancelled.set()
+            raise
+
+    async def _unused_dream(_reason):
+        return "unused"
+
+    async def _noop_tick(_now):
+        return None
+
+    async def _noop_error(_error):
+        return None
+
+    scheduler = HeadlessScheduler(
+        HeadlessSchedule(1, 100, tick_seconds=0.01),
+        active=lambda: True,
+        idle_ready=_idle,
+        run_thought=_blocking_thought,
+        run_dream=_unused_dream,
+        on_tick=_noop_tick,
+        on_error=_noop_error,
+        priority_event=priority_event,
+        random_unit=lambda: 0.5,
+        monotonic=lambda: scheduler_clock[0],
+    )
+    scheduler_clock[0] = 102.0
+    cycle = asyncio.create_task(scheduler.run_cycle())
+    await asyncio.wait_for(thought_started.wait(), timeout=1.0)
+    priority_event.set()
+    await asyncio.wait_for(cycle, timeout=1.0)
+    scheduler_state = scheduler.snapshot()
+    voice_first_preemption = (
+        thought_cancelled.is_set()
+        and scheduler_state["preemptions"] == 1
+        and scheduler_state["thought_runs"] == 0
+        and scheduler_state["errors"] == 0
+    )
+
+    ingress = VoiceIngressSequencer(
+        max_buffered_frames=8,
+        max_forward_gap=96,
+        max_jitter_ms=20,
+    )
+    for sequence in range(1, 81):
+        if sequence % 13 == 0:
+            continue
+        ingress.ingest(
+            VoiceFrame(sequence, sequence * 20, b"pcm"),
+            arrival_ms=sequence * 25,
+        )
+    ingress.ingest(VoiceFrame(80, 1_600, b"duplicate"), arrival_ms=2_025)
+    forward_gap_rejected = False
+    try:
+        ingress.ingest(VoiceFrame(200, 4_000, b"gap"), arrival_ms=2_050)
+    except VoiceProtocolError:
+        forward_gap_rejected = True
+    voice_state = ingress.snapshot()
+    packet_chaos = (
+        voice_state["ack_sequence"] == 80
+        and voice_state["lost"] == 6
+        and voice_state["duplicates"] == 1
+        and voice_state["rejected"] == 1
+        and voice_state["buffered"] == 0
+        and voice_state["max_buffer_depth"] <= 8
+        and forward_gap_rejected
+    )
+
+    passed = all((
+        state_storm,
+        idempotency_storm,
+        capacity_guard,
+        cancellation_guard,
+        voice_first_preemption,
+        packet_chaos,
+    ))
+    detail = "\n".join([
+        f"  256 concurrent state writes stay monotonic and private: {state_storm}",
+        f"  128 duplicate operations execute exactly once:          {idempotency_storm}",
+        f"  Saturation runs four and sheds 36 without leaks:        {capacity_guard}",
+        f"  Chat overflow/cancellation leaves no orphan tasks:      {cancellation_guard}",
+        f"  Interactive priority cancels background cognition:     {voice_first_preemption}",
+        f"  Packet loss/duplicates/gaps remain bounded and ordered: {packet_chaos}",
+    ])
+    _result(
+        "BM",
+        "Headless v2 survives concurrent state, admission, cancellation, and packet chaos",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BN():
+    _header("BN", "The five-viewport browser release matrix is permanent and bounded")
+    matrix_path = os.path.join(PROJ, "tests", "headless_release_matrix.py")
+    with open(matrix_path, "r", encoding="utf-8") as handle:
+        source = handle.read()
+    syntax_valid = True
+    try:
+        compile(source, matrix_path, "exec")
+    except SyntaxError:
+        syntax_valid = False
+    exact_viewports = all(marker in source for marker in (
+        '"width": 320',
+        '"width": 390, "height": 844',
+        '"width": 768',
+        '"width": 1024',
+        '"width": 1440',
+    ))
+    realtime_boundary = all(marker in source for marker in (
+        '"weaver-headless-v2"',
+        '"canExecuteCapsules"] is False',
+        '"maxSemanticWaitMs"] is None',
+        'item.get("type") == "resume"',
+    ))
+    performance_budget = all(marker in source for marker in (
+        'ready_wall_ms < 2_500',
+        'metrics["resourceCount"] <= 24',
+        '96 * 1024 * 1024',
+        'metrics["visual"]["fps"] == 60',
+        'metrics["visual"]["dprCap"] == 1.25',
+    ))
+    recovery_accessibility = all(marker in source for marker in (
+        "set_offline(True)",
+        "set_offline(False)",
+        'dialog["openAudit"]["backgroundInert"] is True',
+        'minimum_target = 43.5',
+        'metrics["unlabeledButtons"] == 0',
+    ))
+    bounded_script = len(source.encode("utf-8")) < 24_000 and source.count("assert ") >= 20
+    passed = all((
+        syntax_valid,
+        exact_viewports,
+        realtime_boundary,
+        performance_budget,
+        recovery_accessibility,
+        bounded_script,
+    ))
+    detail = "\n".join([
+        f"  Release-matrix Python syntax is valid:              {syntax_valid}",
+        f"  320/390x844/768/1024/1440 targets are exact:        {exact_viewports}",
+        f"  Realtime is authenticated, resumable, and read-only:{realtime_boundary}",
+        f"  Boot/resource/heap/iPhone render budgets are hard:  {performance_budget}",
+        f"  Offline recovery, modal containment, targets pass:  {recovery_accessibility}",
+        f"  Test remains dependency-light and reviewable:       {bounded_script}",
+    ])
+    _result(
+        "BN",
+        "The five-viewport browser release matrix is permanent and bounded",
+        passed,
+        detail,
+    )
+    return passed
+
+
+async def test_BO():
+    _header("BO", "Runtime dependencies retain an audited, deploy-enforced security floor")
+    import subprocess
+    from importlib.metadata import version
+
+    security_path = os.path.join(PROJ, "requirements-security.txt")
+    with open(security_path, "r", encoding="utf-8") as handle:
+        security_source = handle.read()
+    expected = {}
+    for raw in security_source.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, pinned = line.split("==", 1)
+        expected[name] = pinned
+    exact_floor = (
+        len(expected) == 19
+        and expected.get("aiohttp") == "3.14.1"
+        and expected.get("starlette") == "1.3.1"
+        and expected.get("langchain") == "1.3.13"
+        and expected.get("PyJWT") == "2.13.0"
+        and expected.get("urllib3") == "2.7.0"
+    )
+
+    with open(os.path.join(PROJ, "requirements.txt"), "r", encoding="utf-8") as handle:
+        requirements = handle.read()
+    with open(os.path.join(PROJ, "requirements-full.txt"), "r", encoding="utf-8") as handle:
+        requirements_full = handle.read()
+    synchronized = all(
+        f"{name}=={pinned}" in requirements
+        and f"{name}=={pinned}" in requirements_full
+        for name, pinned in expected.items()
+    )
+    installed = {name: version(name) for name in expected}
+    local_floor = installed == expected
+
+    with open(os.path.join(PROJ, "scripts", "audit_dependencies.sh"), "r", encoding="utf-8") as handle:
+        audit_source = handle.read()
+    with open(os.path.join(PROJ, "deploy", "weaver-llm.service"), "r", encoding="utf-8") as handle:
+        llm_unit = handle.read()
+    exec_start = llm_unit.split("ExecStart=", 1)[1].split("Restart=", 1)[0]
+    exceptions_bounded = all(marker in audit_source for marker in (
+        "PYSEC-2026-2447",
+        "CVE-2025-3000",
+        "diskcache has no fixed release",
+        "affected range is PyTorch 2.6.0 only",
+    )) and all(marker in llm_unit for marker in (
+        "PrivateTmp=true",
+        "ProtectSystem=strict",
+        "ProtectHome=read-only",
+        "UMask=0077",
+    )) and "--cache" not in exec_start and all(
+        "torch==2.11.0" in source for source in (requirements, requirements_full)
+    )
+
+    with open(os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"), "r", encoding="utf-8") as handle:
+        deploy_source = handle.read()
+    deployment_floor = all(marker in deploy_source for marker in (
+        'test -s "$APP/requirements-security.txt"',
+        '--requirement "$APP/requirements-security.txt"',
+        '"$APP/venv/bin/python3" -m pip check',
+        "actual == expected",
+        "Security floors are forward-only infrastructure",
+    ))
+    syntax_valid = all(
+        subprocess.run(
+            ["bash", "-n", path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode == 0
+        for path in (
+            os.path.join(PROJ, "scripts", "audit_dependencies.sh"),
+            os.path.join(PROJ, "deploy", "deploy_voice_fullstack_fix.sh"),
+        )
+    )
+
+    passed = all((
+        exact_floor,
+        synchronized,
+        local_floor,
+        exceptions_bounded,
+        deployment_floor,
+        syntax_valid,
+    ))
+    detail = "\n".join([
+        f"  Nineteen fixable runtime packages are exactly pinned: {exact_floor}",
+        f"  Full and standard requirement sets match the floor:  {synchronized}",
+        f"  Current release environment matches every exact pin: {local_floor}",
+        f"  Two no-fix/false-positive exceptions are constrained: {exceptions_bounded}",
+        f"  Deployment upgrades and verifies before migration:   {deployment_floor}",
+        f"  Audit and deployment shells parse under strict Bash: {syntax_valid}",
+    ])
+    _result(
+        "BO",
+        "Runtime dependencies retain an audited, deploy-enforced security floor",
+        passed,
+        detail,
+    )
+    return passed
+
+
 TESTS = {
     "G": ("Quantum parse invariants", test_G),
     "H": ("Quantum description + state write persistence", test_H),
@@ -3787,6 +9115,32 @@ TESTS = {
     "AM": ("iPhone 16e A18 adaptive mobile performance without embodiment loss", test_AM),
     "AN": ("Resilient visual boot, seamless clothing, and compositor-safe headless controls", test_AN),
     "AO": ("Only Weaver speaks while the coder stays private", test_AO),
+    "AP": ("Headless v2 contracts preserve capsule, native, and long-turn authority", test_AP),
+    "AQ": ("Strict headless v2 schemas, privacy projection, and revisioned shadow state", test_AQ),
+    "AR": ("Headless scheduler and read-mostly realtime transport remain bounded", test_AR),
+    "AS": ("Short-lived browser sessions keep the Weaver key out of repeated requests", test_AS),
+    "AT": ("Headless v2 HTTP boundaries are allowlisted, bounded, correlated, and redacted", test_AT),
+    "AU": ("Mutation admission deduplicates, rate-limits, replay-guards, and bounds concurrency", test_AU),
+    "AV": ("Private cognition yields to voice with jitter, token budgets, and cancellation", test_AV),
+    "AW": ("Private cognition stays in a bounded vault while clients receive safe metadata", test_AW),
+    "AX": ("Memory provenance, deduplication, freshness, retention, and deletion are auditable", test_AX),
+    "AY": ("Awareness fusion joins body, world, cognition, fabric, and dependency freshness", test_AY),
+    "AZ": ("Realtime voice is sequenced, resumable, interruptible, and telemetry-bounded", test_AZ),
+    "BA": ("Cancellable chat streams only Weaver's validated public answer", test_BA),
+    "BB": ("Prewarming, coalescing, ETags, cache bounds, and circuit recovery", test_BB),
+    "BC": ("Liveness, readiness, and authenticated deep health stay distinct and private", test_BC),
+    "BD": ("Correlated telemetry is redacted, bounded, and governed by SLO error budgets", test_BD),
+    "BE": ("Versioned n8n boundary keeps specialists private and Weaver public", test_BE),
+    "BF": ("Edge, service, container, and deployment hardening remain coherent", test_BF),
+    "BG": ("Headless shell is modular, CSP-strict, dependency-light, and rollback-safe", test_BG),
+    "BH": ("Headless workspace makes conversation primary and private awareness explicit", test_BH),
+    "BI": ("Authenticated transcript streams only Weaver and survives long cognition turns", test_BI),
+    "BJ": ("Voice UX uses session auth, v2 framing, native ownership, and safe fallbacks", test_BJ),
+    "BK": ("Semantic visuals adapt on iPhone and the offline shell never caches private traffic", test_BK),
+    "BL": ("Realtime recovery, accessibility preferences, focus containment, and diagnostics stay safe", test_BL),
+    "BM": ("Headless v2 survives concurrent state, admission, cancellation, and packet chaos", test_BM),
+    "BN": ("The five-viewport browser release matrix is permanent and bounded", test_BN),
+    "BO": ("Runtime dependencies retain an audited, deploy-enforced security floor", test_BO),
 }
 
 
@@ -3814,6 +9168,6 @@ async def main(which: str):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("test", nargs="?", default="all", help="G-AO or all")
+    ap.add_argument("test", nargs="?", default="all", help="G-BO or all")
     args = ap.parse_args()
     raise SystemExit(0 if asyncio.run(main(args.test)) else 1)

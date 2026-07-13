@@ -328,12 +328,32 @@ check(localTargets.has('8. LoRA Voice') && localTargets.has('8b. Qwen3B') && loc
 check((inboundByInput.get('8c. Local Barrier') || new Map()).size === 2, 'Local Barrier must synchronize both local-model tags');
 
 const sanitizeCode = nodes.get('2. Sanitize')?.parameters?.jsCode || '';
-check(sanitizeCode.includes('.slice(0, 4000)'), 'Sanitize must cap user text at 4000 characters');
-check(sanitizeCode.includes('.slice(0, 12000)'), 'Sanitize must cap codebase evidence at 12000 characters');
-check(sanitizeCode.includes('cognition_context'), 'Sanitize must bound Cognition Mesh context');
+const n8nContractVersion = 'weaver-headless-n8n-v1';
+const requestContractFields = [
+  'contract_version', 'correlation_id', 'deadline_ms', 'text',
+  'self_check', 'introspect', 'path_glob', 'search_query',
+  'codebase_context', 'quantum_pathway', 'cognition_context',
+];
+check(sanitizeCode.includes(n8nContractVersion), 'Sanitize must require the versioned headless contract');
+for (const field of requestContractFields) {
+  check(sanitizeCode.includes(`'${field}'`), `Sanitize contract is missing request field ${field}`);
+}
+check(
+  sanitizeCode.includes('keys.length === ALLOWED.length')
+    && sanitizeCode.includes('keys.every(key => ALLOWED.includes(key))'),
+  'Sanitize must reject missing and additional top-level fields',
+);
+check(sanitizeCode.includes('body.text.trim().length <= 4000'), 'Sanitize must cap user text at 4000 characters');
+check(sanitizeCode.includes('body.codebase_context.length <= 12000'), 'Sanitize must cap codebase evidence at 12000 characters');
+check(sanitizeCode.includes('body.deadline_ms === 115000'), 'Sanitize must enforce the 115-second brain deadline');
+check(sanitizeCode.includes('body.correlation_id === correlation'), 'Sanitize must preserve the authenticated correlation ID');
+check(sanitizeCode.includes('cognitionKeys.length === COGNITION_ALLOWED.length'), 'Sanitize must enforce the exact Cognition Mesh context');
+check(!sanitizeCode.includes('body.selfCheck'), 'Sanitize must not accept compatibility aliases outside the v1 contract');
 const dlqCode = nodes.get('DLQ Logger')?.parameters?.jsCode || '';
 check(dlqCode.includes('METADATA-ONLY'), 'DLQ must declare metadata-only handling');
 check(!dlqCode.includes('appendFile') && !dlqCode.includes('dlq_path'), 'DLQ must not persist raw request data from a Code node');
+check(dlqCode.includes("error_code: 'invalid-request'"), 'DLQ must produce the stable invalid-request rejection');
+check(!dlqCode.includes('...d') && !dlqCode.includes('...safe'), 'DLQ must not spread request fields into its envelope');
 const writebackCode = nodes.get('9. Writeback')?.parameters?.jsCode || '';
 const speakerBody = nodes.get('7. Self-Reflect')?.parameters?.jsonBody || '';
 const speakerTagCode = nodes.get('7-tag')?.parameters?.jsCode || '';
@@ -344,14 +364,123 @@ check(!speakerBody.includes("quality reviewer"), 'Internal quality-reviewer iden
 check(!serialized.includes('No codebase evidence was supplied.'), 'Empty evidence must not poison conversational turns');
 check(speakerTagCode.includes('speaker_boundary_applied: !!reviewed'), 'Speaker boundary must fail closed when the Weaver brain call fails');
 check(speakerTagCode.includes('internal_draft_hidden: true'), 'Private specialist drafts must remain hidden');
-check(writebackCode.includes("pipeline_version: 'v6-parallel-cognition'"), 'Writeback must expose the v6 pipeline contract');
+check(writebackCode.includes(n8nContractVersion), 'Writeback must expose the versioned public contract');
+check(writebackCode.includes("const PIPELINE = 'v6-parallel-cognition'"), 'Writeback must expose the v6 pipeline contract');
 check(writebackCode.includes("pipeline_architecture: 'parallel-fanout-barrier'"), 'Writeback must expose the parallel topology');
-check(writebackCode.includes('speaker_boundary_applied: !!d.speaker_boundary_applied'), 'Writeback must expose the speaker-boundary result');
-check(writebackCode.includes('internal_draft_hidden: d.internal_draft_hidden === true'), 'Writeback must attest that private drafts stayed hidden');
+check(writebackCode.includes("status: 'ok'") && writebackCode.includes('error: false'), 'Writeback must emit an explicit success discriminator');
+check(writebackCode.includes("status: 'rejected'") && writebackCode.includes('error: true'), 'Writeback must emit an explicit rejection discriminator');
+check(writebackCode.includes("speaker: 'weaver'"), 'Writeback must identify Weaver as the sole public speaker');
+check(writebackCode.includes('speaker_boundary_applied: true'), 'Writeback must expose only a passed speaker boundary');
+check(writebackCode.includes('internal_draft_hidden: true'), 'Writeback must attest that private drafts stayed hidden');
+check(writebackCode.includes('manifested_response: reviewed'), 'Writeback must publish only the reviewed Weaver response');
+check(!writebackCode.includes('...d'), 'Writeback must not spread internal pipeline state into public output');
 check(!writebackCode.includes('d.collapsed_response ||'), 'Writeback must never fall back to a private specialist draft');
 check(!writebackCode.includes('original_input:'), 'Writeback must not echo original input');
 check(!writebackCode.includes('collapsed_response:'), 'Writeback must not duplicate private intermediate output');
-check(writebackCode.includes('written_to_hub: false'), 'Writeback must not claim an Akashic write it did not perform');
+for (const privateField of [
+  'lora_error:', 'qwen3b_error:', 'dominant_lobe:', 'experts_activated:',
+  'qwen3b_route:', 'synthesis_prompt:', 'codebase_context_chars:', 'qubit_layout:',
+]) {
+  check(!writebackCode.includes(privateField), `Writeback must not expose private field ${privateField.slice(0, -1)}`);
+}
+
+async function executeCodeNode(code, inputItems) {
+  const input = {
+    all: () => inputItems,
+    first: () => inputItems[0],
+  };
+  const now = { toISO: () => '2026-07-13T12:00:00.000Z' };
+  const forbiddenNamedLookup = () => {
+    throw new Error('contract validation nodes may not use named-node lookups');
+  };
+  const callable = new AsyncFunction('$input', '$execution', '$workflow', '$now', '$', code);
+  return callable(input, { id: 'validator-exec' }, {}, now, forbiddenNamedLookup);
+}
+
+const validContractRequest = {
+  contract_version: n8nContractVersion,
+  correlation_id: 'req-validator-1',
+  deadline_ms: 115000,
+  text: 'Hello Weaver',
+  self_check: false,
+  introspect: false,
+  path_glob: '**/*',
+  search_query: '',
+  codebase_context: '',
+  quantum_pathway: '',
+  cognition_context: {
+    awareness_confidence: 0.75,
+    fabric_pressure: 0.1,
+    immune_status: 'nominal',
+    open_components: [],
+  },
+};
+try {
+  const [validSanitized] = await executeCodeNode(sanitizeCode, [{ json: validContractRequest }]);
+  check(validSanitized?.json?.error !== true, 'Sanitize must accept the exact v1 request contract');
+  check(validSanitized?.json?.correlation_id === validContractRequest.correlation_id, 'Sanitize must echo correlation IDs exactly');
+  for (const mutation of [
+    { ...validContractRequest, private_prompt: 'must-not-cross' },
+    { ...validContractRequest, contract_version: 'legacy' },
+    { ...validContractRequest, deadline_ms: 114999 },
+    { ...validContractRequest, cognition_context: { ...validContractRequest.cognition_context, private_state: true } },
+  ]) {
+    const [rejected] = await executeCodeNode(sanitizeCode, [{ json: mutation }]);
+    check(rejected?.json?.error_code === 'invalid-request', 'Sanitize must reject malformed or expanded contracts');
+    check(!JSON.stringify(rejected).includes('must-not-cross'), 'Sanitize rejection must not echo untrusted fields');
+  }
+
+  const privateSentinel = 'PRIVATE-DRAFT-MUST-NOT-CROSS';
+  const validInternalState = {
+    ...validSanitized.json,
+    self_reflection: 'Weaver public manifestation',
+    reflection_applied: true,
+    speaker_boundary_applied: true,
+    speaker_model: 'qwen.qwen3-235b-a22b-2507',
+    internal_draft_hidden: true,
+    expert_parallel: true,
+    expert_count: 5,
+    experts_completed: 5,
+    expert_errors: 0,
+    expert_fanout_elapsed_ms: 102500,
+    collapsed_response: privateSentinel,
+    synthesis_prompt: privateSentinel,
+    expert_drafts: [privateSentinel],
+    lora_error: privateSentinel,
+    qwen3b_error: privateSentinel,
+    qwen3b_route: privateSentinel,
+  };
+  const [publicSuccess] = await executeCodeNode(writebackCode, [{ json: validInternalState }]);
+  const successFields = [
+    'contract_version', 'status', 'error', 'correlation_id', 'manifested_response',
+    'speaker', 'speaker_boundary_applied', 'speaker_model', 'internal_draft_hidden',
+    'reflection_applied', 'soul_voice_active', 'codebase_grounded', 'expert_parallel',
+    'expert_count', 'experts_completed', 'expert_errors', 'expert_fanout_elapsed_ms',
+    'execution_id', 'timestamp', 'pipeline_architecture', 'pipeline_version',
+  ].sort();
+  check(
+    JSON.stringify(Object.keys(publicSuccess?.json || {}).sort()) === JSON.stringify(successFields),
+    'Writeback success must contain exactly the public v1 fields',
+  );
+  check(publicSuccess?.json?.manifested_response === validInternalState.self_reflection, 'Writeback must publish the reviewed manifestation verbatim');
+  check(!JSON.stringify(publicSuccess).includes(privateSentinel), 'Writeback must contain no private draft, route, prompt, or raw error');
+
+  const [boundaryRejection] = await executeCodeNode(writebackCode, [{
+    json: { ...validInternalState, speaker_boundary_applied: false },
+  }]);
+  const rejectionFields = [
+    'contract_version', 'status', 'error', 'error_code', 'correlation_id',
+    'execution_id', 'timestamp', 'pipeline_version',
+  ].sort();
+  check(
+    JSON.stringify(Object.keys(boundaryRejection?.json || {}).sort()) === JSON.stringify(rejectionFields),
+    'Writeback rejection must contain exactly the public rejection fields',
+  );
+  check(boundaryRejection?.json?.error_code === 'speaker-boundary-failed', 'Writeback must fail closed at the public speaker boundary');
+  check(!Object.hasOwn(boundaryRejection?.json || {}, 'manifested_response'), 'Rejected output must never contain a manifestation');
+} catch (error) {
+  errors.push(`versioned n8n contract execution checks failed: ${error.message}`);
+}
 
 const settings = workflow.settings || {};
 check(settings.executionOrder === 'v1', 'workflow executionOrder must be v1');
@@ -380,7 +509,7 @@ const fingerprint = createHash('sha256').update(raw).digest('hex');
 const result = {
   valid: errors.length === 0,
   technology: 'weaver-n8n-contract-validator',
-  version: 1,
+  version: 2,
   workflow: workflowPath,
   workflow_name: workflow.name,
   workflow_id: workflow.id || null,

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-13",
+  "reaction": {
+    "acknowledgement_target_ms": 200,
+    "queue_target_ms": 120,
+    "semantic_soft_target_ms": 3000,
+    "n8n_semantic_hard_budget_ms": 115000,
+    "progress_heartbeat_max_interval_ms": 5000,
+    "transport_heartbeat_max_interval_ms": 10000,
+    "transport_stale_after_ms": 25000
+  },
+  "web": {
+    "ttfb_p95_max_ms": 300,
+    "fcp_max_ms": 600,
+    "lcp_max_ms": 1200,
+    "cls_max": 0.05,
+    "ci_software_render_fps_min": 30,
+    "physical_iphone_fps_target": 55,
+    "long_tasks_max": 5,
+    "horizontal_overflow_px": 0,
+    "touch_target_min_px": 44,
+    "critical_console_errors": 0,
+    "critical_accessibility_violations": 0,
+    "html_decoded_bytes_max": 100000,
+    "initial_resource_transfer_bytes_max": 400000,
+    "initial_resource_decoded_bytes_max": 1400000
+  },
+  "api": {
+    "state_read_p95_max_ms": 25,
+    "voice_config_p95_max_ms": 25,
+    "health_p95_max_ms": 100,
+    "snapshot_max_bytes": 65536,
+    "delta_max_bytes": 16384,
+    "event_max_bytes": 32768
+  },
+  "protocol": {
+    "max_capsule_actions": 8,
+    "max_capsule_ttl_ms": 60000,
+    "max_delta_history": 256,
+    "max_subscriptions_per_connection": 8,
+    "max_pending_messages_per_connection": 64,
+    "max_reconnect_delay_ms": 30000
+  }
+}

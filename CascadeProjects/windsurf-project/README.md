@@ -164,8 +164,9 @@ The current non-OpenAI server-side voice path is AWS-first:
 
 | Piece | Default | Notes |
 | --- | --- | --- |
-| Browser realtime voice | `/brain/realtime/voice` | Headless UI receives Nova Sonic voice metadata and opens a WebSocket session. |
-| TTS server | `deploy/tts/tts_server.py` | Runs on `127.0.0.1:8092`, exposed through `/tts/*`. |
+| Browser realtime voice | `/brain/realtime/voice` | Headless UI opens a cookie/CSRF-authenticated v2 WebSocket; native iOS retains its authenticated key bridge. |
+| Browser trained TTS | `/brain/headless/v2/voice/synth` | CSRF-protected, bounded FastAPI proxy; the browser never receives or repeats the service key. |
+| TTS server | `deploy/tts/tts_server.py` | Runs only on `127.0.0.1:8092`; legacy/native compatibility remains under `/tts/*`. |
 | TTS provider | Amazon Polly | Defaults to generative `Ruth` in `us-east-1`; override with `TTS_POLLY_*`. |
 | Local clone fallback | OpenVoice | Set `TTS_PROVIDER=openvoice`; embedding is extracted once and cached. |
 | Browser fallback | Web Speech API | Used when server voice or realtime audio is unavailable. |
@@ -173,6 +174,27 @@ The current non-OpenAI server-side voice path is AWS-first:
 The phone and Discord bridges still contain legacy OpenAI/Azure realtime/STT/TTS
 paths. Treat those as optional integration paths, not the default low-cost
 headless voice stack.
+
+## Headless Mobile Web Runtime
+
+The modular headless shell maps the verified v2 awareness, cognition phase,
+Neural Fabric pressure/lanes, freshness, and voice state into deterministic
+Three.js or 2D motion. The iPhone 16e profile targets 60 FPS with a bounded 1.25
+DPR ceiling and adaptive resolution before cadence shedding. Visual viewport,
+safe-area, keyboard, portrait/landscape, reduced-motion, offline, and install
+lifecycles are first-class. `nativeShell=1` remains render-only because SwiftUI
+owns AVFoundation, Vision, Core ML, sensors, and credentials.
+
+Authenticated browser state is WebSocket-primary with exact revisioned
+snapshot/delta validation, 10-second heartbeats, resume cursors, bounded
+reconnect, and polling fallback. The client sends no Intent Capsules and cannot
+execute one. The operator dialog provides redacted health plus keyboard focus
+containment and non-sensitive motion, contrast, and ambient-field preferences;
+coarse-pointer controls retain 44-pixel targets.
+
+The service worker caches only the public same-origin GET shell. Brain, voice,
+LLM, codebase, and GPU-render routes always bypass it; no state response,
+transcript, Intent Capsule, or authentication material is available offline.
 
 ## Quantum Runtime
 
@@ -223,7 +245,7 @@ Two workflow exports are included:
 
 | File | Nodes | Role |
 | --- | ---: | --- |
-| `n8n_weaver_v5.json` | 35 | Canonical v6 workflow (stable file/ID): bounded input and cognition context, parallel five-expert fanout/barrier, internet context, geometric collapse, parallel LoRA/Qwen reflection, and privacy-safe response metadata. Validate with `npm run validate:n8n`. |
+| `n8n_weaver_v5.json` | 35 | Canonical v6 workflow (stable file/ID): exact `weaver-headless-n8n-v1` request gate, parallel five-expert fanout/barrier, geometric collapse, Weaver-only reflection boundary, and strict public success/rejection envelopes. Validate with `npm run validate:n8n`. |
 | `n8n_weaver_final.json` | 13 | Historical reference only; do not deploy. |
 
 The primary webhook defaults vary by environment. Check `.env`,
@@ -279,8 +301,15 @@ Important variables:
 - `codebase_api.py` is read-only, redacts secret-looking values, blocks binary
   and oversized files, and blocks private/loopback/reserved hosts for public-web
   fetches.
-- Caddy gates `/brain/*`, `/tts/*`, `/codebase/*`, and `/llm/*` with
-  `X-Weaver-Key` when `WEAVER_LLM_KEY` is set.
+- Caddy key-gates legacy `/brain/*`, `/tts/*`, `/codebase/*`, and `/llm/*`
+  routes. `/brain/headless/v2/*` delegates short-lived cookie/CSRF validation to
+  FastAPI, while realtime WebSockets authenticate inside the brain protocol.
+- Public origins emit HSTS, CSP, permissions, frame, referrer, and content-type
+  protections. HTML/API responses and the service-worker/manifest entries are
+  `no-store`; versioned public assets use a bounded cache. The modular headless
+  entry requires no inline CSP allowances.
+- n8n is digest-pinned, read-only, capability-dropped, resource-bounded, and
+  accepts only the exact `weaver-headless-n8n-v1` request/public-response union.
 - `dash.weaverv3.com` and `status.weaverv3.com` are protected with Caddy
   `basic_auth` via `WEAVER_DASH_HASH`.
 - Some legacy tests and scripts print key prefixes or call paid APIs. Run them
@@ -302,10 +331,28 @@ venv/bin/python3 tests/weaver_tests.py --tier stress --dur 30
 Longer stress and legacy suites:
 
 ```bash
-venv/bin/python3 tests/stress_30min_full.py --quick
-venv/bin/python3 tests/stress_30min_full.py
-venv/bin/python3 whole_codebase_tests.py
+venv/bin/python3 whole_codebase_tests.py all
+venv/bin/python3 tests/stress_30min_full.py --quick  # includes an optional paid OpenAI lane when a key is present
+venv/bin/python3 tests/stress_30min_full.py           # full ~30-minute endurance run
 ```
+
+The permanent browser release matrix covers 320 px, iPhone 16e (390×844),
+768 px, 1024 px, and 1440 px with mocked authenticated state/voice boundaries:
+
+```bash
+python3 -m http.server 8018 --bind 127.0.0.1 --directory ../../avatar
+python3 tests/headless_release_matrix.py
+```
+
+Dependency compatibility and the live advisory gate:
+
+```bash
+bash scripts/audit_dependencies.sh venv/bin/python
+```
+
+The audit has two documented exceptions in the script: DiskCache has no fixed
+release but its optional llama disk cache is disabled and filesystem-isolated;
+the reported Torch issue affects 2.6.0 while Weaver pins 2.11.0.
 
 Be careful with live tiers: they may require valid cloud credentials, n8n, local
 ports, or paid APIs.

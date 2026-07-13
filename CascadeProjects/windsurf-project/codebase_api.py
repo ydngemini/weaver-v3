@@ -37,12 +37,16 @@ def _default_project_root() -> Path:
 
 
 PROJECT_ROOT = _default_project_root()
-MAX_FILE_BYTES = int(os.environ.get("WEAVER_CODEBASE_MAX_FILE_BYTES", str(256 * 1024)))
+MAX_FILE_BYTES = min(
+    max(int(os.environ.get("WEAVER_CODEBASE_MAX_FILE_BYTES", str(384 * 1024))), 64 * 1024),
+    1024 * 1024,
+)
 DEFAULT_CONTEXT_CHARS = int(os.environ.get("WEAVER_CODEBASE_CONTEXT_CHARS", "6000"))
 MAX_CONTENT_SEARCH_FILES = int(os.environ.get("WEAVER_CODEBASE_SEARCH_FILES", "180"))
 MATCH_READ_CHARS = min(
-    int(os.environ.get("WEAVER_CODEBASE_MATCH_CHARS", str(MAX_FILE_BYTES))),
+    max(int(os.environ.get("WEAVER_CODEBASE_MATCH_CHARS", str(256 * 1024))), 16 * 1024),
     MAX_FILE_BYTES,
+    384 * 1024,
 )
 INTERNET_MAX_BYTES = int(os.environ.get("WEAVER_INTERNET_MAX_BYTES", str(768 * 1024)))
 INTERNET_TIMEOUT_SECONDS = float(os.environ.get("WEAVER_INTERNET_TIMEOUT_SECONDS", "5.0"))
@@ -440,6 +444,12 @@ def _context_chunk(path: Path, max_chars: int, matches: list[dict] | None = None
     header = f"### {_rel(path)}\n"
     if matches:
         source_lines = _read_text(path, MATCH_READ_CHARS).splitlines()
+        furthest_match = max((int(match.get("line", 0)) for match in matches), default=0)
+        if furthest_match > len(source_lines):
+            # Exact-path searches may scan the remainder of a large, bounded
+            # source file. Reload that one admitted file so its line indexes
+            # still resolve without widening ordinary content scans.
+            source_lines = _read_text(path, MAX_FILE_BYTES).splitlines()
         selected_lines: list[int] = []
         seen_lines: set[int] = set()
         definition_spans = [
@@ -487,9 +497,15 @@ def _file_meta(path: Path) -> dict:
     }
 
 
-def _matches_for_file(path: Path, terms: list[str], max_matches: int = 16) -> list[dict]:
+def _matches_for_file(
+    path: Path,
+    terms: list[str],
+    max_matches: int = 16,
+    *,
+    scan_chars: int = MATCH_READ_CHARS,
+) -> list[dict]:
     try:
-        text = _read_text(path, MATCH_READ_CHARS)
+        text = _read_text(path, min(max(scan_chars, MATCH_READ_CHARS), MAX_FILE_BYTES))
     except OSError:
         return []
     candidates = []
@@ -584,16 +600,23 @@ def search_codebase(query: str, max_files: int = 10) -> list[dict]:
             if term in rel
         )
         if path_score:
-            matches = _matches_for_file(path, terms)
+            matches = _matches_for_file(
+                path,
+                terms,
+                scan_chars=MAX_FILE_BYTES if exact_path else MATCH_READ_CHARS,
+            )
             path_hits.append({
                 **_file_meta(path),
+                "_exact_path": exact_path,
                 "score": path_score + sum(match.get("score", 1) for match in matches),
                 "matches": matches,
             })
         else:
             content_candidates.append(path)
 
-    path_hits.sort(key=lambda item: (-item["score"], item["path"]))
+    # An explicitly named source file is a hard retrieval constraint, not a
+    # soft relevance hint. Reserve its place before content-heavy neighbors.
+    path_hits.sort(key=lambda item: (-int(item["_exact_path"]), -item["score"], item["path"]))
     results = path_hits
     content_scan_limit = min(MAX_CONTENT_SEARCH_FILES, 64) if has_exact_path else MAX_CONTENT_SEARCH_FILES
     for path in content_candidates[:content_scan_limit]:
@@ -601,11 +624,15 @@ def search_codebase(query: str, max_files: int = 10) -> list[dict]:
         if matches:
             results.append({
                 **_file_meta(path),
+                "_exact_path": False,
                 "score": sum(match.get("score", 1) for match in matches),
                 "matches": matches,
             })
-    results.sort(key=lambda item: (-item["score"], item["path"]))
-    return results[:max_files]
+    results.sort(key=lambda item: (-int(item["_exact_path"]), -item["score"], item["path"]))
+    return [
+        {key: value for key, value in item.items() if key != "_exact_path"}
+        for item in results[:max_files]
+    ]
 
 
 def build_context(query: str = "", path: str = "", max_files: int = 6, max_chars: int = DEFAULT_CONTEXT_CHARS) -> dict:

@@ -2,11 +2,14 @@
 Description=Weaver local expert LLM (llama.cpp OpenAI-compatible server on 127.0.0.1:8090)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/weaver/CascadeProjects/windsurf-project
+Environment=PYTHONDONTWRITEBYTECODE=1
 # Serves the 5 expert lobes when WEAVER_LLM_BACKEND=local + WEAVER_LLM_MODEL=weaver-local.
 # The experts GGUF is fetched by deploy/setup_oracle_extras.sh into models/experts.gguf.
 # Reuses the llama-cpp-python already installed by deploy/setup_oracle.sh (OpenBLAS).
@@ -25,6 +28,32 @@ MemoryHigh=3G
 MemoryMax=4G
 KillSignal=SIGTERM
 TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=65536
+TasksMax=512
+CPUQuota=400%
+OOMPolicy=stop
 
 [Install]
 WantedBy=multi-user.target
