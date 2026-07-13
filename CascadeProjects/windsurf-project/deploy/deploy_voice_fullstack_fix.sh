@@ -369,9 +369,9 @@ with open("/tmp/n8n_cred.json", "w", encoding="utf-8") as fh:
     json.dump(payload, fh)
 PY
 if [ -f /tmp/n8n_cred.json ]; then
-  sudo docker cp /tmp/n8n_cred.json n8n:/tmp/n8n_cred.json
-  sudo docker exec -u root n8n sh -c 'chown node:node /tmp/n8n_cred.json && chmod 600 /tmp/n8n_cred.json'
+  sudo docker exec -i -u node n8n sh -c 'umask 077; cat > /tmp/n8n_cred.json' < /tmp/n8n_cred.json
   sudo docker exec -u node n8n n8n import:credentials --input=/tmp/n8n_cred.json
+  sudo docker exec -u node n8n rm -f /tmp/n8n_cred.json
   rm -f /tmp/n8n_cred.json
   echo "  Mantle credential refreshed from deployment environment"
 else
@@ -383,9 +383,9 @@ assert row == ("azure-openai-header", "httpHeaderAuth"), f"existing Mantle crede
 print("  existing encrypted Mantle credential preserved")
 PY
 fi
-sudo docker cp "$APP/n8n_weaver_v5.json" n8n:/tmp/wf.json
-sudo docker exec -u root n8n chown node:node /tmp/wf.json
+sudo docker exec -i -u node n8n sh -c 'umask 077; cat > /tmp/wf.json' < "$APP/n8n_weaver_v5.json"
 sudo docker exec -u node n8n n8n import:workflow --input=/tmp/wf.json
+sudo docker exec -u node n8n rm -f /tmp/wf.json
 sudo docker exec -u node n8n n8n publish:workflow --id=weaverv5soulbind || \
   sudo docker exec -u node n8n n8n update:workflow --id=weaverv5soulbind --active=true
 sudo systemctl restart n8n

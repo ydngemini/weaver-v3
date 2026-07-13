@@ -2865,17 +2865,22 @@ async def test_AJ():
             "N8N_BLOCK_ENV_ACCESS_IN_NODE=true",
         ))
     )
-    deployment_gates = all(marker in deploy_source for marker in (
-        "scripts/validate_n8n_workflow.mjs",
-        "v6-parallel-cognition",
-        "parallel-fanout-barrier",
-        "/cognition/v1/state",
-        "/cognition/v1/observe",
-        "/cognition/v1/route",
-        "/cognition/v1/intent/evaluate",
-        'sudo docker image inspect "$N8N_IMAGE"',
-        "n8n container: pinned, read-only, capability-dropped, sandboxed",
-    ))
+    deployment_gates = (
+        all(marker in deploy_source for marker in (
+            "scripts/validate_n8n_workflow.mjs",
+            "v6-parallel-cognition",
+            "parallel-fanout-barrier",
+            "/cognition/v1/state",
+            "/cognition/v1/observe",
+            "/cognition/v1/route",
+            "/cognition/v1/intent/evaluate",
+            'sudo docker image inspect "$N8N_IMAGE"',
+            "cat > /tmp/n8n_cred.json",
+            "cat > /tmp/wf.json",
+            "n8n container: pinned, read-only, capability-dropped, sandboxed",
+        ))
+        and "docker cp" not in deploy_source
+    )
 
     passed = all((
         sensor_fusion,
