@@ -231,8 +231,11 @@ done < <(find "$RELEASE" -type f -print0)
 echo "  verified $(find "$RELEASE" -type f | wc -l) tracked files from $DEPLOY_SHA"
 
 node "$APP/scripts/validate_n8n_workflow.mjs" "$APP/n8n_weaver_v5.json"
-sudo docker pull --quiet docker.n8n.io/n8nio/n8n:2.25.7@sha256:761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd >/dev/null
-sudo docker image inspect docker.n8n.io/n8nio/n8n:2.25.7 \
+N8N_IMAGE="docker.n8n.io/n8nio/n8n:2.25.7@sha256:761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd"
+sudo docker pull --quiet "$N8N_IMAGE" >/dev/null
+# Pulling tag@digest guarantees content identity but does not necessarily create
+# a mutable tag alias. Inspect the same immutable reference that was pulled.
+sudo docker image inspect "$N8N_IMAGE" \
   --format '  verified n8n image: {{index .RepoDigests 0}}'
 
 echo "  ensuring supervised bridge dependencies"

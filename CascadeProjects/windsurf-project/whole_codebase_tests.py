@@ -2873,6 +2873,7 @@ async def test_AJ():
         "/cognition/v1/observe",
         "/cognition/v1/route",
         "/cognition/v1/intent/evaluate",
+        'sudo docker image inspect "$N8N_IMAGE"',
         "n8n container: pinned, read-only, capability-dropped, sandboxed",
     ))
 
