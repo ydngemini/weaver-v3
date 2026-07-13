@@ -3597,6 +3597,49 @@ async def test_AO():
         for name, value in originals.items():
             setattr(brain, name, value)
 
+    old_mantle_key = brain.MANTLE_API_KEY
+    old_mantle_chat = brain._mantle_chat
+    old_bedrock_chat = brain._bedrock_chat
+    mantle_calls = 0
+    runtime_calls = 0
+
+    async def available_mantle(route, messages, max_tokens=None, temperature=None):
+        nonlocal mantle_calls
+        mantle_calls += 1
+        return "private coder work", {
+            "latency_ms": 1,
+            "usage": {},
+            "stop_reason": "stop",
+            "route": {"alias": route.alias, "transport": "bedrock-mantle"},
+        }
+
+    async def unexpected_runtime(*_args, **_kwargs):
+        nonlocal runtime_calls
+        runtime_calls += 1
+        raise RuntimeError("native runtime should not precede configured Mantle")
+
+    try:
+        brain.MANTLE_API_KEY = "test-mantle-key"
+        brain._mantle_chat = available_mantle
+        brain._bedrock_chat = unexpected_runtime
+        transport_text, transport_meta = await brain._cortex_route_chat(
+            brain.MODEL_ROUTES["weaver-code"],
+            [{"role": "user", "content": "Fix the test."}],
+            max_tokens=40,
+        )
+    finally:
+        brain.MANTLE_API_KEY = old_mantle_key
+        brain._mantle_chat = old_mantle_chat
+        brain._bedrock_chat = old_bedrock_chat
+
+    coder_transport_ready = (
+        brain.MANTLE_MODEL_IDS.get("weaver-code") == "qwen.qwen3-coder-480b-a35b-v1:0"
+        and transport_text == "private coder work"
+        and transport_meta.get("route", {}).get("transport") == "bedrock-mantle"
+        and mantle_calls == 1
+        and runtime_calls == 0
+    )
+
     old_key = brain.WEAVER_KEY
     old_cortex = brain._cortex_chat
     old_direct = brain._chat_direct_alias
@@ -3651,6 +3694,7 @@ async def test_AO():
         rejected_private_draft,
         coder_is_private,
         direct_leak_repaired,
+        coder_transport_ready,
         api_alias_bounded,
     ))
     detail = "\n".join([
@@ -3659,6 +3703,7 @@ async def test_AO():
         f"  Unsafe n8n draft is never returned:       {rejected_private_draft}",
         f"  Coder works silently; Weaver answers:     {coder_is_private}",
         f"  Direct-model identity leak is rewritten:   {direct_leak_repaired}",
+        f"  Private coder uses available Mantle first:  {coder_transport_ready}",
         f"  Public coder alias cannot bypass Weaver:   {api_alias_bounded}",
     ])
     _result("AO", "Only Weaver speaks while the coder stays private", passed, detail)

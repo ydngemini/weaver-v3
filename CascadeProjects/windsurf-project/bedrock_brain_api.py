@@ -164,6 +164,9 @@ MANTLE_MODEL_IDS = {
     "weaver-brain": os.environ.get(
         "WEAVER_BRAIN_MANTLE_MODEL", "qwen.qwen3-235b-a22b-2507"
     ),
+    "weaver-code": os.environ.get(
+        "WEAVER_CODE_MANTLE_MODEL", "qwen.qwen3-coder-480b-a35b-v1:0"
+    ),
 }
 PUBLIC_SPEAKER_MODEL = "qwen.qwen3-235b-a22b-2507"
 PUBLIC_SPEAKER_BOUNDARY = (
@@ -1278,6 +1281,40 @@ async def _mantle_chat(
     }
 
 
+async def _cortex_route_chat(
+    route: ModelRoute,
+    messages: list[dict[str, Any]],
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Use Mantle for configured cortex models, then native Bedrock as fallback."""
+    mantle_error = ""
+    if MANTLE_API_KEY and route.alias in MANTLE_MODEL_IDS:
+        try:
+            return await _mantle_chat(
+                route,
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            mantle_error = _redact_text(exc, 240)
+    try:
+        return await _bedrock_chat(
+            route,
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+    except Exception as exc:
+        if mantle_error:
+            raise RuntimeError(
+                "configured model transports unavailable: "
+                f"mantle={mantle_error}; runtime={_redact_text(exc, 240)}"
+            ) from exc
+        raise
+
+
 def _last_user_text(messages: list[dict[str, Any]]) -> str:
     for msg in reversed(messages):
         if str(msg.get("role", "")).lower() == "user":
@@ -1780,7 +1817,7 @@ async def _cortex_chat_inner(
         {"role": "user", "content": f"{state_text}\n\nCurrent user turn:\n{user_text}"},
     ]
     try:
-        reflex_text, reflex_meta = await _bedrock_chat(
+        reflex_text, reflex_meta = await _cortex_route_chat(
             MODEL_ROUTES["weaver-speed"],
             reflex_messages,
             max_tokens=96,
@@ -1826,7 +1863,7 @@ async def _cortex_chat_inner(
                 },
                 *messages,
             ]
-            coder_text, coder_meta = await _bedrock_chat(
+            coder_text, coder_meta = await _cortex_route_chat(
                 final_route,
                 coder_messages,
                 max_tokens=max_tokens or final_route.default_max_tokens,
@@ -1846,7 +1883,7 @@ async def _cortex_chat_inner(
                 },
                 *messages,
             ]
-            final_text, final_meta = await _bedrock_chat(
+            final_text, final_meta = await _cortex_route_chat(
                 speaker_route,
                 speaker_messages,
                 max_tokens=max_tokens or final_route.default_max_tokens,
@@ -1854,7 +1891,7 @@ async def _cortex_chat_inner(
             )
             calls.append({"alias": "weaver-brain", "speaker": True, **final_meta})
         else:
-            final_text, final_meta = await _bedrock_chat(
+            final_text, final_meta = await _cortex_route_chat(
                 final_route,
                 final_messages,
                 max_tokens=max_tokens or final_route.default_max_tokens,
@@ -1875,7 +1912,7 @@ async def _cortex_chat_inner(
             {"role": "user", "content": f"{state_text}\n\n{reflex_text}\n\nUser turn:\n{user_text}"},
         ]
         try:
-            final_text, final_meta = await _bedrock_chat(
+            final_text, final_meta = await _cortex_route_chat(
                 MODEL_ROUTES["weaver-speed"],
                 fallback_messages,
                 max_tokens=min(int(max_tokens or 180), 220),
@@ -1910,7 +1947,7 @@ async def _cortex_chat_inner(
         ]
         repaired_text = ""
         try:
-            repaired_text, repaired_meta = await _bedrock_chat(
+            repaired_text, repaired_meta = await _cortex_route_chat(
                 MODEL_ROUTES["weaver-speed"],
                 repair_messages,
                 max_tokens=min(int(max_tokens or 220), 300),

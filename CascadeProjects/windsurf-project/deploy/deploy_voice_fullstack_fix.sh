@@ -81,7 +81,7 @@ cleanup() {
   rc=$?
   trap - EXIT
   set +e
-  rm -f /tmp/n8n_cred.json /tmp/webhook.json /tmp/brain.json /tmp/synthcheck.bin /tmp/tts.headers \
+  rm -f /tmp/n8n_cred.json /tmp/webhook.json /tmp/brain.json /tmp/brain-code.json /tmp/synthcheck.bin /tmp/tts.headers \
     /tmp/public-synthcheck.bin /tmp/public-tts.headers /tmp/cognition-capsule.json \
     /tmp/cognition-evaluate.json
   sudo rm -f /tmp/existing-creds.json
@@ -548,6 +548,31 @@ assert state.get("last_cortex_route") == "n8n-moe", state
 assert not state.get("last_n8n_error"), state
 print("  cortex route:", state["last_cortex_route"], "| n8n error: none")
 '
+curl -fsS -m 240 -X POST http://127.0.0.1:8093/v1/chat/completions \
+  -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"weaver-one","max_tokens":220,"messages":[{"role":"user","content":"Explain how _is_explicit_code_turn in bedrock_brain_api.py distinguishes casual coder-model questions from actual programming work."}]}' \
+  -o /tmp/brain-code.json
+python3 - <<'PY'
+import json
+data=json.load(open("/tmp/brain-code.json", encoding="utf-8"))
+text=data.get("choices", [{}])[0].get("message", {}).get("content", "")
+route=data.get("weaver", {}).get("route", {})
+calls=route.get("calls", [])
+coder=next((call for call in calls if call.get("alias") == "weaver-code"), {})
+speaker=next((call for call in calls if call.get("alias") == "weaver-brain" and call.get("speaker") is True), {})
+assert text.strip(), data
+assert route.get("selected_specialist") == "weaver-code", route
+assert route.get("public_speaker") == "weaver-brain", route
+assert route.get("speaker_boundary_applied") is True, route
+assert route.get("internal_draft_hidden") is True, route
+assert coder.get("silent_specialist") is True, calls
+assert coder.get("route", {}).get("transport") == "bedrock-mantle", coder
+assert speaker.get("route", {}).get("transport") == "bedrock-mantle", speaker
+assert not any(phrase in text.lower() for phrase in (
+    "as an ai coding assistant", "i am a coder", "i'm a coder", "quality reviewer",
+)), text
+print("  private coder -> Weaver speaker:", text[:180])
+PY
 curl -fsS http://127.0.0.1:8093/fabric/v1/state -H "X-Weaver-Key: $KEY" | python3 -c '
 import json,sys
 state=json.load(sys.stdin)
