@@ -1375,6 +1375,26 @@ def _public_speaker_violations(user_text: str, response_text: str) -> list[str]:
         return ["empty-response"]
 
     violations: list[str] = []
+    architecture_requested = bool(re.search(
+        r"\b(?:architecture|pipeline|routing|route|which model|what model|system design|"
+        r"internal models?|expert lobes?|how (?:are|do) you (?:work|think))\b",
+        user_text,
+        flags=re.IGNORECASE,
+    )) or (
+        _is_explicit_code_turn(user_text)
+        and bool(re.search(
+            r"\b(?:coder[- ]model|coding model|model identity|speaker boundary|"
+            r"routing|route|classifier|regex|implementation)\b|_is_explicit_code_turn",
+            user_text,
+            flags=re.IGNORECASE,
+        ))
+    )
+    architecture_soft_labels = {
+        "model-preface",
+        "coder-role",
+        "coder-only",
+        "conversation-refusal",
+    }
     hard_patterns = (
         ("model-identity", r"\bi(?: am|'m)\s+(?:an?\s+)?(?:multi[- ]lobe\s+)?(?:ai\s+)?(?:system|model|coder|coding assistant|reviewer|expert)\b"),
         ("model-preface", r"\bas\s+(?:an?\s+)?(?:ai\s+)?(?:coding assistant|coder|language model|ai assistant|model)\b"),
@@ -1385,15 +1405,11 @@ def _public_speaker_violations(user_text: str, response_text: str) -> list[str]:
         ("capability-leak", r"\bthe system(?:'s|s')?\s+core functionality\b"),
     )
     for label, pattern in hard_patterns:
+        if architecture_requested and label in architecture_soft_labels:
+            continue
         if re.search(pattern, text, re.IGNORECASE):
             violations.append(label)
 
-    architecture_requested = bool(re.search(
-        r"\b(?:architecture|pipeline|routing|route|which model|what model|system design|"
-        r"internal models?|expert lobes?|how (?:are|do) you (?:work|think))\b",
-        user_text,
-        flags=re.IGNORECASE,
-    ))
     if not architecture_requested:
         internal_patterns = (
             ("lobe-leak", r"\b(?:multi[- ]lobe|logic lobe|emotion lobe|memory lobe|creativity lobe|vigilance lobe)\b"),

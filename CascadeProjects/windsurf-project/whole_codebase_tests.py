@@ -3504,6 +3504,21 @@ async def test_AO():
         "Tell me who you are.",
         "I'm Weaver. I'm here, present, and happy to talk with you about whatever is on your mind.",
     )
+    architecture_examples_safe = (
+        not brain._public_speaker_violations(
+            "Explain how _is_explicit_code_turn handles coder-model routing.",
+            "The adjacent filter recognizes examples such as 'As an AI coding assistant' and "
+            "'I can only assist with coding'; those phrases are data here, not my identity.",
+        )
+        and "model-preface" in brain._public_speaker_violations(
+            "Are you the coder model?",
+            "As an AI coding assistant, I can only assist with coding.",
+        )
+        and "model-identity" in brain._public_speaker_violations(
+            "Explain your architecture.",
+            "I am a coder.",
+        )
+    )
 
     names = (
         "_n8n_moe_chat", "_codebase_context_for_turn", "_state_summary",
@@ -3710,6 +3725,7 @@ async def test_AO():
         strict_intent_routing,
         definition_grounding,
         leak_detector,
+        architecture_examples_safe,
         rejected_private_draft,
         coder_is_private,
         direct_leak_repaired,
@@ -3720,6 +3736,7 @@ async def test_AO():
         f"  Coder requires explicit programming intent: {strict_intent_routing}",
         f"  Exact function body reaches grounding:      {definition_grounding}",
         f"  Known production identity leaks detected: {leak_detector}",
+        f"  Quoted regex examples are context-safe:     {architecture_examples_safe}",
         f"  Unsafe n8n draft is never returned:       {rejected_private_draft}",
         f"  Coder works silently; Weaver answers:     {coder_is_private}",
         f"  Direct-model identity leak is rewritten:   {direct_leak_repaired}",
