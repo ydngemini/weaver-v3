@@ -11,7 +11,9 @@ import sys
 import time
 
 from dotenv import load_dotenv
-load_dotenv()
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(TEST_DIR)
+load_dotenv(os.path.join(PROJ, ".env"))
 
 PASS = "\033[92m✓ PASS\033[0m"
 FAIL = "\033[91m✗ FAIL\033[0m"
@@ -37,11 +39,11 @@ VISION_KEY = os.environ.get("WEAVER_VISION_KEY", "")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 IBM_KEY    = os.environ.get("IBM_QUANTUM_TOKEN", "")
 
-log("WEAVER_VOICE_KEY",  "pass" if VOICE_KEY.startswith("sk-")  else "fail", VOICE_KEY[:12]+"…" if VOICE_KEY else "MISSING")
-log("WEAVER_MEM_KEY",    "pass" if MEM_KEY.startswith("sk-")    else "fail", MEM_KEY[:12]+"…"   if MEM_KEY   else "MISSING")
-log("WEAVER_VISION_KEY", "pass" if VISION_KEY.startswith("sk-") else "fail", VISION_KEY[:12]+"…" if VISION_KEY else "MISSING")
-log("GEMINI_API_KEY",    "pass" if GEMINI_KEY.startswith("AIza") else "fail", GEMINI_KEY[:12]+"…" if GEMINI_KEY else "MISSING")
-log("IBM_QUANTUM_TOKEN", "pass" if IBM_KEY else "warn", IBM_KEY[:12]+"…" if IBM_KEY else "MISSING")
+log("WEAVER_VOICE_KEY",  "pass" if VOICE_KEY.startswith("sk-")  else "fail", "configured" if VOICE_KEY else "MISSING")
+log("WEAVER_MEM_KEY",    "pass" if MEM_KEY.startswith("sk-")    else "fail", "configured" if MEM_KEY else "MISSING")
+log("WEAVER_VISION_KEY", "pass" if VISION_KEY.startswith("sk-") else "fail", "configured" if VISION_KEY else "MISSING")
+log("GEMINI_API_KEY",    "pass" if GEMINI_KEY.startswith("AIza") else "fail", "configured" if GEMINI_KEY else "MISSING")
+log("IBM_QUANTUM_TOKEN", "pass" if IBM_KEY else "warn", "configured" if IBM_KEY else "MISSING")
 
 # ─────────────────────────────────────────────
 # 2. IMPORTS — all vtv_basic dependencies
@@ -153,7 +155,6 @@ except Exception as e:
 # 7. GOOGLE DRIVE
 # ─────────────────────────────────────────────
 print("\n\033[1m[7] Google Drive\033[0m")
-PROJ = "/media/ydn/SYPHER_CORE/weaver v3/CascadeProjects/windsurf-project"
 VENV_PY = os.path.join(PROJ, "venv", "bin", "python3")
 PYTHON = VENV_PY if os.path.exists(VENV_PY) else sys.executable
 TOKEN_PATH = os.path.join(PROJ, "token.json")

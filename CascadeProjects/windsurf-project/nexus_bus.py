@@ -274,6 +274,7 @@ async def main() -> None:
         max_size=MAX_MSG_SIZE,
         ping_interval=PING_INTERVAL,
         ping_timeout=PING_TIMEOUT,
+        close_timeout=2,
     ):
         log.info("⚡ Nexus Bus LIVE — waiting for lobes to connect...")
         await asyncio.gather(

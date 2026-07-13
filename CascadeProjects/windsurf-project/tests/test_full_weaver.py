@@ -24,11 +24,12 @@ import time
 import urllib.request
 import urllib.error
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(TEST_DIR)
+sys.path.insert(0, PROJ)
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(PROJ, ".env"))
 
-PROJ = os.path.dirname(os.path.abspath(__file__))
 BAR = "─" * 62
 RESULTS = {}
 TOTAL_START = time.monotonic()

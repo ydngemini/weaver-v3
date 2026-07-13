@@ -23,11 +23,12 @@ import urllib.error
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(TEST_DIR)
+sys.path.insert(0, PROJ)
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(PROJ, ".env"))
 
-PROJ = os.path.dirname(os.path.abspath(__file__))
 BAR = "─" * 70
 RESULTS = {}
 FINDINGS = {}
@@ -539,11 +540,12 @@ if body:
 
 ok_200 = code == 200
 expert_count = parsed.get("expert_count", 0)
-ok = ok_200 and latency < 30  # 30s max for 5 sequential API calls
+parallel_ok = parsed.get("pipeline_architecture") == "parallel-fanout-barrier"
+ok = ok_200 and latency < 120 and parallel_ok
 
 result(19, f"Pipeline latency: {latency:.1f}s, status={code}, experts={expert_count}", ok,
-       f"Target: <2s per lobe × 5 = <10s ideal, <30s acceptable",
-       f"RECOMMENDED: Parallelize the 5 OpenAI calls instead of sequential chaining. Expected improvement: {latency:.0f}s → {latency/5:.0f}s." if latency > 10 else "")
+       f"Parallel fanout active={parallel_ok}; hard workflow deadline is 115s",
+       "VERIFY: workflow must report parallel-fanout-barrier and finish before its deadline." if not ok else "")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -625,7 +627,7 @@ print("""
   HIGH PRIORITY:
     5. Migrate weaver.py supervisor from asyncio.gather to TaskGroup (Python 3.11+)
     6. Add adaptive Euler step sizing in liquid_fracture.py (reduce dt when tau is small)
-    7. Parallelize the 5 n8n OpenAI calls instead of sequential chain
+    7. Keep the five n8n expert calls behind the validated parallel fanout/barrier
     8. Add input sanitization (strip HTML/null bytes) in the Akashic Hub n8n node
 
   RECOMMENDED:

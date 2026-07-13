@@ -14,6 +14,7 @@ import time
 import html
 import ipaddress
 import socket
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -39,7 +40,10 @@ PROJECT_ROOT = _default_project_root()
 MAX_FILE_BYTES = int(os.environ.get("WEAVER_CODEBASE_MAX_FILE_BYTES", str(256 * 1024)))
 DEFAULT_CONTEXT_CHARS = int(os.environ.get("WEAVER_CODEBASE_CONTEXT_CHARS", "6000"))
 MAX_CONTENT_SEARCH_FILES = int(os.environ.get("WEAVER_CODEBASE_SEARCH_FILES", "180"))
-MATCH_READ_CHARS = int(os.environ.get("WEAVER_CODEBASE_MATCH_CHARS", "32000"))
+MATCH_READ_CHARS = min(
+    int(os.environ.get("WEAVER_CODEBASE_MATCH_CHARS", str(MAX_FILE_BYTES))),
+    MAX_FILE_BYTES,
+)
 INTERNET_MAX_BYTES = int(os.environ.get("WEAVER_INTERNET_MAX_BYTES", str(768 * 1024)))
 INTERNET_TIMEOUT_SECONDS = float(os.environ.get("WEAVER_INTERNET_TIMEOUT_SECONDS", "5.0"))
 
@@ -57,7 +61,9 @@ EXCLUDED_DIRS = {
     ".env",
     "Nexus_Vault",
     "Weaver_Vault",
+    "SYPHER_VAULT",
     "models",
+    "3b",
     "downloads",
     "renders",
     "assets",
@@ -118,6 +124,9 @@ SECRET_PATTERNS = [
 ]
 
 app = FastAPI(title="Weaver Codebase API", version="1.0.0")
+_CODE_FILE_CACHE: list[Path] = []
+_CODE_FILE_CACHE_AT = 0.0
+_CODE_FILE_CACHE_SECONDS = float(os.environ.get("WEAVER_CODEBASE_INDEX_TTL", "15"))
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -145,6 +154,26 @@ def _is_allowed_file(path: Path) -> bool:
     return path.suffix.lower() in ALLOWED_SUFFIXES
 
 
+def _load_git_tracked_paths() -> tuple[str, ...] | None:
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), "ls-files", "-z"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if tracked.returncode != 0 or not tracked.stdout:
+        return None
+    return tuple(os.fsdecode(raw) for raw in tracked.stdout.split(b"\0") if raw)
+
+
+# Loaded once on the importing thread. Request workers never fork a Git process.
+_GIT_TRACKED_PATHS = _load_git_tracked_paths()
+
+
 def _resolve_repo_path(rel_path: str) -> Path:
     if not rel_path:
         raise HTTPException(status_code=400, detail="path is required")
@@ -161,26 +190,50 @@ def _resolve_repo_path(rel_path: str) -> Path:
 
 
 def _iter_code_files(limit: int = 1200) -> Iterable[Path]:
-    yielded = 0
-    for root, dirs, files in os.walk(PROJECT_ROOT):
-        root_path = Path(root)
-        dirs[:] = [
-            d for d in sorted(dirs)
-            if d not in EXCLUDED_DIRS and not d.startswith(".")
-        ]
-        for name in sorted(files):
-            path = root_path / name
-            try:
-                if not _is_allowed_file(path):
+    global _CODE_FILE_CACHE, _CODE_FILE_CACHE_AT
+    now = time.monotonic()
+    if not _CODE_FILE_CACHE or now - _CODE_FILE_CACHE_AT >= _CODE_FILE_CACHE_SECONDS:
+        discovered: list[Path] = []
+        if _GIT_TRACKED_PATHS is not None:
+            for rel_path in _GIT_TRACKED_PATHS:
+                path = PROJECT_ROOT / rel_path
+                try:
+                    path.resolve().relative_to(PROJECT_ROOT)
+                    if not path.is_file():
+                        continue
+                    if not _is_allowed_file(path):
+                        continue
+                    if path.stat().st_size > MAX_FILE_BYTES:
+                        continue
+                    discovered.append(path)
+                    if len(discovered) >= 1200:
+                        break
+                except (OSError, ValueError):
                     continue
-                if path.stat().st_size > MAX_FILE_BYTES:
-                    continue
-                yielded += 1
-                yield path
-                if yielded >= limit:
-                    return
-            except OSError:
-                continue
+        else:
+            for root, dirs, files in os.walk(PROJECT_ROOT):
+                root_path = Path(root)
+                dirs[:] = [
+                    d for d in sorted(dirs)
+                    if d not in EXCLUDED_DIRS and not d.startswith(".")
+                ]
+                for name in sorted(files):
+                    path = root_path / name
+                    try:
+                        if not _is_allowed_file(path):
+                            continue
+                        if path.stat().st_size > MAX_FILE_BYTES:
+                            continue
+                        discovered.append(path)
+                        if len(discovered) >= 1200:
+                            break
+                    except OSError:
+                        continue
+                if len(discovered) >= 1200:
+                    break
+        _CODE_FILE_CACHE = discovered
+        _CODE_FILE_CACHE_AT = now
+    yield from _CODE_FILE_CACHE[:limit]
 
 
 def _redact(text: str) -> str:
@@ -359,10 +412,20 @@ def _read_text(path: Path, max_chars: int) -> str:
 def _context_chunk(path: Path, max_chars: int, matches: list[dict] | None = None) -> str:
     header = f"### {_rel(path)}\n"
     if matches:
-        match_lines = "\n".join(
-            f"L{match['line']}: {match['text']}" for match in matches[:6]
+        source_lines = _read_text(path, MATCH_READ_CHARS).splitlines()
+        selected_lines: list[int] = []
+        seen_lines: set[int] = set()
+        for match in matches:
+            line_index = max(0, int(match["line"]) - 1)
+            for selected in range(max(0, line_index - 1), min(len(source_lines), line_index + 2)):
+                if selected not in seen_lines:
+                    seen_lines.add(selected)
+                    selected_lines.append(selected)
+        excerpts = "\n".join(
+            f"L{line_index + 1}: {source_lines[line_index]}"
+            for line_index in selected_lines
         )
-        header += f"Relevant matches:\n{match_lines}\n\n"
+        return (header + "Relevant source excerpts:\n" + excerpts)[:max_chars]
     body_chars = max(600, max_chars - len(header))
     return (header + _read_text(path, body_chars))[:max_chars]
 
@@ -380,19 +443,56 @@ def _file_meta(path: Path) -> dict:
     }
 
 
-def _matches_for_file(path: Path, terms: list[str], max_matches: int = 4) -> list[dict]:
+def _matches_for_file(path: Path, terms: list[str], max_matches: int = 16) -> list[dict]:
     try:
         text = _read_text(path, MATCH_READ_CHARS)
     except OSError:
         return []
-    matches = []
+    candidates = []
     for idx, line in enumerate(text.splitlines(), start=1):
         low = line.lower()
-        if any(term in low for term in terms):
-            matches.append({"line": idx, "text": line.strip()[:240]})
-            if len(matches) >= max_matches:
+        matched = [term for term in terms if term in low]
+        if matched:
+            score = sum(4 if "_" in term or "." in term else 1 for term in matched)
+            if re.search(r"\bname\s*=", line):
+                score += 12
+            if re.match(r'^\s*"[A-Z]{1,2}"\s*:', line):
+                score += 12
+            candidates.append({
+                "line": idx,
+                "text": line.strip()[:240],
+                "score": score,
+                "matched": matched,
+            })
+    ranked = sorted(candidates, key=lambda item: (-item["score"], item["line"]))
+    selected: list[dict] = []
+    selected_lines: set[int] = set()
+    coverage_terms = [
+        term for term in terms
+        if "_" in term or "." in term or term in {"cortexrouted"}
+    ]
+    for term in coverage_terms:
+        match = next((item for item in ranked if term in item["matched"]), None)
+        if match is not None and match["line"] not in selected_lines:
+            selected.append(match)
+            selected_lines.add(match["line"])
+            if len(selected) >= max_matches:
                 break
-    return matches
+    for item in ranked:
+        if len(selected) >= max_matches:
+            break
+        if item["line"] not in selected_lines:
+            selected.append(item)
+            selected_lines.add(item["line"])
+    return [
+        {
+            "line": item["line"],
+            "text": item["text"],
+            "score": item["score"],
+            "matched": item["matched"],
+        }
+        for item in selected
+    ]
 
 
 def build_manifest(limit: int = 200) -> dict:
@@ -411,35 +511,55 @@ def build_manifest(limit: int = 200) -> dict:
 
 
 def search_codebase(query: str, max_files: int = 10) -> list[dict]:
-    terms = [term.lower() for term in re.findall(r"[A-Za-z0-9_./-]{2,}", query)][:8]
+    raw_terms = re.findall(r"[A-Za-z0-9_./-]{2,}", query)[:40]
+    terms: list[str] = []
+    for raw_term in raw_terms:
+        lowered = raw_term.lower()
+        variants = [lowered, *lowered.split("-")]
+        if lowered.endswith("ing") and len(lowered) > 6:
+            variants.append(lowered[:-3])
+        if lowered.endswith("ed") and len(lowered) > 5:
+            variants.append(lowered[:-1])
+        for variant in variants:
+            if len(variant) >= 2 and variant not in terms:
+                terms.append(variant)
     if not terms:
         return []
 
     path_hits = []
     content_candidates = []
+    has_exact_path = False
     for path in _iter_code_files():
         rel = _rel(path).lower()
-        path_score = sum(2 for term in terms if term in rel)
+        name = path.name.lower()
+        exact_path = any(term == name or rel.endswith(f"/{term}") for term in terms)
+        has_exact_path = has_exact_path or exact_path
+        path_score = sum(
+            100 if term == name or rel.endswith(f"/{term}") else 2
+            for term in terms
+            if term in rel
+        )
         if path_score:
             matches = _matches_for_file(path, terms)
             path_hits.append({
                 **_file_meta(path),
-                "score": path_score + len(matches),
+                "score": path_score + sum(match.get("score", 1) for match in matches),
                 "matches": matches,
             })
         else:
             content_candidates.append(path)
 
+    path_hits.sort(key=lambda item: (-item["score"], item["path"]))
     results = path_hits
-    if len(results) < max_files:
-        for path in content_candidates[:MAX_CONTENT_SEARCH_FILES]:
-            matches = _matches_for_file(path, terms)
-            if matches:
-                results.append({
-                    **_file_meta(path),
-                    "score": len(matches),
-                    "matches": matches,
-                })
+    content_scan_limit = min(MAX_CONTENT_SEARCH_FILES, 64) if has_exact_path else MAX_CONTENT_SEARCH_FILES
+    for path in content_candidates[:content_scan_limit]:
+        matches = _matches_for_file(path, terms)
+        if matches:
+            results.append({
+                **_file_meta(path),
+                "score": sum(match.get("score", 1) for match in matches),
+                "matches": matches,
+            })
     results.sort(key=lambda item: (-item["score"], item["path"]))
     return results[:max_files]
 
@@ -456,13 +576,15 @@ def build_context(query: str = "", path: str = "", max_files: int = 6, max_chars
         chunks.append(_context_chunk(target, max_chars))
     else:
         candidates = search_codebase(query, max_files=max_files) if query else build_manifest(limit=max_files)["files"]
+        candidate_count = max(1, min(len(candidates), max_files))
+        per_file_chars = max(900, min(3000, max_chars // candidate_count))
         for item in candidates[:max_files]:
             target = _resolve_repo_path(item["path"])
             remaining = max_chars - sum(len(chunk) for chunk in chunks)
             if remaining <= 600:
                 break
             files.append(_file_meta(target))
-            chunks.append(_context_chunk(target, min(2200, remaining), item.get("matches")))
+            chunks.append(_context_chunk(target, min(per_file_chars, remaining), item.get("matches")))
 
     context = "\n\n".join(chunks)
     return {

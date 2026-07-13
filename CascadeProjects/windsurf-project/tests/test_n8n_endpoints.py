@@ -1,161 +1,131 @@
 #!/usr/bin/env python3
-"""Quick smoke test for all n8n workflow endpoints and Weaver services."""
+"""Non-destructive live smoke test for n8n and adjacent Weaver services."""
+
+from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
-import time
-import urllib.request
 import urllib.error
+import urllib.request
 
-RESULTS = {}
 
-def port_open(host, port, timeout=2):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
-    ok = s.connect_ex((host, port)) == 0
-    s.close()
-    return ok
+RESULTS: dict[str, bool] = {}
+BAR = "─" * 64
+N8N_URL = (
+    os.environ.get("WEAVER_N8N_WEBHOOK_URL")
+    or os.environ.get("N8N_WEBHOOK_URL")
+    or "http://127.0.0.1:5678/webhook/weaver-input"
+)
+N8N_TIMEOUT_S = float(os.environ.get("WEAVER_N8N_TEST_TIMEOUT", "125"))
+BRIDGE_HEALTH_URL = os.environ.get(
+    "WEAVER_OBSIDIAN_HEALTH_URL", "http://127.0.0.1:5679/health"
+)
+NEXUS_HEALTH_URL = os.environ.get(
+    "WEAVER_NEXUS_HEALTH_URL", "http://127.0.0.1:9998/health"
+)
+NEXUS_WS_URL = os.environ.get("WEAVER_NEXUS_WS_URL", "ws://127.0.0.1:9999")
 
-def http_post(url, payload, timeout=5):
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data,
-                                headers={"Content-Type": "application/json"},
-                                method="POST")
+
+def port_open(host: str, port: int, timeout: float = 2) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        return sock.connect_ex((host, port)) == 0
+
+
+def http_request(
+    url: str, payload: dict | None = None, timeout: float = 5
+) -> tuple[int | None, str]:
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="GET" if payload is None else "POST",
+    )
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout)
-        return resp.getcode(), resp.read().decode()[:300]
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode()[:300]
-    except Exception as e:
-        return None, str(e)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.getcode(), response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", errors="replace")
+    except Exception as exc:  # pragma: no cover - live diagnostic path
+        return None, str(exc)
 
-BAR = "─" * 60
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TEST 1: Port checks
-# ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BAR}")
-print("TEST 1: Port Connectivity")
-print(BAR)
-ports = {5678: "n8n Docker", 5679: "Obsidian Bridge", 9999: "Nexus Bus"}
-for port, name in ports.items():
-    ok = port_open("127.0.0.1", port)
-    RESULTS[f"port_{port}"] = ok
-    mark = "✅" if ok else "❌"
-    print(f"  {mark} {port} {name:<20} {'LISTENING' if ok else 'DOWN'}")
+def record(name: str, ok: bool, detail: str) -> None:
+    RESULTS[name] = bool(ok)
+    print(f"  {'✅' if ok else '❌'} {detail}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TEST 2: n8n webhook POST
-# ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BAR}")
-print("TEST 2: n8n Webhook POST → http://localhost:5678/webhook-test/weaver-input")
-print(BAR)
-code, body = http_post("http://localhost:5678/webhook-test/weaver-input", {
-    "text": "Smoke test from test_n8n_endpoints.py",
-    "source_file": "/tmp/smoke_test.md",
-    "timestamp": "2026-04-07T23:00:00",
-})
-ok = code is not None and 200 <= code < 500
-RESULTS["n8n_webhook"] = ok
-mark = "✅" if ok else "❌"
-print(f"  {mark} Status: {code}")
-print(f"     Body: {body[:200]}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TEST 3: Obsidian bridge response listener
-# ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BAR}")
-print("TEST 3: Obsidian Bridge POST → http://localhost:5679/weaver-response")
-print(BAR)
-code, body = http_post("http://localhost:5679/weaver-response", {
-    "manifested_response": "The quantum entanglement reveals akashic resonance through the pineal gate.",
-    "source_file": "/home/ydn/Weaver_Vault/Test_Note.md",
-    "experts_activated": ["logic", "creativity", "memory"],
-    "interference": 0.0131,
-})
-ok = code is not None and 200 <= code < 300
-RESULTS["bridge_response"] = ok
-mark = "✅" if ok else "❌"
-print(f"  {mark} Status: {code}")
-print(f"     Body: {body[:200]}")
+print(f"\n{BAR}\nPORT CONNECTIVITY\n{BAR}")
+for port, label in ((5678, "n8n"), (5679, "Obsidian bridge"), (9999, "Nexus Bus")):
+    record(f"port_{port}", port_open("127.0.0.1", port), f"{label} port {port}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TEST 4: Nexus Bus WebSocket
-# ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BAR}")
-print("TEST 4: Nexus Bus WebSocket → ws://localhost:9999")
-print(BAR)
+print(f"\n{BAR}\nN8N V6 WEBHOOK\n{BAR}")
+status, body = http_request(
+    N8N_URL,
+    {
+        "text": "Return a concise Weaver service smoke-test acknowledgement.",
+        "source_file": "smoke-test.md",
+        "timestamp": "2026-07-12T00:00:00Z",
+    },
+    N8N_TIMEOUT_S,
+)
+try:
+    n8n_response = json.loads(body)
+except json.JSONDecodeError:
+    n8n_response = {}
+private_fields = {"raw_input", "original_input", "collapsed_response", "codebase_context"}
+record(
+    "n8n_webhook",
+    status == 200
+    and n8n_response.get("pipeline_version") == "v6-parallel-cognition"
+    and n8n_response.get("pipeline_architecture") == "parallel-fanout-barrier"
+    and not private_fields.intersection(n8n_response),
+    f"Canonical n8n webhook returned the privacy-safe v6 contract ({status=})",
+)
 
-async def test_ws():
-    import websockets
+print(f"\n{BAR}\nREAD-ONLY SERVICE HEALTH\n{BAR}")
+for name, url in (("bridge_health", BRIDGE_HEALTH_URL), ("nexus_health", NEXUS_HEALTH_URL)):
+    health_status, health_body = http_request(url)
     try:
-        async with websockets.connect("ws://localhost:9999") as ws:
-            # Should get sync message immediately
-            raw = await asyncio.wait_for(ws.recv(), timeout=3.0)
-            msg = json.loads(raw)
-            sync_ok = msg.get("type") == "sync"
-            print(f"  {'✅' if sync_ok else '❌'} Sync received: {sync_ok} ({len(msg.get('messages', []))} cached msgs)")
+        health_payload = json.loads(health_body)
+    except json.JSONDecodeError:
+        health_payload = {}
+    record(
+        name,
+        health_status == 200 and isinstance(health_payload, dict),
+        f"{url} returned JSON health ({health_status=})",
+    )
 
-            # Register
-            await ws.send(json.dumps({"action": "register", "lobe_id": "smoke_test"}))
-            ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=2.0))
-            reg_ok = ack.get("type") == "ack"
-            print(f"  {'✅' if reg_ok else '❌'} Register ack: {ack.get('msg', '')}")
 
-            # Ping
-            t0 = time.monotonic()
-            await ws.send(json.dumps({"action": "ping"}))
-            pong = json.loads(await asyncio.wait_for(ws.recv(), timeout=2.0))
-            lat = (time.monotonic() - t0) * 1000
-            ping_ok = pong.get("type") == "pong"
-            print(f"  {'✅' if ping_ok else '❌'} Ping/pong: {lat:.1f}ms")
+async def test_nexus_websocket() -> bool:
+    try:
+        import websockets
 
-            return sync_ok and reg_ok and ping_ok
-    except Exception as e:
-        print(f"  ❌ WebSocket error: {e}")
+        async with websockets.connect(NEXUS_WS_URL) as websocket:
+            initial = json.loads(await asyncio.wait_for(websocket.recv(), timeout=3))
+            if initial.get("type") != "sync":
+                return False
+            await websocket.send(json.dumps({"action": "register", "lobe_id": "smoke_test"}))
+            acknowledgement = json.loads(await asyncio.wait_for(websocket.recv(), timeout=2))
+            if acknowledgement.get("type") != "ack":
+                return False
+            await websocket.send(json.dumps({"action": "ping"}))
+            pong = json.loads(await asyncio.wait_for(websocket.recv(), timeout=2))
+            return pong.get("type") == "pong"
+    except Exception as exc:  # pragma: no cover - live diagnostic path
+        print(f"  Nexus WebSocket error: {exc}")
         return False
 
-ws_ok = asyncio.run(test_ws())
-RESULTS["nexus_ws"] = ws_ok
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TEST 5: Verify Obsidian bridge wrote to the vault file
-# ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BAR}")
-print("TEST 5: Obsidian Vault write verification")
-print(BAR)
-import os
-vault_file = "/home/ydn/Weaver_Vault/Test_Note.md"
-write_ok = False
-if os.path.exists(vault_file):
-    with open(vault_file, "r") as f:
-        content = f.read()
-    write_ok = "Weaver's Resonance" in content and "[[" in content
-    print(f"  {'✅' if write_ok else '❌'} Resonance block written: {write_ok}")
-    if write_ok:
-        # Show the injected section
-        idx = content.find("### 👁️ Weaver's Resonance")
-        if idx >= 0:
-            snippet = content[idx:idx+300]
-            for line in snippet.split("\n")[:8]:
-                print(f"     {line}")
-else:
-    print(f"  ❌ File not found: {vault_file}")
-RESULTS["vault_write"] = write_ok
+print(f"\n{BAR}\nNEXUS WEBSOCKET\n{BAR}")
+record("nexus_ws", asyncio.run(test_nexus_websocket()), "Sync/register/ping contract")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SUMMARY
-# ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{'═' * 60}")
-print("  N8N WORKFLOW ENDPOINT TEST RESULTS")
-print(f"{'═' * 60}")
-passed = 0
+print(f"\n{'═' * 64}")
+passed = sum(RESULTS.values())
 total = len(RESULTS)
-for name, ok in RESULTS.items():
-    mark = "✅" if ok else "❌"
-    print(f"  {mark}  {name}")
-    if ok:
-        passed += 1
-print(f"\n  {passed}/{total} passed")
-print(f"{'═' * 60}\n")
+print(f"  {passed}/{total} non-destructive endpoint checks passed")
+print(f"{'═' * 64}\n")
+raise SystemExit(0 if passed == total else 1)

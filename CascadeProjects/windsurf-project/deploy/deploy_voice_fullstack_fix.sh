@@ -46,6 +46,10 @@ if ! git -C "$ROOT" diff --quiet || ! git -C "$ROOT" diff --cached --quiet; then
   exit 1
 fi
 
+node "$PROJ/scripts/validate_n8n_workflow.mjs" "$PROJ/n8n_weaver_v5.json"
+PYTHONPYCACHEPREFIX=/tmp/weaver-pycache "$PROJ/venv/bin/python3" -m py_compile \
+  "$PROJ/weaver_neural_fabric.py" "$PROJ/weaver_cognition_mesh.py" "$PROJ/bedrock_brain_api.py"
+
 echo "── stage deploy $DEPLOY_SHA on $BOX ──"
 push_eic_key
 git -C "$ROOT" archive --format=tar.gz --output "$ARCHIVE" "$DEPLOY_SHA"
@@ -78,7 +82,8 @@ cleanup() {
   trap - EXIT
   set +e
   rm -f /tmp/n8n_cred.json /tmp/webhook.json /tmp/brain.json /tmp/synthcheck.bin /tmp/tts.headers \
-    /tmp/public-synthcheck.bin /tmp/public-tts.headers
+    /tmp/public-synthcheck.bin /tmp/public-tts.headers /tmp/cognition-capsule.json \
+    /tmp/cognition-evaluate.json
   sudo rm -f /tmp/existing-creds.json
   sudo docker exec -u root n8n rm -f /tmp/n8n_cred.json /tmp/existing-creds.json /tmp/wf.json >/dev/null 2>&1 || true
   if (( rc != 0 )) && [ -n "$DB_ROLLBACK" ] && sudo test -f "$DB_ROLLBACK"; then
@@ -151,7 +156,7 @@ wait_http() {
 
 wait_n8n_workflow_ready() {
   attempts=${1:-60}
-  marker='Activated workflow "Weaver Nervous System v5 (soul-binding)" (ID: weaverv5soulbind)'
+  marker='Activated workflow "Weaver Nervous System v6 (parallel cognition mesh)" (ID: weaverv5soulbind)'
   for _ in $(seq 1 "$attempts"); do
     if sudo docker logs n8n 2>&1 | grep -Fq "$marker"; then
       echo "  n8n workflow activation complete"
@@ -225,6 +230,11 @@ while IFS= read -r -d '' source; do
 done < <(find "$RELEASE" -type f -print0)
 echo "  verified $(find "$RELEASE" -type f | wc -l) tracked files from $DEPLOY_SHA"
 
+node "$APP/scripts/validate_n8n_workflow.mjs" "$APP/n8n_weaver_v5.json"
+sudo docker pull --quiet docker.n8n.io/n8nio/n8n:2.25.7@sha256:761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd >/dev/null
+sudo docker image inspect docker.n8n.io/n8nio/n8n:2.25.7 \
+  --format '  verified n8n image: {{index .RepoDigests 0}}'
+
 echo "  ensuring supervised bridge dependencies"
 if ! "$APP/venv/bin/python3" -c 'import langchain_openai, discord, twilio' >/dev/null 2>&1; then
   "$APP/venv/bin/python3" -m pip install --disable-pip-version-check \
@@ -242,6 +252,18 @@ sudo install -m 0644 "$DEPLOY_ROOT/avatar/embodiment.html" /var/www/weaver/index
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/embodiment.html" /var/www/weaver/embodiment.html
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/headless.html" /var/www/weaver-headless/index.html
 sudo install -m 0644 "$DEPLOY_ROOT/avatar/headless.html" /var/www/weaver-headless/headless.html
+for asset in \
+  weaver_avatar_dress_hifi.glb \
+  textures/skin_normal_hifi.png \
+  textures/skin_roughness_hifi.png \
+  textures/skin_specular_hifi.png; do
+  test -s "$DEPLOY_ROOT/avatar/$asset" || { echo "missing generated high-fidelity avatar asset: $asset" >&2; exit 1; }
+done
+sudo install -m 0644 "$DEPLOY_ROOT/avatar/weaver_avatar_dress_hifi.glb" /var/www/weaver/weaver_avatar_dress_hifi.glb
+sudo install -d -m 0755 /var/www/weaver/textures
+for map in skin_normal_hifi.png skin_roughness_hifi.png skin_specular_hifi.png; do
+  sudo install -m 0644 "$DEPLOY_ROOT/avatar/textures/$map" "/var/www/weaver/textures/$map"
+done
 for root in /var/www/weaver /var/www/weaver-headless; do
   sudo rm -rf "$root/vendor"
   sudo cp -a "$DEPLOY_ROOT/avatar/vendor" "$root/vendor"
@@ -274,6 +296,19 @@ wait_http "health dashboard" http://127.0.0.1:9996/health 60
 wait_http "phone bridge" http://127.0.0.1:8765/health 60
 wait_http "Obsidian bridge" http://127.0.0.1:5679/health 60
 wait_http "n8n" http://127.0.0.1:5678/healthz 60
+sudo docker inspect n8n | python3 -c '
+import json,sys
+data=json.load(sys.stdin)[0]
+host=data.get("HostConfig", {})
+env=set(data.get("Config", {}).get("Env", []))
+assert host.get("ReadonlyRootfs") is True, host
+assert "ALL" in (host.get("CapDrop") or []), host.get("CapDrop")
+assert "no-new-privileges:true" in (host.get("SecurityOpt") or []), host.get("SecurityOpt")
+assert "N8N_BLOCK_ENV_ACCESS_IN_NODE=true" in env, env
+assert "N8N_RUNNERS_ENABLED=true" in env, env
+assert data.get("Config", {}).get("Image") == "docker.n8n.io/n8nio/n8n:2.25.7@sha256:761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd", data.get("Config", {}).get("Image")
+print("  n8n container: pinned, read-only, capability-dropped, sandboxed")
+'
 wait_http "local llama API" http://127.0.0.1:8090/v1/models 60
 curl -fsS -m 90 -X POST http://127.0.0.1:8090/v1/chat/completions \
   -H 'Content-Type: application/json' \
@@ -403,17 +438,20 @@ python3 - <<'PY'
 import json
 data=json.load(open("/tmp/webhook.json", encoding="utf-8"))
 assert isinstance(data.get("manifested_response"), str) and data["manifested_response"].strip(), data
-assert data.get("pipeline_version") == "v5-dual-model", data
+assert data.get("pipeline_version") == "v6-parallel-cognition", data
+assert data.get("pipeline_architecture") == "parallel-fanout-barrier", data
 assert data.get("expert_count") == 5, data
+assert data.get("experts_completed") == 5, data
+assert data.get("expert_parallel") is True, data
 assert data.get("soul_voice_active") is True, data
 assert data.get("qwen3b_active") is True, data
 assert data.get("dual_model_active") is True, data
 assert not data.get("lora_error"), data.get("lora_error")
 assert not data.get("qwen3b_error"), data.get("qwen3b_error")
-collapsed = str(data.get("collapsed_response", "")).lower()
-for marker in ("[logic: timeout]", "[emotion: timeout]", "[memory: timeout]", "[creativity: timeout]", "[vigilance: timeout]", "operation not allowed"):
-    assert marker not in collapsed, marker
-print("  webhook: dual-model active; 5 experts; response=", data["manifested_response"][:180])
+assert data.get("cognition_mesh_active") is True, data
+assert data.get("written_to_hub") is False, data
+assert "original_input" not in data and "collapsed_response" not in data, data
+print("  webhook: v6 parallel cognition; dual-model active; response=", data["manifested_response"][:180])
 PY
 sudo systemctl restart weaver-brain
 wait_http "brain after n8n recovery" http://127.0.0.1:8093/health 45
@@ -486,6 +524,82 @@ state=json.load(sys.stdin)
 assert state.get("last_cortex_route") == "n8n-moe", state
 assert not state.get("last_n8n_error"), state
 print("  cortex route:", state["last_cortex_route"], "| n8n error: none")
+'
+curl -fsS http://127.0.0.1:8093/fabric/v1/state -H "X-Weaver-Key: $KEY" | python3 -c '
+import json,sys
+state=json.load(sys.stdin)
+assert state.get("technology") == "weaver-neural-fabric", state
+assert state.get("ledger", {}).get("valid") is True, state
+accelerator=state.get("accelerator", {})
+assert accelerator.get("realtime_reserved_units", 0) > 0, accelerator
+print("  neural fabric:", state.get("status"), "| pressure:", accelerator.get("pressure"), "| ledger: valid")
+'
+curl -fsS -X POST http://127.0.0.1:8093/fabric/v1/intent/compile \
+  -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"goal":"Verify bounded lounge navigation","priority":"embodiment","ttl_ms":10000,"actions":[{"type":"navigate","zone":"lounge"},{"type":"interact","interaction":"reading_book"}]}' \
+  | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+capsule=data.get("capsule", {})
+assert data.get("verified") is True, data
+assert capsule.get("integrity", {}).get("algorithm") == "hmac-sha256", capsule
+assert capsule.get("rollback") == ["cancel_interaction", "stop_locomotion"], capsule
+print("  intent capsule:", capsule.get("capsule_id"), "| signed and bounded")
+'
+
+curl -fsS http://127.0.0.1:8093/cognition/v1/state -H "X-Weaver-Key: $KEY" | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+assert data.get("technology") == "weaver-cognition-mesh", data
+assert data.get("angles") == ["perception", "embodiment", "prediction", "compute", "memory", "resilience", "evolution"], data
+assert data.get("evolution", {}).get("mode") == "advisory-only", data
+print("  cognition mesh: seven angles; evolution is advisory-only")
+'
+curl -fsS -X POST http://127.0.0.1:8093/cognition/v1/observe \
+  -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"body":{"awake":true,"balance":0.92,"velocity_mps":0,"pose":{"leftElbow":0.1,"rightElbow":0.1},"confidence":0.95},"environment":{"zone":"center","obstacle_distance_m":5,"confidence":0.95,"objects":[{"id":"reading_book","zone":"lounge","distance_m":1.2,"visible":true,"confidence":0.95}]},"sensors":{"camera":{"confidence":0.9},"microphone":{"confidence":0.9}}}' \
+  | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+awareness=data.get("awareness", {})
+assert awareness.get("body_revision", 0) > 0 and awareness.get("world_revision", 0) > 0, awareness
+assert awareness.get("awareness_confidence", 0) > 0.5, awareness
+assert data.get("fabric", {}).get("lane") == "embodiment", data
+print("  sensor fusion: body/world revisions live; confidence:", awareness.get("awareness_confidence"))
+'
+curl -fsS -X POST http://127.0.0.1:8093/cognition/v1/route \
+  -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"task":"voice","deadline_ms":200,"quality_priority":0.4}' \
+  | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+assert data.get("primary", {}).get("alias") == "weaver-speed", data
+assert data.get("advisory") is True, data
+print("  inference governor: 200 ms voice route ->", data["primary"]["alias"])
+'
+curl -fsS -X POST http://127.0.0.1:8093/fabric/v1/intent/compile \
+  -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"goal":"Evaluate safe lounge reading","priority":"embodiment","ttl_ms":10000,"actions":[{"type":"navigate","zone":"lounge"},{"type":"interact","interaction":"reading_book"},{"type":"pose","values":{"leftElbow":0.3,"rightElbow":0.3,"leftKnee":0.1,"rightKnee":0.1}}]}' \
+  -o /tmp/cognition-capsule.json
+python3 - <<'PY'
+import json
+source=json.load(open("/tmp/cognition-capsule.json", encoding="utf-8"))
+with open("/tmp/cognition-evaluate.json", "w", encoding="utf-8") as target:
+    json.dump({"capsule": source["capsule"]}, target)
+PY
+curl -fsS -X POST http://127.0.0.1:8093/cognition/v1/intent/evaluate \
+  -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
+  --data-binary @/tmp/cognition-evaluate.json \
+  | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+angles=data.get("angles", {})
+assert data.get("capsule_verified") is True, data
+assert data.get("decision") == "execute", data
+assert angles.get("embodiment", {}).get("decision") == "approve", angles
+assert angles.get("prediction", {}).get("predicted_zone") == "lounge", angles
+assert len(angles) == 7, angles
+print("  seven-angle intent: verified, reflex-approved, twin-predicted, execute")
 '
 
 curl --resolve weaverv3.com:443:127.0.0.1 -fsS -m 240 -X POST https://weaverv3.com/brain/v1/chat/completions \
@@ -591,6 +705,16 @@ done
 curl -fsSI --max-time 20 https://weaver-avatar-404870839825.s3.amazonaws.com/weaver_avatar_dress.glb >/dev/null
 curl -fsSI --max-time 20 https://weaver-avatar-404870839825.s3.amazonaws.com/weaver_apartment.glb >/dev/null
 echo "  avatar vendor modules and S3 GLBs reachable"
+for asset in \
+  weaver_avatar_dress_hifi.glb \
+  textures/skin_normal_hifi.png \
+  textures/skin_roughness_hifi.png \
+  textures/skin_specular_hifi.png; do
+  local_asset_sha=$(sha256sum "$DEPLOY_ROOT/avatar/$asset" | cut -d' ' -f1)
+  live_asset_sha=$(curl --resolve weaverv3.com:443:127.0.0.1 -fsS --max-time 60 "https://weaverv3.com/$asset" | sha256sum | cut -d' ' -f1)
+  [ "$live_asset_sha" = "$local_asset_sha" ] || { echo "high-fidelity asset checksum mismatch: $asset" >&2; exit 1; }
+done
+echo "  high-fidelity GLB and PBR maps match deployed checksums"
 for service in weaver-brain weaver-tts weaver-llm weaver n8n caddy; do
   sudo systemctl is-active --quiet "$service" || { echo "$service is not active" >&2; exit 1; }
 done

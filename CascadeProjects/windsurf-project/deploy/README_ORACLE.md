@@ -88,9 +88,10 @@ For zero quota, set `WEAVER_LLM_BACKEND=local` and run a small GGUF with
 
 ## Optional: n8n nervous system
 ```bash
-sudo apt install -y nodejs npm && sudo npm i -g n8n
-n8n start &                            # http://localhost:5678
-# import n8n_weaver_v5.json via the n8n UI; weaver.py posts to its webhook.
+cd ~/weaver/CascadeProjects/windsurf-project
+npm run validate:n8n
+sudo systemctl enable --now n8n       # uses deploy/n8n.service and its pinned image digest
+# Import n8n_weaver_v5.json only after validation; weaver.py posts to its webhook.
 ```
 Weaver degrades gracefully if n8n is absent.
 

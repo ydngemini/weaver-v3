@@ -31,10 +31,11 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-BASE   = os.path.dirname(os.path.abspath(__file__))
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE   = os.path.dirname(TEST_DIR)
 PYTHON = os.path.join(BASE, "venv", "bin", "python3")
 TS     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-LOG    = os.path.join(BASE, f"watchdog_run_{TS}.log")
+LOG    = os.path.join(TEST_DIR, f"watchdog_run_{TS}.log")
 
 # ── ANSI colours ──────────────────────────────────────────────────────────────
 RST  = "\033[0m"
@@ -56,15 +57,15 @@ SUITES = {
         "timeout": 600,          # 10 min hard cap
     },
     2: {
-        "name":    "Stress Tests v5 (soul-binding)",
-        "cmd":     [PYTHON, "stress_tests_v5.py", "all"],
+        "name":    "Stress Tests v6 (soul-binding compatibility)",
+        "cmd":     [PYTHON, "tests/stress_tests_v5.py", "all"],
         "colour":  MAG,
         "timeout": 300,          # 5 min
     },
     3: {
         "name":    "30-min Full Endurance",
-        "cmd_full":  [PYTHON, "stress_30min_full.py"],
-        "cmd_quick": [PYTHON, "stress_30min_full.py", "--quick"],
+        "cmd_full":  [PYTHON, "tests/stress_30min_full.py"],
+        "cmd_quick": [PYTHON, "tests/stress_30min_full.py", "--quick"],
         "colour":  YLW,
         "timeout": 2100,         # 35 min
         "timeout_quick": 300,    # 5 min

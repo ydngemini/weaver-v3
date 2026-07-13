@@ -21,6 +21,9 @@ CascadeProjects/windsurf-project/pretrain_moe/kaggle_smoke/
 # weaver-avatar-404870839825 S3 bucket, not git). embodiment.html itself IS
 # tracked — it's the actual page source, small and meaningful to version.
 avatar/*.glb
+# The deterministic HiFi runtime tier is intentionally versioned so a clean
+# checkout can serve and deploy it without depending on workstation state.
+!avatar/weaver_avatar_dress_hifi.glb
 avatar/*.blend
 avatar/*.blend1
 avatar/assets/

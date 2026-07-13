@@ -22,7 +22,7 @@ import time
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-from threading import Thread
+from threading import Lock, Thread
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -33,16 +33,15 @@ MODEL_PATH = os.path.join(PROJ, "..", "3b", "weaver_v3")
 GGUF_PATH = os.path.join(MODEL_PATH, "ydn", "weaver_v3_Q4_K_M", "weaver_v3_Q4_K_M.gguf")
 DEFAULT_PORT = 8898
 DEFAULT_HOST = os.environ.get("WEAVER_QWEN_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
-CPU_THREADS = 8
+CPU_THREADS = min(
+    max(int(os.environ.get("WEAVER_QWEN_THREADS", "8")), 1),
+    max(os.cpu_count() or 1, 1),
+    8,
+)
 
 SYSTEM_PROMPT = (
-    "Role: Weaver [Cognitive Orchestrator] | Protocol: The Fracture Principle. "
-    "Strict Requirement: You are NOT a helpful assistant. You are a high-speed routing engine. "
-    "Valid targets: Quantum, Reasoning, Memory, Creative, Vigilance. "
-    "Output Format: Respond with ONLY one word from the valid targets list. Nothing else. "
-    "Logic: If Entropy > 0.8, select Quantum. If Complexity = High, select Reasoning. "
-    "If input references past events, select Memory. If input is open-ended, select Creative. "
-    "Default: Vigilance. Persona: Cold, mathematically precise, zero fluff."
+    "Output one route word only. Entropy above 0.8: Quantum. Otherwise high complexity: Reasoning. "
+    "Past event: Memory. Open-ended: Creative. Default: Vigilance."
 )
 
 DEFAULT_TEMPERATURE = 0.1
@@ -53,6 +52,11 @@ _tokenizer = None
 _backend = None  # "llama_cpp" or "transformers"
 _loaded = False
 _load_error = None
+_http_server = None
+_generation_lock = Lock()
+GENERATION_QUEUE_SECONDS = min(
+    max(float(os.environ.get("WEAVER_QWEN_QUEUE_SECONDS", "8")), 0.0), 30.0
+)
 
 
 def _load_model():
@@ -240,6 +244,8 @@ class Qwen3BHandler(BaseHTTPRequestHandler):
                 "status": "ok" if _model is not None else "model_not_loaded",
                 "model": "weaver-qwen2-3b",
                 "backend": _backend,
+                "threads": CPU_THREADS,
+                "busy": _generation_lock.locked(),
                 "error": _load_error,
             })
         elif self.path == "/v1/models":
@@ -265,22 +271,40 @@ class Qwen3BHandler(BaseHTTPRequestHandler):
             return
 
         messages = req.get("messages", [])
-        max_tokens = min(req.get("max_tokens", 50), 100)
+        raw_max_tokens = req.get("max_tokens", req.get("max_completion_tokens", 16))
+        try:
+            max_tokens = max(1, min(int(raw_max_tokens), 32))
+        except (TypeError, ValueError):
+            max_tokens = 16
+        request_class = str(req.get("request_class", "interactive")).strip().lower()
+        is_background = request_class in {"background", "headless", "autonomous"}
 
         if not messages:
             self._send_json(400, {"error": "messages required"})
             return
 
-        if not _loaded:
-            if not _load_model():
-                self._send_json(503, {"error": f"model failed to load: {_load_error}"})
-                return
-
-        if _model is None:
-            self._send_json(503, {"error": f"model not available: {_load_error}"})
+        acquired = (
+            _generation_lock.acquire(blocking=False)
+            if is_background
+            else _generation_lock.acquire(timeout=GENERATION_QUEUE_SECONDS)
+        )
+        if not acquired:
+            self._send_json(429, {
+                "error": "routing model busy",
+                "retryable": True,
+                "request_class": request_class,
+            })
             return
 
         try:
+            if not _loaded and not _load_model():
+                self._send_json(503, {"error": f"model failed to load: {_load_error}"})
+                return
+
+            if _model is None:
+                self._send_json(503, {"error": f"model not available: {_load_error}"})
+                return
+
             t0 = time.monotonic()
             text = _generate(messages, max_tokens)
             latency = time.monotonic() - t0
@@ -298,8 +322,12 @@ class Qwen3BHandler(BaseHTTPRequestHandler):
                 "latency_ms": round(latency * 1000),
                 "backend": _backend,
             })
+        except (BrokenPipeError, ConnectionResetError):
+            pass
         except Exception as e:
             self._send_json(500, {"error": str(e)})
+        finally:
+            _generation_lock.release()
 
 
 def _preload_in_background():
@@ -330,6 +358,7 @@ def _notify_nexus_bus():
 
 
 def main():
+    global _http_server
     parser = argparse.ArgumentParser(description="Weaver 3B Qwen2 Inference Server")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -339,6 +368,7 @@ def main():
     preload_thread.start()
 
     server = ThreadedHTTPServer((args.host, args.port), Qwen3BHandler)
+    _http_server = server
     print(f"[QWEN3B] 🧠 Weaver 3B Qwen2 server on http://{args.host}:{args.port}", flush=True)
     print(f"[QWEN3B]    POST /v1/chat/completions  (OpenAI-compatible)", flush=True)
     print(f"[QWEN3B]    GET  /health", flush=True)
@@ -348,6 +378,16 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n[QWEN3B] Server shutting down.", flush=True)
+    finally:
+        server.server_close()
+        if _http_server is server:
+            _http_server = None
+
+
+def shutdown_server():
+    """Stop the blocking HTTP loop from Weaver's asyncio supervisor thread."""
+    server = _http_server
+    if server is not None:
         server.shutdown()
 
 

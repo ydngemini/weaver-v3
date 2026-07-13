@@ -25,7 +25,7 @@ import time
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-from threading import Thread
+from threading import Lock, Thread
 from urllib.parse import urlparse
 
 from memory_manager import MemoryManager, default_vault_dir
@@ -45,7 +45,17 @@ _model = None
 _tokenizer = None
 _loaded = False
 _load_error = None
+_http_server = None
 _llm = None  # llama-cpp-python handle when WEAVER_LORA_BACKEND=gguf
+_generation_lock = Lock()
+GENERATION_QUEUE_SECONDS = min(
+    max(float(os.environ.get("WEAVER_LORA_QUEUE_SECONDS", "8")), 0.0), 30.0
+)
+LORA_THREADS = min(
+    max(int(os.environ.get("WEAVER_LORA_THREADS", "4")), 1),
+    max(os.cpu_count() or 1, 1),
+    8,
+)
 
 # Backend: "transformers" (default, x86/GPU) or "gguf" (ARM/CPU via llama.cpp).
 LORA_BACKEND = os.environ.get("WEAVER_LORA_BACKEND", "transformers").lower()
@@ -118,7 +128,7 @@ def _load_model_gguf():
         _llm = Llama(
             model_path=SOUL_GGUF,
             n_ctx=2048,
-            n_threads=int(os.environ.get("WEAVER_LORA_THREADS", "4")),
+            n_threads=LORA_THREADS,
             chat_format="llama-3",
             verbose=False,
         )
@@ -316,6 +326,8 @@ class LoRAHandler(BaseHTTPRequestHandler):
                 "status": "ok" if _model is not None else "model_not_loaded",
                 "model": "weaver-fracture-1b-lora",
                 "backend": LORA_BACKEND,
+                "threads": LORA_THREADS,
+                "busy": _generation_lock.locked(),
                 "active_version": _active_version,
                 "active_record": active,
                 "error": _load_error,
@@ -378,28 +390,47 @@ class LoRAHandler(BaseHTTPRequestHandler):
             return
 
         messages = req.get("messages", [])
-        max_tokens = req.get("max_tokens", 200)
+        raw_max_tokens = req.get("max_tokens", req.get("max_completion_tokens", 200))
+        try:
+            max_tokens = max(1, min(int(raw_max_tokens), 512))
+        except (TypeError, ValueError):
+            max_tokens = 200
         temperature = req.get("temperature", 0.7)
+        request_class = str(req.get("request_class", "interactive")).strip().lower()
+        is_background = request_class in {"background", "headless", "autonomous"}
 
         if not messages:
             self._send_json(400, {"error": "messages required"})
             return
 
-        # Lazy load model on first request
-        if not _loaded:
-            if not _load_model():
+        acquired = (
+            _generation_lock.acquire(blocking=False)
+            if is_background
+            else _generation_lock.acquire(timeout=GENERATION_QUEUE_SECONDS)
+        )
+        if not acquired:
+            self._send_json(429, {
+                "error": "soul voice model busy",
+                "retryable": True,
+                "request_class": request_class,
+            })
+            return
+
+        try:
+            # Keep lazy loading under the same lock as generation. llama.cpp
+            # model handles are not safe for concurrent request threads.
+            if not _loaded and not _load_model():
                 self._send_json(503, {
                     "error": f"model failed to load: {_load_error}"
                 })
                 return
 
-        if _model is None:
-            self._send_json(503, {
-                "error": f"model not available: {_load_error}"
-            })
-            return
+            if _model is None:
+                self._send_json(503, {
+                    "error": f"model not available: {_load_error}"
+                })
+                return
 
-        try:
             t0 = time.monotonic()
             text = _generate(messages, max_tokens, temperature)
             latency = time.monotonic() - t0
@@ -421,8 +452,12 @@ class LoRAHandler(BaseHTTPRequestHandler):
                 "latency_ms": round(latency * 1000),
             })
 
+        except (BrokenPipeError, ConnectionResetError):
+            pass
         except Exception as e:
             self._send_json(500, {"error": str(e)})
+        finally:
+            _generation_lock.release()
 
 
 def _preload_in_background():
@@ -454,6 +489,7 @@ def _notify_nexus_bus():
 
 
 def main():
+    global _http_server
     parser = argparse.ArgumentParser(description="Weaver LoRA Inference Server")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -466,6 +502,7 @@ def main():
     preload_thread.start()
 
     server = ThreadedHTTPServer((args.host, args.port), LoRAHandler)
+    _http_server = server
     print(f"[LORA] 🧠 Weaver LoRA server on http://{args.host}:{args.port}", flush=True)
     print(f"[LORA]    POST /v1/chat/completions  (OpenAI-compatible)", flush=True)
     print(f"[LORA]    GET  /health", flush=True)
@@ -475,6 +512,16 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n[LORA] Server shutting down.", flush=True)
+    finally:
+        server.server_close()
+        if _http_server is server:
+            _http_server = None
+
+
+def shutdown_server():
+    """Stop the blocking HTTP loop from Weaver's asyncio supervisor thread."""
+    server = _http_server
+    if server is not None:
         server.shutdown()
 
 

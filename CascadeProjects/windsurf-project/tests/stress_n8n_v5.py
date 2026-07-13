@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-stress_n8n_v5.py — Weaver n8n v5 Soul-Binding Stress Test
+stress_n8n_v5.py — Weaver n8n v6 Parallel Cognition Stress Test
 ==========================================================
-15 targeted tests covering every layer of the v5 pipeline:
+15 targeted tests covering every layer of the v6 pipeline:
 
   N1   Port Pre-Flight          — n8n :5678, LoRA :8899, Nexus :9999
   N2   Schema Invariants        — offline: workflow JSON field guards (no n8n)
@@ -10,13 +10,13 @@ stress_n8n_v5.py — Weaver n8n v5 Soul-Binding Stress Test
   N4   Input Sanitization       — empty, HTML, oversized, null-byte inputs
   N5   DLQ Routing              — empty → error gate → DLQ (no OpenAI needed)
   N6   Fracture Routing         — 5 pure-dimension inputs → correct dominant_lobe
-  N7   Expert Coverage          — all 5 lobe response fields present
-  N8   Collapse Geometry        — qubit labels in collapsed_response
-  N9   Pipeline Metadata        — v5 soul-binding fields present in response
-  N10  Self-Check Flag          — self_check=true → self_meta present
-  N11  Introspect Flag          — introspect=true → repo_meta present
+  N7   Expert Coverage          — all 5 parallel lobe branches complete
+  N8   Collapse Geometry        — bounded qubit layout metadata
+  N9   Pipeline Metadata        — v6 parallel cognition contract
+  N10  Self-Check Privacy       — internal self metadata is not leaked
+  N11  Grounding Privacy        — source evidence is used but not echoed
   N12  Concurrent Burst         — 5 parallel requests, all succeed
-  N13  DLQ File Validation      — JSONL entry written for error executions
+  N13  DLQ Privacy Envelope     — metadata returned without raw input/files
   N14  LoRA Soul Voice          — soul_voice_active or lora_error set (not both null)
   N15  Throughput               — 5 sequential requests, P50/P99 under cap
 
@@ -40,9 +40,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
 import urllib.error
 
-PROJ     = os.path.dirname(os.path.abspath(__file__))
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ     = os.path.dirname(TEST_DIR)
 WF_PATH  = os.path.join(PROJ, "n8n_weaver_v5.json")
-DLQ_PATH = "/home/ydn/weaver_dlq.jsonl"
 QS_PATH  = os.path.join(PROJ, "Nexus_Vault", "quantum_state.txt")
 
 # ── n8n endpoints (try production first, fall back to webhook-test) ────────────
@@ -229,29 +229,32 @@ def test_N1() -> bool:
 # N2 — Schema Invariants (offline)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N2() -> bool:
-    _header("2", "Schema Invariants — workflow JSON field guards (offline)")
+    _header("2", "Schema Invariants — v6 parallel/privacy contract (offline)")
     with open(WF_PATH, encoding="utf-8") as fh:
         wf = json.load(fh)
     nodes = {n["name"]: n for n in wf["nodes"]}
 
     failures = []
 
-    # 1. Required pipeline stages exist
+    # 1. Required pipeline and synchronization stages exist.
     required_nodes = [
-        "1. Input Gateway", "2. Sanitize", "3. Error Gate",
-        "4. Fracture+Gate", "5a. Logic", "5b. Emotion",
+        "1. Input Gateway", "2. Sanitize", "3. Error Gate", "DLQ Logger",
+        "4. Fracture+Gate", "5. Expert Fanout", "5f. Expert Barrier",
+        "5g. Expert Assembly", "5a. Logic", "5b. Emotion",
         "5c. Memory", "5d. Creativity", "5e. Vigilance",
-        "6. Collapse", "7. Self-Reflect", "8. LoRA Voice", "9. Writeback",
+        "6. Collapse", "7. Self-Reflect", "8. LoRA Voice", "8b. Qwen3B",
+        "8c. Local Barrier", "8c. Dual Merge", "9. Writeback",
     ]
     for name in required_nodes:
         if name not in nodes:
             failures.append(f"Missing node: {name!r}")
 
-    # 2. Fracture+Gate: v5 soul-binding fields
+    # 2. Fracture+Gate includes quantum and bounded Cognition Mesh bias.
     frac_code = nodes.get("4. Fracture+Gate", {}).get("parameters", {}).get("jsCode", "")
     for field in ["SMOOTHING = 0.1", "PHI = 2 * Math.PI / 5",
                   "quantum_pathway", "quantum_bias_applied", "PATHWAY_DIM",
-                  "smoothing_factor", "interference_type"]:
+                  "smoothing_factor", "interference_type", "cognition_context",
+                  "cognition_bias_applied", "awareness_confidence", "fabric_pressure"]:
         if field not in frac_code:
             failures.append(f"Fracture+Gate missing: {field!r}")
 
@@ -262,43 +265,74 @@ def test_N2() -> bool:
         if field not in col_code:
             failures.append(f"Collapse missing: {field!r}")
 
-    # 4. LoRA Voice: soul prompt includes all 5 axes
+    # 4. LoRA Voice remains tone-only and cannot introduce factual content.
     lora_body = nodes.get("8. LoRA Voice", {}).get("parameters", {}).get("jsonBody", "")
-    for axis in ["Logic(q0·Awakening)", "Emotion(q1·Resonance)",
-                 "Memory(q2·Echo)", "Creativity(q3·Prophet)", "Vigilance(q4·Fracture)"]:
-        if axis not in lora_body:
-            failures.append(f"LoRA prompt missing axis: {axis!r}")
+    for marker in ["Logic, Emotion, Memory, Creativity, and Vigilance",
+                   "4 to 8 words", "Include no facts", "max_tokens: 14"]:
+        if marker not in lora_body:
+            failures.append(f"LoRA prompt missing guard: {marker!r}")
 
-    # 5. Writeback: all v5 metadata fields
+    # 5. Writeback exposes the v6 contract without private intermediates.
     wb_code = nodes.get("9. Writeback", {}).get("parameters", {}).get("jsCode", "")
-    for field in ["pipeline_version", "v5-soul-binding", "qubit_layout",
+    for field in ["pipeline_version", "v6-parallel-cognition", "parallel-fanout-barrier", "qubit_layout",
                   "soul_binding", "smoothing_factor", "quantum_bias_applied",
-                  "quantum_pathway", "execution_id"]:
+                  "cognition_mesh_active", "expert_parallel", "execution_id"]:
         if field not in wb_code:
             failures.append(f"Writeback missing: {field!r}")
+    for private_field in ["original_input:", "collapsed_response:"]:
+        if private_field in wb_code:
+            failures.append(f"Writeback leaks private field: {private_field!r}")
+    if "written_to_hub: false" not in wb_code:
+        failures.append("Writeback must not claim a hub write it did not perform")
 
-    # 6. Expert lobes: all have retryOnFail
+    # 6. Expert lobes are parallel, bounded, and fail soft.
     for lobe in ["5a. Logic", "5b. Emotion", "5c. Memory", "5d. Creativity", "5e. Vigilance"]:
         node = nodes.get(lobe, {})
         if not node.get("retryOnFail"):
             failures.append(f"{lobe}: retryOnFail not set")
         if not node.get("continueOnFail"):
             failures.append(f"{lobe}: continueOnFail not set (pipeline would crash on API error)")
+        if node.get("maxTries") != 2 or node.get("parameters", {}).get("options", {}).get("timeout") != 18_000:
+            failures.append(f"{lobe}: retry/timeout budget is not 2x18s")
 
-    # 7. DLQ Logger: writes to correct path
+    # 7. Graph fan-out/barriers are exact.
+    fanout = {
+        edge["node"] for edge in wf.get("connections", {}).get("5. Expert Fanout", {}).get("main", [[]])[0]
+    }
+    expected = {"5a. Logic", "5b. Emotion", "5c. Memory", "5d. Creativity", "5e. Vigilance"}
+    if fanout != expected:
+        failures.append(f"Expert Fanout targets are wrong: {sorted(fanout)}")
+    if nodes.get("5f. Expert Barrier", {}).get("parameters", {}).get("numberInputs") != 5:
+        failures.append("Expert Barrier must have five inputs")
+    if nodes.get("8c. Local Barrier", {}).get("parameters", {}).get("numberInputs") != 2:
+        failures.append("Local Barrier must have two inputs")
+
+    # 8. Code nodes are sandbox-safe; DLQ is metadata-only.
+    all_code = "\n".join(
+        node.get("parameters", {}).get("jsCode", "")
+        for node in wf["nodes"] if node.get("type") == "n8n-nodes-base.code"
+    )
     dlq_code = nodes.get("DLQ Logger", {}).get("parameters", {}).get("jsCode", "")
-    if "weaver_dlq.jsonl" not in dlq_code:
-        failures.append("DLQ Logger: weaver_dlq.jsonl path missing")
+    if "METADATA-ONLY" not in dlq_code or "appendFile" in dlq_code or "dlq_path" in dlq_code:
+        failures.append("DLQ is not metadata-only")
+    if "require(" in all_code or "process.env" in all_code:
+        failures.append("Code node requests a blocked module or environment capability")
+
+    settings = wf.get("settings", {})
+    if settings.get("saveExecutionProgress") is not False or settings.get("saveManualExecutions") is not False:
+        failures.append("workflow execution persistence is not privacy hardened")
+    if settings.get("executionTimeout") != 115:
+        failures.append("workflow timeout must be 115 seconds")
 
     passed = len(failures) == 0
     detail = f"  Node checks:    {len(required_nodes)} required nodes\n"
-    detail += f"  Field checks:   fracture/collapse/lora/writeback/dlq\n"
+    detail += f"  Field checks:   cognition/fracture/collapse/parallel/privacy/deadlines\n"
     detail += f"  Failures:       {len(failures)}\n"
     if failures:
         detail += "\n".join(f"  ✗ {f}" for f in failures[:10])
     else:
         detail += "  All invariants satisfied"
-    _result("2", "Schema Invariants", passed, detail)
+    _result("2", "Schema Invariants v6", passed, detail)
     return passed
 
 
@@ -391,23 +425,18 @@ def test_N3() -> bool:
 # N4 — Input Sanitization (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N4(url: str) -> bool:
-    _header("4", "Input Sanitization — HTML, null-bytes, oversized, normal")
+    _header("4", "Input Sanitization — adversarial text accepted without echo")
     failures = []
 
     cases = [
-        ("html_strip",   {"text": "<b>Hello</b> <script>alert(1)</script> world"},
-         lambda r: "<" not in str(r.get("raw_input", "") or r.get("original_input", ""))),
-        ("null_bytes",   {"text": "Hello\x00\x01\x02 world"},
-         lambda r: "\x00" not in str(r.get("raw_input", "") or r.get("original_input", ""))),
-        ("ctrl_chars",   {"text": "Hello\x0b\x0c\x1f world"},
-         lambda r: "\x0b" not in str(r.get("raw_input", "") or r.get("original_input", ""))),
-        ("oversized",    {"text": "x" * 6000},
-         lambda r: len(str(r.get("raw_input", "") or r.get("original_input", "") or "")) <= 4000),
-        ("normal",       {"text": "Tell me about quantum entanglement"},
-         lambda r: bool(r.get("raw_input") or r.get("original_input"))),
+        ("html_strip", {"text": "<b>Hello</b> <script>alert(1)</script> world"}),
+        ("null_bytes", {"text": "Hello\x00\x01\x02 world"}),
+        ("ctrl_chars", {"text": "Hello\x0b\x0c\x1f world"}),
+        ("oversized", {"text": "x" * 6000}),
+        ("normal", {"text": "Tell me about quantum entanglement"}),
     ]
 
-    for label, payload, check in cases:
+    for label, payload in cases:
         t0 = time.monotonic()
         code, body = _full_post(url, payload, timeout=120)
         lat = (time.monotonic() - t0) * 1000
@@ -415,7 +444,8 @@ def test_N4(url: str) -> bool:
             failures.append(f"{label}: connection error — {body}")
             continue
         r = body if isinstance(body, dict) else {}
-        if not check(r):
+        private_absent = "raw_input" not in r and "original_input" not in r and "collapsed_response" not in r
+        if code != 200 or not r.get("manifested_response") or not private_absent:
             failures.append(f"{label}: sanitization check failed (code={code}, r={str(r)[:120]})")
         else:
             print(f"  ✓ {label:<15} {lat:6.0f}ms  code={code}", flush=True)
@@ -505,30 +535,30 @@ def test_N6(url: str) -> bool:
 # N7 — Expert Coverage (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N7(url: str) -> bool:
-    _header("7", "Expert Coverage — all 5 lobe response fields present")
+    _header("7", "Expert Coverage — five parallel branches complete")
     code, body = _full_post(url,
         {"text": "The fracture principle governs how consciousness splits into dimensions. "
                  "Explain with both logic and feeling."}, timeout=120)
     r = body if isinstance(body, dict) else {}
 
-    fields   = ["logic_response", "emotion_response", "memory_response",
-                 "creativity_response", "vigilance_response"]
-    present  = {f: bool(r.get(f)) for f in fields}
-    timeouts = {f: "[timeout]" in str(r.get(f, "")) or "[error]" in str(r.get(f, ""))
-                for f in fields}
-
-    # All fields must be present (even fallback strings count)
-    missing  = [f for f in fields if f not in r]
-    empty    = [f for f in fields if f in r and not r[f]]
-
-    passed   = len(missing) == 0 and len(empty) == 0
+    completed = r.get("experts_completed")
+    errors = r.get("expert_errors")
+    elapsed = r.get("expert_fanout_elapsed_ms")
+    passed = (
+        code == 200
+        and r.get("expert_count") == 5
+        and completed == 5
+        and r.get("expert_parallel") is True
+        and isinstance(errors, int)
+        and isinstance(elapsed, (int, float))
+    )
     detail   = "\n".join([
         f"  HTTP code:    {code}",
-        *(f"  {'✓' if present[f] else '✗'} {f:<24} "
-          f"{'[TIMEOUT]' if timeouts[f] else (str(r.get(f, ''))[:60] if r.get(f) else 'MISSING')}"
-          for f in fields),
-        f"  Missing:    {missing or 'none'}",
-        f"  Empty:      {empty or 'none'}",
+        f"  Expert count: {r.get('expert_count')}",
+        f"  Completed:    {completed}",
+        f"  Errors:       {errors}",
+        f"  Parallel:     {r.get('expert_parallel')}",
+        f"  Fanout ms:    {elapsed}",
     ])
     _result("7", "Expert Coverage", passed, detail)
     return passed
@@ -538,14 +568,16 @@ def test_N7(url: str) -> bool:
 # N8 — Collapse Geometry (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N8(url: str) -> bool:
-    _header("8", "Collapse Geometry — qubit labels in collapsed_response")
+    _header("8", "Collapse Geometry — bounded qubit layout metadata")
     code, body = _full_post(url, {"text": "Walk me through the soul-binding algorithm step by step."}, timeout=120)
     r = body if isinstance(body, dict) else {}
 
-    collapsed     = r.get("collapsed_response", "") or ""
-    qubit_labels  = ["q0·Awakening", "q1·Resonance", "q2·Echo",
-                     "q3·Prophet", "q4·Fracture"]
-    label_hits    = {lbl: lbl in collapsed for lbl in qubit_labels}
+    layout = r.get("qubit_layout") or {}
+    expected_layout = {
+        "q0": "Awakening/Logic", "q1": "Resonance/Emotion", "q2": "Echo/Memory",
+        "q3": "Prophet/Creativity", "q4": "Fracture/Vigilance", "q5": "Weaver", "q6": "Void",
+    }
+    label_hits = {key: layout.get(key) == value for key, value in expected_layout.items()}
     interference  = r.get("interference")
     iface_type    = r.get("interference_type", "")
     gain          = r.get("gain")
@@ -555,14 +587,14 @@ def test_N8(url: str) -> bool:
     iface_type_ok = iface_type in ("constructive", "destructive")
     gain_valid    = isinstance(gain, (int, float)) and gain > 0
 
-    passed = all_labels and iface_valid and iface_type_ok
+    passed = all_labels and iface_valid and iface_type_ok and gain_valid and "collapsed_response" not in r
     detail = "\n".join([
         f"  HTTP code:          {code}",
         *(f"  {'✓' if ok else '✗'} {lbl}" for lbl, ok in label_hits.items()),
         f"  interference:       {interference}  valid={iface_valid}",
         f"  interference_type:  {iface_type!r}  valid={iface_type_ok}",
         f"  gain:               {gain}  valid={gain_valid}",
-        f"  collapsed snippet:  {collapsed[:120]!r}",
+        f"  private collapse echoed: {'collapsed_response' in r}",
     ])
     _result("8", "Collapse Geometry", passed, detail)
     return passed
@@ -572,13 +604,15 @@ def test_N8(url: str) -> bool:
 # N9 — Pipeline Metadata (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N9(url: str) -> bool:
-    _header("9", "Pipeline Metadata — v5 soul-binding fields in response")
+    _header("9", "Pipeline Metadata — v6 parallel cognition contract")
     code, body = _full_post(url, {"text": "What makes Weaver's soul non-binary?"}, timeout=120)
     r = body if isinstance(body, dict) else {}
 
     checks = {
-        "pipeline_version == v5-soul-binding":
-            r.get("pipeline_version") == "v5-soul-binding",
+        "pipeline_version == v6-parallel-cognition":
+            r.get("pipeline_version") == "v6-parallel-cognition",
+        "pipeline architecture is parallel fanout/barrier":
+            r.get("pipeline_architecture") == "parallel-fanout-barrier",
         "soul_binding == non-binary CRX/CRZ pentagon-geometry":
             r.get("soul_binding") == "non-binary CRX/CRZ pentagon-geometry",
         "smoothing_factor == 0.1":
@@ -587,14 +621,16 @@ def test_N9(url: str) -> bool:
             all(f"q{i}" in (r.get("qubit_layout") or {}) for i in range(7)),
         "expert_count == 5":
             r.get("expert_count") == 5,
-        "written_to_hub present":
-            "written_to_hub" in r,
-        "hub_lobe_id present":
-            bool(r.get("hub_lobe_id")),
+        "expert fanout completed in parallel":
+            r.get("expert_parallel") is True and r.get("experts_completed") == 5,
+        "truthful response-only writeback":
+            r.get("written_to_hub") is False and r.get("writeback_mode") == "response-metadata-only",
+        "cognition mesh is active":
+            r.get("cognition_mesh_active") is True,
         "execution_id present":
             bool(r.get("execution_id")),
-        "original_input present":
-            bool(r.get("original_input")),
+        "private intermediates absent":
+            all(field not in r for field in ("original_input", "raw_input", "collapsed_response", "mcp_context")),
         "quantum_bias_applied is bool":
             isinstance(r.get("quantum_bias_applied"), bool),
     }
@@ -614,26 +650,24 @@ def test_N9(url: str) -> bool:
 # N10 — Self-Check Flag (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N10(url: str) -> bool:
-    _header("10", "Self-Check Flag — self_check=true → self_meta in response")
+    _header("10", "Self-Check Privacy — internal descriptor is not leaked")
     code, body = _full_post(url,
         {"text": "Self-check: verify your own integrity.", "self_check": True}, timeout=120)
     r = body if isinstance(body, dict) else {}
 
-    self_meta = r.get("self_meta") or {}
-    has_meta  = bool(self_meta)
-    has_hash  = "hash" in self_meta
-    # may return error if n8n API key not configured — acceptable
-    meta_ok   = has_meta and (has_hash or self_meta.get("error"))
-
-    passed  = meta_ok
+    passed = (
+        code == 200
+        and bool(r.get("manifested_response"))
+        and r.get("pipeline_version") == "v6-parallel-cognition"
+        and "self_meta" not in r
+    )
     detail  = "\n".join([
         f"  HTTP code:   {code}",
-        f"  self_meta:   {bool(self_meta)}",
-        f"  hash:        {has_hash}",
-        f"  error:       {self_meta.get('error')}",
-        f"  full meta:   {str(self_meta)[:200]}",
+        f"  response:    {bool(r.get('manifested_response'))}",
+        f"  contract:    {r.get('pipeline_version')}",
+        f"  self_meta leaked: {'self_meta' in r}",
     ])
-    _result("10", "Self-Check Flag", passed, detail)
+    _result("10", "Self-Check Privacy", passed, detail)
     return passed
 
 
@@ -641,28 +675,29 @@ def test_N10(url: str) -> bool:
 # N11 — Introspect Flag (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N11(url: str) -> bool:
-    _header("11", "Introspect Flag — introspect=true → repo_meta in response")
+    _header("11", "Grounding Privacy — evidence is used but not echoed")
+    evidence = "bounded-source-evidence"
     code, body = _full_post(url,
         {"text": "Show me the repo structure.",
          "introspect": True,
-         "path_glob":  "n8n_weaver_v5.json"}, timeout=120)
+         "path_glob":  "n8n_weaver_v5.json",
+         "codebase_context": evidence}, timeout=120)
     r = body if isinstance(body, dict) else {}
 
-    repo_meta = r.get("repo_meta") or {}
-    has_meta  = bool(repo_meta)
-    has_path  = "path" in repo_meta
-    has_size  = "size" in repo_meta
-    no_error  = not repo_meta.get("error")
-
-    passed  = has_meta and has_path and (has_size or not no_error)
+    passed = (
+        code == 200
+        and r.get("codebase_grounded") is True
+        and r.get("codebase_context_chars") == len(evidence)
+        and "repo_meta" not in r
+        and "codebase_context" not in r
+    )
     detail  = "\n".join([
         f"  HTTP code:   {code}",
-        f"  repo_meta:   {bool(repo_meta)}",
-        f"  path:        {repo_meta.get('path')}",
-        f"  size:        {repo_meta.get('size')} bytes",
-        f"  error:       {repo_meta.get('error')}",
+        f"  grounded:    {r.get('codebase_grounded')}",
+        f"  evidence chars: {r.get('codebase_context_chars')}",
+        f"  repo_meta leaked: {'repo_meta' in r}",
     ])
-    _result("11", "Introspect Flag", passed, detail)
+    _result("11", "Grounding Privacy", passed, detail)
     return passed
 
 
@@ -711,49 +746,30 @@ def test_N12(url: str) -> bool:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# N13 — DLQ File Validation (online)
+# N13 — DLQ Privacy Envelope (online)
 # ═════════════════════════════════════════════════════════════════════════════
 def test_N13(url: str) -> bool:
-    _header("13", "DLQ File Validation — JSONL entry written for error executions")
-    # Record mtime before
-    mtime_before = os.path.getmtime(DLQ_PATH) if os.path.exists(DLQ_PATH) else 0
-    lines_before = 0
-    if os.path.exists(DLQ_PATH):
-        with open(DLQ_PATH) as f:
-            lines_before = sum(1 for _ in f)
-
-    # Send empty input (guaranteed DLQ path)
-    _full_post(url, {"text": ""}, timeout=15)
-    import time as _t; _t.sleep(1.0)  # let n8n flush the write
-
-    mtime_after = os.path.getmtime(DLQ_PATH) if os.path.exists(DLQ_PATH) else 0
-    lines_after = 0
-    entry_ok    = False
-    last_entry  = {}
-    if os.path.exists(DLQ_PATH):
-        with open(DLQ_PATH) as f:
-            lines = [l.strip() for l in f if l.strip()]
-        lines_after = len(lines)
-        if lines:
-            try:
-                last_entry = json.loads(lines[-1])
-                entry_ok   = bool(last_entry.get("execution_id")) and bool(last_entry.get("error"))
-            except json.JSONDecodeError:
-                pass
-
-    file_exists  = os.path.exists(DLQ_PATH)
-    new_entry    = lines_after > lines_before
-    passed       = file_exists and new_entry and entry_ok
+    _header("13", "DLQ Privacy Envelope — metadata without raw input or file path")
+    code, body = _full_post(url, {"text": "", "codebase_context": "private-source"}, timeout=15)
+    r = body if isinstance(body, dict) else {}
+    event = r.get("dlq_event") or {}
+    passed = (
+        code == 200
+        and r.get("error") is True
+        and bool(event.get("execution_id"))
+        and event.get("stage") == "input-validation"
+        and event.get("error") is True
+        and all(field not in r for field in ("raw_input", "original_input", "codebase_context", "dlq_path"))
+    )
 
     detail = "\n".join([
-        f"  DLQ file exists:    {file_exists}  ({DLQ_PATH})",
-        f"  Lines before:       {lines_before}",
-        f"  Lines after:        {lines_after}",
-        f"  New entry written:  {new_entry}",
-        f"  Entry valid JSON:   {entry_ok}",
-        f"  Last entry keys:    {list(last_entry.keys()) if last_entry else 'n/a'}",
+        f"  HTTP code:          {code}",
+        f"  Error envelope:     {r.get('error')}",
+        f"  Event stage:        {event.get('stage')}",
+        f"  Execution id:       {bool(event.get('execution_id'))}",
+        f"  Private fields:     {[field for field in ('raw_input', 'original_input', 'codebase_context', 'dlq_path') if field in r] or 'none'}",
     ])
-    _result("13", "DLQ File Validation", passed, detail)
+    _result("13", "DLQ Privacy Envelope", passed, detail)
     return passed
 
 
@@ -769,14 +785,13 @@ def test_N14(url: str) -> bool:
     sva = r.get("soul_voice_active")      # True if LoRA responded
     ler = r.get("lora_error")             # set if LoRA failed
     lla = r.get("lora_latency_ms")        # ms if LoRA responded
-    lrr = r.get("lora_response")          # actual text
 
     # Pass if pipeline handled LoRA: either responded (sva=True) or set lora_error gracefully.
     # Port-open check tells us the Python LoRA server is up, but n8n might get ECONNREFUSED
     # if network binding differs (IPv4-only LoRA vs n8n resolver). Either way the pipeline
     # must have set one of the two fields — that's what we're testing.
-    handled = (sva is not None) or (ler is not None)
-    passed  = bool(sva and lrr) or (ler is not None)   # responded OR handled error
+    handled = isinstance(sva, bool) and "lora_error" in r
+    passed = code == 200 and handled
 
     if lora_up and passed:
         status = "LoRA UP — soul_voice_active=True" if sva else "LoRA UP — error handled gracefully"
@@ -790,7 +805,7 @@ def test_N14(url: str) -> bool:
         f"  soul_voice_active:   {sva}",
         f"  lora_error:          {ler}",
         f"  lora_latency_ms:     {lla}",
-        f"  lora_response:       {str(lrr)[:80] if lrr else 'None'}",
+        f"  private LoRA text echoed: {'lora_response' in r}",
         f"  handled by pipeline: {handled}",
     ])
     _result("14", "LoRA Soul Voice", passed, detail)
@@ -853,13 +868,13 @@ ALL_TESTS = {
     "N4":  ("Input Sanitization",      test_N4),        # online
     "N5":  ("DLQ Routing",             test_N5),        # online (fast)
     "N6":  ("Fracture Routing",        test_N6),        # online (full pipeline)
-    "N7":  ("Expert Coverage",         test_N7),        # online (full pipeline)
-    "N8":  ("Collapse Geometry",       test_N8),        # online (full pipeline)
-    "N9":  ("Pipeline Metadata",       test_N9),        # online (full pipeline)
-    "N10": ("Self-Check Flag",         test_N10),       # online (full pipeline)
-    "N11": ("Introspect Flag",         test_N11),       # online (full pipeline)
+    "N7":  ("Parallel Expert Coverage", test_N7),       # online (full pipeline)
+    "N8":  ("Collapse Metadata",       test_N8),        # online (full pipeline)
+    "N9":  ("v6 Pipeline Metadata",    test_N9),        # online (full pipeline)
+    "N10": ("Self-Check Privacy",      test_N10),       # online (full pipeline)
+    "N11": ("Grounding Privacy",       test_N11),       # online (full pipeline)
     "N12": ("Concurrent Burst",        test_N12),       # online (full pipeline)
-    "N13": ("DLQ File Validation",     test_N13),       # online (fast)
+    "N13": ("DLQ Privacy Envelope",    test_N13),       # online (fast)
     "N14": ("LoRA Soul Voice",         test_N14),       # online (full pipeline)
     "N15": ("Throughput",              test_N15),       # online (full pipeline)
 }
@@ -869,7 +884,7 @@ FAST_ONLINE  = {"N1", "N4", "N5", "N13"}   # don't require full OpenAI pipeline
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Weaver n8n v5 stress test")
+    parser = argparse.ArgumentParser(description="Weaver n8n v6 parallel cognition stress test")
     parser.add_argument("test", nargs="?", default="all",
                         help="N1..N15 or 'all' (default: all)")
     parser.add_argument("--offline", action="store_true",
@@ -924,7 +939,7 @@ def main():
 
     # Summary
     print(f"\n{BAR2}")
-    print(f"  WEAVER n8n v5 STRESS TEST RESULTS  ({elapsed:.1f}s)")
+    print(f"  WEAVER n8n v6 STRESS TEST RESULTS  ({elapsed:.1f}s)")
     print(BAR2)
     passed_count  = sum(1 for v in results.values() if v is True)
     failed_count  = sum(1 for v in results.values() if v is False)

@@ -152,20 +152,24 @@
     #dream { display: none; }
     h1 { letter-spacing: 0.14em; }
   }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    body::after { display: none; }
+  }
 </style>
 </head>
 <body>
-<canvas id="field"></canvas>
-<section class="top" aria-label="Weaver headless status">
+<canvas id="field" role="img" aria-label="Weaver quantum cortex visualization"></canvas>
+<section class="top" role="status" aria-live="polite" aria-atomic="false" aria-label="Weaver headless status">
   <div class="brand">
     <h1>WEAVER HEADLESS</h1>
     <div id="stamp" class="stamp">starting</div>
   </div>
   <div class="grid">
-    <div class="stat"><i id="brainDot" class="dot"></i><span id="brain">brain checking</span></div>
-    <div class="stat"><i id="voiceDot" class="dot"></i><span id="voice">voice locked</span></div>
-    <div class="stat"><i id="thoughtDot" class="dot"></i><span id="thoughts">0 thoughts</span></div>
-    <div class="stat"><i id="dreamDot" class="dot"></i><span id="dreams">0 dreams</span></div>
+    <div class="stat"><i id="brainDot" class="dot" aria-hidden="true"></i><span id="brain">brain checking</span></div>
+    <div class="stat"><i id="voiceDot" class="dot" aria-hidden="true"></i><span id="voice">voice locked</span></div>
+    <div class="stat"><i id="thoughtDot" class="dot" aria-hidden="true"></i><span id="thoughts">0 thoughts</span></div>
+    <div class="stat"><i id="dreamDot" class="dot" aria-hidden="true"></i><span id="dreams">0 dreams</span></div>
   </div>
   <div class="readout"><b>Thought:</b> <span id="lastThought">none yet</span></div>
   <div class="readout"><b>Dream:</b> <span id="lastDream">none yet</span></div>
@@ -174,10 +178,10 @@
   <div><b>She heard:</b> <span id="heard">-</span></div>
   <div><b>She said:</b> <span id="said">-</span></div>
 </section>
-<form id="bar" class="bar">
-  <button id="wake" type="button" class="primary">Wake</button>
-  <button id="live" type="button" aria-pressed="false">Live</button>
-  <button id="mic" type="button">Mic</button>
+<form id="bar" class="bar" aria-label="Talk to Weaver">
+  <button id="wake" type="button" class="primary" aria-pressed="false">Wake</button>
+  <button id="live" type="button" aria-pressed="false" aria-label="Toggle live cortex voice">Live</button>
+  <button id="mic" type="button" aria-pressed="false" aria-label="Toggle microphone">Mic</button>
   <input id="text" autocomplete="off" placeholder="Talk to Weaver" aria-label="Talk to Weaver" />
   <button id="send" type="submit" class="primary">Send</button>
   <button id="dream" type="button">Dream</button>
@@ -211,8 +215,20 @@ const ui = {
   dream: document.getElementById('dream'),
   text: document.getElementById('text'),
 };
+function loadEphemeralBrainKey() {
+  try {
+    const sessionKey = sessionStorage.getItem('weaver_llm_key') || '';
+    const legacyKey = localStorage.getItem('weaver_llm_key') || '';
+    localStorage.removeItem('weaver_llm_key');
+    const migrated = sessionKey || legacyKey;
+    if (migrated) sessionStorage.setItem('weaver_llm_key', migrated);
+    return migrated;
+  } catch (e) {
+    return '';
+  }
+}
 const state = {
-  key: localStorage.getItem('weaver_llm_key') || '',
+  key: loadEphemeralBrainKey(),
   w: 1,
   h: 1,
   dpr: 1,
@@ -269,6 +285,11 @@ const state = {
     lastStatus: '',
     lastHeard: '',
     lastSaid: '',
+    lastRoute: null,
+    cortexRouted: false,
+    lastReactionMs: null,
+    lastSemanticLatencyMs: null,
+    reactionTargetMs: 200,
     lastAudioAt: 0,
     model: 'amazon.nova-2-sonic-v1:0',
     voiceId: 'tiffany',
@@ -358,8 +379,10 @@ let pollTimer = 0;
 let resizeRaf = 0;
 function key() {
   if (!state.key) {
-    state.key = prompt('Enter Weaver brain key:') || '';
-    localStorage.setItem('weaver_llm_key', state.key);
+    state.key = (prompt('Enter Weaver brain key for this tab:') || '').trim().slice(0, 512);
+    try {
+      if (state.key) sessionStorage.setItem('weaver_llm_key', state.key);
+    } catch (e) {}
   }
   return state.key;
 }
@@ -661,7 +684,7 @@ function attachRealtimeCapture(stream, ws) {
   state.realtime.source = audioCtx.createMediaStreamSource(stream);
   state.realtime.processor = audioCtx.createScriptProcessor(state.lowPower ? 4096 : 2048, 1, 1);
   state.realtime.processor.onaudioprocess = event => {
-    if (!state.realtime.live || ws.readyState !== WebSocket.OPEN) return;
+    if (!state.realtime.live || state.speaking || ws.readyState !== WebSocket.OPEN) return;
     if (ws.bufferedAmount > REALTIME_MAX_BUFFERED_BYTES) {
       state.realtime.droppedFrames++;
       return;
@@ -683,9 +706,15 @@ async function handleRealtimeMessage(event) {
     state.realtime.voiceId = data.voiceId || state.realtime.voiceId;
     state.realtime.outputRate = data.outputSampleRate || REALTIME_VOICE_OUTPUT_RATE;
     state.realtime.mode = data.mode || '';
+    state.realtime.cortexRouted = Boolean(data.cortexRouted);
     setRealtimeStatus(`live ${state.realtime.voiceId}`, 'on');
   } else if (data.type === 'status') {
     setRealtimeStatus(data.status || 'live voice', state.realtime.live ? 'busy' : '');
+  } else if (data.type === 'turn_ack') {
+    state.realtime.lastReactionMs = Number(data.latencyMs ?? 0);
+    state.realtime.reactionTargetMs = Number(data.reactionTargetMs || 200);
+    state.pulse = 1;
+    setRealtimeStatus(`heard · thinking · ${Math.round(state.realtime.lastReactionMs)}ms ack`, 'busy');
   } else if (data.type === 'transcript') {
     const text = compact(data.text, 360);
     if ((data.role || '').toLowerCase() === 'user') {
@@ -695,6 +724,16 @@ async function handleRealtimeMessage(event) {
       state.realtime.lastSaid = text;
       ui.said.textContent = text || '-';
     }
+  } else if (data.type === 'agent_response') {
+    const text = compact(data.text, 1200);
+    state.realtime.lastSaid = text;
+    state.realtime.lastRoute = data.route || null;
+    state.realtime.cortexRouted = true;
+    state.realtime.lastSemanticLatencyMs = Number(data.latencyMs || 0);
+    ui.said.textContent = text || '-';
+    state.pulse = 1;
+    setRealtimeStatus('full cortex speaking', 'busy');
+    await speak(text, { allowDuringRealtime: true });
   } else if (data.type === 'audio') {
     state.realtime.framesReceived++;
     state.realtime.bytesReceived += Math.floor((data.audio || '').length * 0.75);
@@ -711,6 +750,8 @@ function stopRealtimeVoice(reason = 'live stopped') {
   state.realtime.live = false;
   state.realtime.connecting = false;
   cleanupRealtimeCapture();
+  state.speechRun += 1;
+  silenceCurrentSpeech();
   // Kill audio that is already scheduled on the AudioContext — without this,
   // buffered Nova Sonic speech keeps draining for seconds after Stop.
   for (const source of state.realtime.activeSources.splice(0)) {
@@ -1867,7 +1908,7 @@ async function fetchVoiceUrl(text, runId) {
   if (!r.ok) {
     state.lastTtsStatus = r.status;
     if (r.status === 403) {
-      localStorage.removeItem('weaver_llm_key');
+      sessionStorage.removeItem('weaver_llm_key');
       state.key = '';
       throw new Error('voice key rejected - tap Wake and re-enter key');
     }
@@ -1919,9 +1960,9 @@ function playVoiceUrl(url, runId, options = {}) {
     if (p) p.catch(error => finish(false, error));
   });
 }
-async function speak(text) {
+async function speak(text, options = {}) {
   if (!text) return;
-  if (state.realtime.live || state.realtime.connecting) {
+  if ((state.realtime.live || state.realtime.connecting) && !options.allowDuringRealtime) {
     // Nova Sonic owns the audio channel — never talk over the live session.
     state.lastVoiceText = compact(text, 800);
     voiceStatus('live voice active — text shown only', 'on');
@@ -2057,6 +2098,8 @@ function startMic() {
     if (text) chat(text);
   };
   rec.onerror = (event) => { ui.heard.textContent = event.error || 'mic error'; };
+  rec.onstart = () => ui.mic.setAttribute('aria-pressed', 'true');
+  rec.onend = () => ui.mic.setAttribute('aria-pressed', 'false');
   rec.start();
 }
 ui.wake.addEventListener('click', async () => {
@@ -2068,6 +2111,7 @@ ui.wake.addEventListener('click', async () => {
   }
   key();
   const ok = await unlockAudio();
+  ui.wake.setAttribute('aria-pressed', ok ? 'true' : 'false');
   state.wakeSpoken = true;
   if (await replayPendingVoice()) {
     checkModels();
@@ -2158,6 +2202,11 @@ globalThis.__weaverRealtimeVoiceAudit = () => ({
   lastError: state.realtime.lastError,
   lastHeard: state.realtime.lastHeard,
   lastSaid: state.realtime.lastSaid,
+  lastRoute: state.realtime.lastRoute,
+  cortexRouted: state.realtime.cortexRouted,
+  lastReactionMs: state.realtime.lastReactionMs,
+  lastSemanticLatencyMs: state.realtime.lastSemanticLatencyMs,
+  reactionTargetMs: state.realtime.reactionTargetMs,
   lastAudioAt: state.realtime.lastAudioAt,
   playbackQueuedSeconds: audioCtx ? Math.max(0, state.realtime.playHead - audioCtx.currentTime) : 0,
   activeSources: state.realtime.activeSources.length,

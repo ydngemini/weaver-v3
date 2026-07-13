@@ -219,8 +219,8 @@ Two workflow exports are included:
 
 | File | Nodes | Role |
 | --- | ---: | --- |
-| `n8n_weaver_v5.json` | 31 | Current soul-binding workflow: input gateway, sanitize/error gate, self-inspect, repo/code search, five lobes, internet context, collapse, reflection, LoRA/Qwen merge, writeback. |
-| `n8n_weaver_final.json` | 13 | Smaller legacy nervous-system workflow. |
+| `n8n_weaver_v5.json` | 35 | Canonical v6 workflow (stable file/ID): bounded input and cognition context, parallel five-expert fanout/barrier, internet context, geometric collapse, parallel LoRA/Qwen reflection, and privacy-safe response metadata. Validate with `npm run validate:n8n`. |
+| `n8n_weaver_final.json` | 13 | Historical reference only; do not deploy. |
 
 The primary webhook defaults vary by environment. Check `.env`,
 `deploy/env.oracle.example`, `docker-compose.yml`, and `weaver_dashboard.py` for

@@ -116,7 +116,7 @@ Microphone/Camera/n8n Webhook
 - **Soul Voice LoRA** — local final voice/personality endpoint on `127.0.0.1:8899`.
 - **Google Gemini / OpenAI / Twilio** — optional legacy perception/phone integrations only when their env vars are configured.
 - **IBM Quantum Platform** — optional hardware execution; local simulator is the default-safe path.
-- **n8n** — workflow orchestrator at `localhost:5678`; import `n8n_weaver_v5.json`.
+- **n8n** — workflow orchestrator at `localhost:5678`; the canonical export is `n8n_weaver_v5.json` (stable filename/workflow ID, v6 pipeline). Run `npm run validate:n8n` before importing it.
 - **Google Drive** — optional cloud memory via `init_drive.py`
 
 All credentials live in `.env`. The LoRA adapter is in `weaver_fracture_1B_lora/` (rank=16, alpha=16, base: `unsloth/llama-3.2-1b-instruct-unsloth-bnb-4bit`).
@@ -124,14 +124,17 @@ All credentials live in `.env`. The LoRA adapter is in `weaver_fracture_1B_lora/
 ## n8n Workflow Pipeline
 
 The main workflow (`n8n_weaver_v5.json`) stages:
-1. Input Gateway (Webhook)
-2. Sanitize (HTML strip, 4KB cap)
-3. DLQ Logger (failed executions)
-4. Fracture + Gate (15 keywords/dimension, pentagon math)
-5. Expert Dispatch (route to 5 lobes)
-6. Collapse (interference-weighted merge)
-7. Soul Voice (LoRA 1B rewrite)
-8. Response (JSON)
+1. Input gateway and bounded privacy sanitizer
+2. Metadata-only failure envelope (no prompt/file write)
+3. Fracture, cognition bias, self-inspection, and repository evidence
+4. Five expert HTTP branches started concurrently
+5. Five-input barrier and allowlisted expert assembly
+6. Internet context and interference-weighted collapse
+7. Reflection plus parallel LoRA/Qwen advisory calls
+8. Privacy-safe response metadata (`v6-parallel-cognition`)
+
+The workflow has a validated 115-second deadline and never returns raw prompts,
+source evidence, or private intermediate responses.
 
 ## Sacred Geometry — Qubit Layout
 

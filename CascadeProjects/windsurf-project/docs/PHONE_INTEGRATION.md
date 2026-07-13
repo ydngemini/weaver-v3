@@ -26,7 +26,7 @@
 ### 1. Start Phone Bridge
 
 ```bash
-cd "/media/ydn/SYPHER_CORE/weaver v3/CascadeProjects/windsurf-project"
+cd "$(git rev-parse --show-toplevel)/CascadeProjects/windsurf-project"
 venv/bin/python3 twilio_weaver_bridge.py
 ```
 

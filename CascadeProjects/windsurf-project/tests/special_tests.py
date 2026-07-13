@@ -25,7 +25,8 @@ import sys
 import time
 from datetime import datetime
 
-PROJ = os.path.dirname(os.path.abspath(__file__))
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(TEST_DIR)
 VENV = os.path.join(PROJ, "venv", "bin", "python3")
 sys.path.insert(0, PROJ)
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")

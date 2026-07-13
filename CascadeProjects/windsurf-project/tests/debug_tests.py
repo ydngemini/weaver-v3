@@ -14,7 +14,8 @@ import sys
 import time
 from datetime import datetime
 
-PROJ = os.path.dirname(os.path.abspath(__file__))
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(TEST_DIR)
 VENV = os.path.join(PROJ, "venv", "bin", "python3")
 sys.path.insert(0, PROJ)
 
@@ -309,7 +310,7 @@ async def _test4():
         VENV, "-c",
         f"""
 import sys, os, asyncio, time
-PROJ = '/media/ydn/SYPHER_CORE/weaver v3/CascadeProjects/windsurf-project'
+PROJ = {PROJ!r}
 sys.path.insert(0, PROJ)
 from dotenv import load_dotenv; load_dotenv()
 import cv2, warnings

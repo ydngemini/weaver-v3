@@ -1024,6 +1024,25 @@ async def read_brain_snapshot() -> dict:
     elif state_err or models_err:
         status = "degraded"
 
+    voice_runtime = state.get("voice_realtime") if isinstance(state.get("voice_realtime"), dict) else {}
+    raw_slo = voice_runtime.get("slo") if isinstance(voice_runtime.get("slo"), dict) else {}
+    slo_keys = {
+        "status", "window", "samples", "success_rate", "error_budget_remaining_pct",
+        "reaction_target_ms", "queue_target_ms", "semantic_target_ms",
+        "reaction_p50_ms", "reaction_p95_ms", "queue_p50_ms", "queue_p95_ms",
+        "cortex_p50_ms", "cortex_p95_ms", "semantic_p50_ms", "semantic_p95_ms",
+    }
+    voice_slo = {
+        key: value for key, value in raw_slo.items()
+        if key in slo_keys and (isinstance(value, (int, float)) or key == "status")
+    }
+    raw_prewarm = voice_runtime.get("prewarm") if isinstance(voice_runtime.get("prewarm"), dict) else {}
+    voice_prewarm = {
+        "enabled": bool(raw_prewarm.get("enabled")),
+        "status": str(raw_prewarm.get("status") or "pending")[:24],
+        "latency_ms": raw_prewarm.get("latency_ms") if isinstance(raw_prewarm.get("latency_ms"), (int, float)) else None,
+    }
+
     return {
         "status": status,
         "latency_ms": health_ms,
@@ -1042,6 +1061,8 @@ async def read_brain_snapshot() -> dict:
         "last_error": state.get("last_error", ""),
         "last_thought": str(state.get("last_thought", ""))[:220],
         "last_dream": str(state.get("last_dream", ""))[:300],
+        "voice_slo": voice_slo,
+        "voice_prewarm": voice_prewarm,
         "routes": routes,
     }
 
@@ -1596,6 +1617,7 @@ body::after {
 }
 .tab-btn:hover { color: var(--text); }
 .tab-btn.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.tab-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: -3px; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
@@ -1695,7 +1717,7 @@ body::after {
 .latency-chip.fast { color: var(--green); border-color: rgba(0,232,123,0.25); background: rgba(0,232,123,0.06); }
 .latency-chip.watch { color: var(--orange); border-color: rgba(255,184,48,0.25); background: rgba(255,184,48,0.06); }
 .latency-chip.slow { color: var(--red); border-color: rgba(255,68,68,0.25); background: rgba(255,68,68,0.06); }
-.ops-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 10px; }
 .signal-card {
   background: linear-gradient(180deg, rgba(24,29,42,0.72), rgba(12,15,24,0.8));
   border: 1px solid var(--border);
@@ -1711,6 +1733,9 @@ body::after {
   color: var(--text); font-size: 12px; font-weight: 700;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.signal-value.nominal { color: var(--green); }
+.signal-value.watch { color: var(--orange); }
+.signal-value.breached { color: var(--red); }
 .signal-sub { color: var(--muted); font-size: 9px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .route-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; max-height: 235px; overflow-y: auto; padding-right: 2px; }
 .route-card {
@@ -2171,6 +2196,8 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
   .thread-stage { min-height: 520px; }
 }
 @media (max-width: 560px) {
+  .tab-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0; }
+  .tab-btn { min-width: 0; padding: 10px 6px; letter-spacing: .7px; }
   .stats-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat-card { min-width: 0; }
   .ops-grid { grid-template-columns: 1fr; }
@@ -2205,15 +2232,15 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
   </div>
 </div>
 
-<div class="tab-bar">
-  <button class="tab-btn active" onclick="switchTab('overview',this)">Overview</button>
-  <button class="tab-btn" onclick="switchTab('console',this)">Console</button>
-  <button class="tab-btn" onclick="switchTab('threads',this)">Thread Matrix</button>
-  <button class="tab-btn" onclick="switchTab('neural',this)">Neural Map</button>
+<div class="tab-bar" role="tablist" aria-label="Dashboard views">
+  <button id="tab-button-overview" type="button" role="tab" aria-selected="true" aria-controls="tab-overview" class="tab-btn active" onclick="switchTab('overview',this)">Overview</button>
+  <button id="tab-button-console" type="button" role="tab" aria-selected="false" aria-controls="tab-console" class="tab-btn" onclick="switchTab('console',this)">Console</button>
+  <button id="tab-button-threads" type="button" role="tab" aria-selected="false" aria-controls="tab-threads" class="tab-btn" onclick="switchTab('threads',this)">Thread Matrix</button>
+  <button id="tab-button-neural" type="button" role="tab" aria-selected="false" aria-controls="tab-neural" class="tab-btn" onclick="switchTab('neural',this)">Neural Map</button>
 </div>
 
 <!-- ══════════ OVERVIEW ══════════ -->
-<div class="tab-content active" id="tab-overview">
+<div class="tab-content active" id="tab-overview" role="tabpanel" aria-labelledby="tab-button-overview">
 <div class="overview-grid">
   <div class="stats-bar">
     <div class="stat-card"><div class="stat-label">Online</div><div class="stat-val green" id="sOnline">--</div></div>
@@ -2236,6 +2263,7 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
       <div class="signal-card"><div class="signal-label">Default</div><div class="signal-value" id="defaultModel">--</div><div class="signal-sub" id="brainLatency">--</div></div>
       <div class="signal-card"><div class="signal-label">Headless</div><div class="signal-value" id="headlessModel">--</div><div class="signal-sub" id="headlessMode">--</div></div>
       <div class="signal-card"><div class="signal-label">Voice</div><div class="signal-value" id="voiceHealth">--</div><div class="signal-sub" id="voiceLatency">--</div></div>
+      <div class="signal-card"><div class="signal-label">Live Voice SLO</div><div class="signal-value" id="liveVoiceSlo" aria-live="polite">NO DATA</div><div class="signal-sub" id="liveVoiceLatency">p95 -- · budget --</div></div>
       <div class="signal-card"><div class="signal-label">Codebase</div><div class="signal-value" id="codebaseHealth">--</div><div class="signal-sub" id="codebaseLatency">--</div></div>
     </div>
     <div class="route-list" id="routeList"></div>
@@ -2289,7 +2317,7 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 </div>
 
 <!-- ══════════ CONSOLE ══════════ -->
-<div class="tab-content" id="tab-console">
+<div class="tab-content" id="tab-console" role="tabpanel" aria-labelledby="tab-button-console">
 <div class="console-grid">
   <div class="chat-panel panel">
     <div class="panel-hdr"><span class="panel-title">Weaver Full-Stack Interface</span><span class="panel-badge" id="chatBadge">ready</span></div>
@@ -2330,7 +2358,7 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 </div>
 
 <!-- ══════════ THREAD MATRIX ══════════ -->
-<div class="tab-content" id="tab-threads">
+<div class="tab-content" id="tab-threads" role="tabpanel" aria-labelledby="tab-button-threads">
 <div class="thread-grid">
   <div class="thread-stage" id="threadStage">
     <div id="threadCanvas" class="thread-canvas" role="application" tabindex="0" aria-label="Interactive 3D codebase thread activation matrix"></div>
@@ -2355,7 +2383,7 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 </div>
 
 <!-- ══════════ NEURAL MAP ══════════ -->
-<div class="tab-content" id="tab-neural">
+<div class="tab-content" id="tab-neural" role="tabpanel" aria-labelledby="tab-button-neural">
 <div class="neural-wrap" id="neuralWrap">
   <canvas id="neuralBg"></canvas>
   <canvas id="neuralMain"></canvas>
@@ -2407,13 +2435,30 @@ textarea.chat-input { resize: vertical; min-height: 50px; }
 // ═══════════════════════════════════════════════════════
 
 function switchTab(name, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
-  if (btn) btn.classList.add('active');
+  if (btn) {
+    btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
+  }
   if (name === 'threads') startThreadMatrix();
   if (name === 'neural') { neuralResize(); if (!_neuralRunning) startNeural(); }
 }
+document.querySelector('.tab-bar')?.addEventListener('keydown', event => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const tabs = [...document.querySelectorAll('.tab-btn')];
+  const current = Math.max(0, tabs.indexOf(document.activeElement));
+  const next = event.key === 'Home' ? 0
+    : event.key === 'End' ? tabs.length - 1
+    : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+  event.preventDefault();
+  tabs[next].focus();
+  switchTab(tabs[next].id.replace('tab-button-', ''), tabs[next]);
+});
 
 // ── State ────────────────────────────────────
 let _quantumWeights = [0.5, 0.5, 0.5, 0.5, 0.5];
@@ -2584,6 +2629,8 @@ function updateLobes(lobes) {
 
 function updateBrain(brain, voice, codebase) {
   const routes = Array.isArray(brain.routes) ? brain.routes : [];
+  const slo = brain.voice_slo && typeof brain.voice_slo === 'object' ? brain.voice_slo : {};
+  const prewarm = brain.voice_prewarm && typeof brain.voice_prewarm === 'object' ? brain.voice_prewarm : {};
   setText('sBrain', statusLabel(brain.status));
   setText('brainBadge', `${statusLabel(brain.status)} · ${fmtMs(brain.latency_ms)}`);
   setText('defaultModel', brain.default_model || 'unknown');
@@ -2592,6 +2639,14 @@ function updateBrain(brain, voice, codebase) {
   setText('headlessMode', `${brain.thoughts || 0} thoughts · ${brain.dreams || 0} dreams`);
   setText('voiceHealth', statusLabel(voice.status));
   setText('voiceLatency', `${voice.service || 'trained voice'} · ${fmtMs(voice.latency_ms)}`);
+  setText('liveVoiceSlo', String(slo.status || 'no data').toUpperCase());
+  const sloElement = document.getElementById('liveVoiceSlo');
+  if (sloElement) sloElement.className = `signal-value ${['nominal','watch','breached'].includes(slo.status) ? slo.status : ''}`;
+  const success = Number.isFinite(Number(slo.success_rate)) ? `${Math.round(Number(slo.success_rate) * 100)}% good` : '-- good';
+  const budget = Number.isFinite(Number(slo.error_budget_remaining_pct)) ? `${Math.round(Number(slo.error_budget_remaining_pct))}% budget` : '-- budget';
+  const semanticP95 = fmtMs(slo.semantic_p95_ms);
+  const warm = `${prewarm.status || 'pending'}${Number.isFinite(Number(prewarm.latency_ms)) ? ` ${fmtMs(prewarm.latency_ms)}` : ''}`;
+  setText('liveVoiceLatency', `p95 ${semanticP95} · ${success} · ${budget} · warm ${warm}`);
   setText('codebaseHealth', statusLabel(codebase.status));
   setText('codebaseLatency', `${codebase.service || 'codebase'} · ${fmtMs(codebase.latency_ms)}`);
 
@@ -3107,17 +3162,17 @@ function updateThreadDetail() {
         <div class="thread-detail-stat"><span>Path</span><span title="${esc(selectedFile.path)}">${esc(selectedFile.path)}</span></div>
         <div class="thread-detail-stat"><span>Updated</span><span>${esc(selectedFile.updated || 'unknown')}</span></div>
         <div class="thread-detail-stat"><span>Lines</span><span>${fmtCount(selectedFile.lines)}</span></div>
-        <div class="thread-detail-stat"><span>Size</span><span>${fmtCount(selectedFile.size)}b</span></div>
+        <div class="thread-detail-stat"><span>Size</span><span>${selectedFile.size_kb == null ? `${fmtCount(selectedFile.size)}b` : `${esc(selectedFile.size_kb)} KB`}</span></div>
       </div>
-      ${(selectedFile.symbols || []).length ? `<div class="thread-section-title">File Symbols</div><div class="thread-mini-list">${selectedFile.symbols.slice(0, 10).map(s => `<span class="thread-chip hot">${esc(s.kind || 'symbol')} ${esc(s.name || '')}:${esc(s.line || '')}</span>`).join('')}</div>` : ''}
-      ${(selectedFile.endpoints || []).length ? `<div class="thread-section-title">File Routes</div><div class="thread-mini-list">${selectedFile.endpoints.slice(0, 8).map(e => `<span class="thread-chip good">${esc(e.method || 'route')} ${esc(e.path || e.name || '')}</span>`).join('')}</div>` : ''}
+      ${(selectedFile.symbols || []).length ? `<div class="thread-section-title">File Symbols</div><div class="thread-mini-list">${selectedFile.symbols.slice(0, 10).map(s => `<span class="thread-chip hot">${esc(typeof s === 'string' ? s : `${s.kind || 'symbol'} ${s.name || ''}${s.line ? `:${s.line}` : ''}`)}</span>`).join('')}</div>` : ''}
+      ${(selectedFile.endpoints || []).length ? `<div class="thread-section-title">File Routes</div><div class="thread-mini-list">${selectedFile.endpoints.slice(0, 8).map(e => `<span class="thread-chip good">${esc(typeof e === 'string' ? e : `${e.method || 'route'} ${e.path || e.name || ''}`)}</span>`).join('')}</div>` : ''}
       ${(selectedFile.imports || []).length || (selectedFile.selectors || []).length ? `<div class="thread-section-title">File Dependencies</div><div class="thread-mini-list">${[...(selectedFile.imports || []), ...(selectedFile.selectors || [])].slice(0, 12).map(v => `<span class="thread-chip">${esc(v)}</span>`).join('')}</div>` : ''}
     ` : `
       <div class="thread-section-title">Newest File</div>
       <div class="thread-mini-list"><span class="thread-chip hot" title="${esc(thread.newest_file || '')}">${esc(thread.newest_file || 'unknown')}</span></div>
     `}
-    ${endpoints.length ? `<div class="thread-section-title">Thread Routes</div><div class="thread-mini-list">${endpoints.slice(0, 10).map(e => `<span class="thread-chip good">${esc(e.method || 'route')} ${esc(e.path || e.name || '')}</span>`).join('')}</div>` : ''}
-    ${symbols.length ? `<div class="thread-section-title">Top Symbols</div><div class="thread-mini-list">${symbols.slice(0, 12).map(s => `<span class="thread-chip hot">${esc(s.kind || 'symbol')} ${esc(s.name || '')}</span>`).join('')}</div>` : ''}
+    ${endpoints.length ? `<div class="thread-section-title">Thread Routes</div><div class="thread-mini-list">${endpoints.slice(0, 10).map(e => `<span class="thread-chip good">${esc(typeof e === 'string' ? e : `${e.method || 'route'} ${e.path || e.name || ''}`)}</span>`).join('')}</div>` : ''}
+    ${symbols.length ? `<div class="thread-section-title">Top Symbols</div><div class="thread-mini-list">${symbols.slice(0, 12).map(s => `<span class="thread-chip hot">${esc(typeof s === 'string' ? s : `${s.kind || 'symbol'} ${s.name || ''}`)}</span>`).join('')}</div>` : ''}
     ${(imports.length || selectors.length) ? `<div class="thread-section-title">Imports / Selectors</div><div class="thread-mini-list">${[...imports, ...selectors].slice(0, 14).map(v => `<span class="thread-chip">${esc(v)}</span>`).join('')}</div>` : ''}
     ${events.length ? `<div class="thread-section-title">Recent Topic Energy</div><div class="thread-mini-list">${events.map(e => `<span class="thread-chip warn" title="${esc(e.payload || '')}">${esc(e.from || 'bus')}:${esc(e.topic || '')}</span>`).join('')}</div>` : ''}
     <div class="thread-section-title">Clickable Source Dots</div>

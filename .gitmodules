@@ -1,0 +1,3 @@
+[submodule "ios/WeaverNeural"]
+	path = ios/WeaverNeural
+	url = https://github.com/ydngemini/weaver-neural-ios.git

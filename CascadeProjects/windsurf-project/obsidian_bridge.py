@@ -11,7 +11,7 @@ Watcher (Obsidian → Weaver):
 
 Writer (Weaver → Obsidian):
     Runs a local HTTP server (port 5679) that catches outgoing webhooks
-    from n8n.  When Weaver replies, the collapsed response is appended
+    from approved clients. When Weaver replies, its manifested response is appended
     to the originating .md file under '### 👁️ Weaver's Resonance'.
 
 Synaptic Linking:
@@ -23,7 +23,7 @@ Usage:
 
 Config:
     VAULT_PATH          ~/Weaver_Vault
-    N8N_WEBHOOK_URL     http://localhost:5678/webhook-test/weaver-input
+    N8N_WEBHOOK_URL     http://localhost:5678/webhook/weaver-input
     LISTENER_PORT       5679  (Weaver response receiver)
 """
 
@@ -49,8 +49,10 @@ NEXUS_TOPICS = ["quantum_state", "gate_decision", "lobe_status", "transcript", "
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-VAULT_PATH = os.path.expanduser("~/Weaver_Vault")
-N8N_WEBHOOK_URL = "http://localhost:5678/webhook/weaver-input"
+VAULT_PATH = os.path.expanduser(os.environ.get("VAULT_PATH", "~/Weaver_Vault"))
+N8N_WEBHOOK_URL = os.environ.get(
+    "N8N_WEBHOOK_URL", "http://localhost:5678/webhook/weaver-input"
+).strip()
 LISTENER_HOST = os.environ.get("OBSIDIAN_LISTENER_HOST", os.environ.get("WEAVER_INTERNAL_HOST", "127.0.0.1"))
 LISTENER_PORT = 5679
 
@@ -371,7 +373,7 @@ async def _send_to_n8n(text: str, source_path: str):
 # ── Writer: Weaver → Obsidian ─────────────────────────────────────────────────
 
 async def _handle_weaver_response(request: web.Request) -> web.Response:
-    """Receive Weaver's collapsed response from n8n and write it to the vault."""
+    """Receive Weaver's manifested response and write it to the vault."""
     try:
         data = await request.json()
     except Exception:

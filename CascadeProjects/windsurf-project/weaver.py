@@ -655,7 +655,12 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     if lora_main is not None:
         async def _run_lora():
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lora_main)
+            try:
+                await loop.run_in_executor(None, lora_main)
+            except asyncio.CancelledError:
+                from lora_server import shutdown_server
+                shutdown_server()
+                raise
         tasks.append(asyncio.create_task(
             _supervised(_run_lora, "LoRA Soul Voice", restart_on_crash=True,
                         restart_delay=10.0),
@@ -669,7 +674,12 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
     if qwen3b_main is not None:
         async def _run_qwen3b():
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, qwen3b_main)
+            try:
+                await loop.run_in_executor(None, qwen3b_main)
+            except asyncio.CancelledError:
+                from qwen3b_server import shutdown_server
+                shutdown_server()
+                raise
         tasks.append(asyncio.create_task(
             _supervised(_run_qwen3b, "Qwen2 3B", restart_on_crash=True,
                         restart_delay=10.0),
@@ -818,7 +828,22 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         for t in tasks:
             if not t.done():
                 t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        shutdown_timeout = max(
+            1.0,
+            min(float(os.environ.get("WEAVER_SHUTDOWN_TIMEOUT_SECONDS", "12")), 18.0),
+        )
+        done, pending = (
+            await asyncio.wait(tasks, timeout=shutdown_timeout)
+            if tasks else (set(), set())
+        )
+        for task in done:
+            if not task.cancelled():
+                task.exception()
+        if pending:
+            names = ", ".join(sorted(task.get_name() for task in pending))
+            print(f"[WEAVER] Shutdown deadline reached; abandoning: {names}", flush=True)
+            for task in pending:
+                task.cancel()
 
         # Persist Akashic Hub state to disk for crash recovery
         if akashic_hub is not None:
@@ -834,14 +859,14 @@ async def main(heartbeat: bool = False, headless: bool = False) -> None:
         print("[WEAVER] All systems offline. Goodbye.", flush=True)
 
 
-def _setup_signal_handlers(loop):
+def _setup_signal_handlers(loop, main_task):
     """Register graceful shutdown on SIGTERM and SIGINT."""
     import signal
 
     def _handle_signal(sig):
         print(f"\n[WEAVER] Received {signal.Signals(sig).name} — initiating graceful shutdown...", flush=True)
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
+        if not main_task.done():
+            main_task.cancel()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
@@ -872,8 +897,12 @@ if __name__ == "__main__":
 
     try:
         loop = asyncio.new_event_loop()
-        _setup_signal_handlers(loop)
-        loop.run_until_complete(main(heartbeat=args.heartbeat, headless=args.headless))
+        main_task = loop.create_task(
+            main(heartbeat=args.heartbeat, headless=args.headless),
+            name="weaver_main",
+        )
+        _setup_signal_handlers(loop, main_task)
+        loop.run_until_complete(main_task)
     except KeyboardInterrupt:
         print("\n[WEAVER] Interrupted — killing audio processes.")
     finally:

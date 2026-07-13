@@ -57,16 +57,44 @@ services:
 
   # ── n8n Workflow Engine ────────────────────────────────────
   n8n:
-    image: docker.n8n.io/n8nio/n8n:2.28.5
+    image: docker.n8n.io/n8nio/n8n:2.25.7@sha256:761374d4eb841b0a22771d6bd68f0e8d827b4979ae4e490045517b13fc1259dd
     container_name: weaver-n8n
     environment:
       - N8N_HOST=0.0.0.0
+      - N8N_LISTEN_ADDRESS=0.0.0.0
       - N8N_PORT=5678
       - WEBHOOK_URL=http://n8n:5678/
+      - N8N_RUNNERS_BROKER_PORT=5680
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_RUNNERS_MODE=internal
+      - N8N_RUNNERS_MAX_CONCURRENCY=5
+      - N8N_RUNNERS_TASK_TIMEOUT=120
+      - N8N_RUNNERS_TASK_REQUEST_TIMEOUT=30
+      - N8N_RUNNERS_INSECURE_MODE=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
+      - N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=true
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_SECURE_COOKIE=false
+      - GENERIC_TIMEZONE=America/New_York
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+      - /home/node/.cache:rw,noexec,nosuid,nodev,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2.0
     restart: unless-stopped
 
   # ── ngrok Tunnel (Twilio webhook) ──────────────────────────

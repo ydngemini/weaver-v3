@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-stress_tests_v5.py — Weaver v5 Soul-Binding Stress Tests
+stress_tests_v5.py — Weaver v6 Soul-Binding Compatibility Stress Tests
 =========================================================
 20 tests targeting every change introduced by the non-binary pentagon-geometry
 soul-binding update:
@@ -23,7 +23,7 @@ soul-binding update:
   T16 Nexus 50-message flood — cache trims to 10
   T17 Nexus 10-subscriber fan-out
   T18 Nexus round-trip latency (p99 < 150 ms)
-  T19 n8n v5 workflow schema — all soul-binding fields present
+  T19 n8n v6 workflow schema — parallel cognition and privacy contract
   T20 LiquidFractureEngine 50-input stress — no NaN, valid weights
 """
 
@@ -40,7 +40,8 @@ import time
 
 import numpy as np
 
-PROJ = os.path.dirname(os.path.abspath(__file__))
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(TEST_DIR)
 VENV = os.path.join(PROJ, "venv", "bin", "python3")
 sys.path.insert(0, PROJ)
 
@@ -913,10 +914,10 @@ async def test_T18():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# T19 — n8n v5 workflow schema: all soul-binding fields present
+# T19 — n8n v6 workflow schema: parallel cognition and privacy contract
 # ═════════════════════════════════════════════════════════════════════════════
 async def test_T19():
-    _header("T19", "n8n v5 workflow schema — all soul-binding fields present")
+    _header("T19", "n8n v6 workflow schema — parallel cognition and privacy contract")
     wf_path = os.path.join(PROJ, "n8n_weaver_v5.json")
 
     with open(wf_path, encoding="utf-8") as fh:
@@ -952,33 +953,56 @@ async def test_T19():
         if not ok:
             failures.append(f"Collapse missing: {desc}")
 
-    # LoRA Voice: top_p, non-binary soul prompt
+    # LoRA Voice: bounded style-only lead-in with no private context.
     lora_body = nodes.get("8. LoRA Voice", {}).get("parameters", {}).get("jsonBody", "")
     checks_lora = {
         "top_p":       "top_p" in lora_body,
-        "0.95":        "0.95" in lora_body,
-        "non-binary":  "non-binary" in lora_body,
-        "quantum_pathway in lora": "quantum_pathway" in lora_body,
+        "top_p 0.9":   "top_p: 0.9" in lora_body,
+        "14-token cap": "max_tokens: 14" in lora_body,
+        "style-only guard": "Include no facts" in lora_body,
+        "no raw prompt": "raw_input" not in lora_body and "collapsed_response" not in lora_body,
     }
     for desc, ok in checks_lora.items():
         if not ok:
             failures.append(f"LoRA Voice missing: {desc}")
 
-    # Writeback: qubit_layout and soul_binding
+    # Writeback: bounded public response, cognition metadata, and v6 identity.
     wb_code = nodes.get("9. Writeback", {}).get("parameters", {}).get("jsCode", "")
     checks_wb = {
         "qubit_layout":      "qubit_layout" in wb_code,
         "quantum_pathway":   "quantum_pathway" in wb_code,
         "soul_binding":      "soul_binding" in wb_code,
         "smoothing_factor":  "smoothing_factor" in wb_code,
-        "v5-soul-binding":   "v5-soul-binding" in wb_code,
+        "v6 identity":       "v6-parallel-cognition" in wb_code,
+        "parallel topology": "parallel-fanout-barrier" in wb_code,
+        "cognition mesh":    "cognition_mesh_active" in wb_code,
+        "truthful writeback": "written_to_hub: false" in wb_code,
+        "no prompt echo":    "original_input:" not in wb_code and "raw_input:" not in wb_code,
     }
     for desc, ok in checks_wb.items():
         if not ok:
             failures.append(f"Writeback missing: {desc}")
 
-    # Tags
-    required_tags = {"non-binary", "soul-binding", "pentagon-geometry", "probability-field"}
+    # Parallel fanout/barrier topology and release tags.
+    parallel_nodes = {
+        "5. Expert Fanout",
+        "5f. Expert Barrier",
+        "5g. Expert Assembly",
+        "8c. Local Barrier",
+    }
+    missing_parallel_nodes = parallel_nodes - set(nodes)
+    if missing_parallel_nodes:
+        failures.append(f"Missing parallel nodes: {missing_parallel_nodes}")
+
+    required_tags = {
+        "non-binary",
+        "soul-binding",
+        "pentagon-geometry",
+        "probability-field",
+        "parallel-fanout",
+        "cognition-mesh",
+        "v6",
+    }
     missing_tags = required_tags - tag_names
     if missing_tags:
         failures.append(f"Missing tags: {missing_tags}")
@@ -989,10 +1013,11 @@ async def test_T19():
         f"  Collapse checks:      {sum(checks_col.values())}/{len(checks_col)}",
         f"  LoRA Voice checks:    {sum(checks_lora.values())}/{len(checks_lora)}",
         f"  Writeback checks:     {sum(checks_wb.values())}/{len(checks_wb)}",
+        f"  Parallel nodes:       {len(parallel_nodes - missing_parallel_nodes)}/{len(parallel_nodes)}",
         f"  Tags present:         {required_tags - missing_tags}",
         f"  Failures:             {failures or 'none'}",
     ])
-    _result("T19", "n8n v5 workflow schema", passed, detail)
+    _result("T19", "n8n v6 workflow schema", passed, detail)
     return passed
 
 
@@ -1090,7 +1115,7 @@ STRESS_TESTS = {
     "T16": ("Nexus 50-message flood — cache trims to last 10",               test_T16),
     "T17": ("Nexus 10-subscriber fan-out",                                   test_T17),
     "T18": ("Nexus round-trip latency — p99 < 150 ms",                      test_T18),
-    "T19": ("n8n v5 workflow schema — all soul-binding fields present",      test_T19),
+    "T19": ("n8n v6 workflow schema — parallel cognition and privacy",       test_T19),
     "T20": ("LiquidFractureEngine 50-input stress — no NaN, valid weights",  test_T20),
 }
 
@@ -1111,7 +1136,7 @@ async def main(which: str = "all"):
     elapsed = time.monotonic() - wall_start
     W = "═" * 64
     print(f"\n{W}")
-    print(f"  WEAVER v5 SOUL-BINDING STRESS TEST RESULTS  ({elapsed:.1f}s)")
+    print(f"  WEAVER v6 SOUL-BINDING COMPATIBILITY RESULTS  ({elapsed:.1f}s)")
     print(W)
     for label, (title, _) in STRESS_TESTS.items():
         if label in results:
