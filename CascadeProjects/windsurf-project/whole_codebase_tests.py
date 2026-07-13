@@ -1080,6 +1080,25 @@ async def test_AA():
         and "unsafeSyntax" in dual_merge
     )
     writeback_grounded = "codebase_grounded" in nodes["9. Writeback"]["parameters"]["jsCode"]
+    speaker_body = nodes["7. Self-Reflect"]["parameters"]["jsonBody"]
+    speaker_tag = nodes["7-tag"]["parameters"]["jsCode"]
+    writeback_code = nodes["9. Writeback"]["parameters"]["jsCode"]
+    public_speaker_bounded = all(marker in speaker_body for marker in (
+        "qwen.qwen3-235b-a22b-2507",
+        "sole user-facing conversational speaker",
+        "Never identify as a coder",
+        "Return only Weaver's final answer",
+    )) and all(marker in speaker_tag for marker in (
+        "speaker_boundary_applied: !!reviewed",
+        "internal_draft_hidden: true",
+    )) and all(marker in writeback_code for marker in (
+        "speaker_boundary_applied: !!d.speaker_boundary_applied",
+        "internal_draft_hidden: d.internal_draft_hidden === true",
+    ))
+    private_draft_fail_closed = (
+        "No codebase evidence was supplied." not in serialized
+        and "d.collapsed_response ||" not in writeback_code
+    )
     no_stale_repo_path = "/media/ydn/SYPHER_CORE/weaver v3" not in serialized
 
     voice_source = inspect.getsource(brain.realtime_voice)
@@ -1102,6 +1121,8 @@ async def test_AA():
         request_bodies_safe,
         lora_preserves_review,
         writeback_grounded,
+        public_speaker_bounded,
+        private_draft_fail_closed,
         no_stale_repo_path,
         voice_unified,
         frontend_unified,
@@ -1112,6 +1133,8 @@ async def test_AA():
         f"  Dynamic HTTP bodies remain valid JSON: {request_bodies_safe}",
         f"  LoRA lead-in preserves reviewed facts: {lora_preserves_review}",
         f"  Writeback reports grounding:          {writeback_grounded}",
+        f"  Qwen brain is the sole public speaker: {public_speaker_bounded}",
+        f"  Private drafts fail closed:            {private_draft_fail_closed}",
         f"  Stale workstation path removed:       {no_stale_repo_path}",
         f"  Realtime transcript enters cortex:    {voice_unified}",
         f"  Browser speaks cortex response once:  {frontend_unified}",
@@ -3432,6 +3455,216 @@ async def test_AN():
     return passed
 
 
+async def test_AO():
+    _header("AO", "Only Weaver speaks while the coder stays private")
+    import httpx
+    import bedrock_brain_api as brain
+
+    routing_cases = {
+        "Are you the coder model?": False,
+        "Can we have a normal conversation about music?": False,
+        "Can we talk about the history of Python?": False,
+        "What would you like to do in the penthouse?": False,
+        "Fix the bug in bedrock_brain_api.py": True,
+        "Review this function and refactor the code": True,
+        "Deploy": True,
+        "Traceback (most recent call last): ValueError": True,
+    }
+    strict_intent_routing = all(
+        brain._is_explicit_code_turn(prompt) is expected
+        for prompt, expected in routing_cases.items()
+    ) and brain._specialist_for_turn([
+        {"role": "user", "content": "Are you the coder model?"}
+    ]) == "weaver-brain"
+
+    leaked_responses = (
+        "I am Weaver, a multi-lobe AI system. My logic lobe is active.",
+        "Without access to codebase evidence, I cannot determine a valid penthouse action.",
+        "I cannot have a normal conversation about music; the system's core functionality contradicts this.",
+        "q0·Logic expert response and q2·Memory expert output agree.",
+    )
+    leak_detector = all(
+        brain._public_speaker_violations("Let's talk normally.", response)
+        for response in leaked_responses
+    ) and not brain._public_speaker_violations(
+        "Tell me who you are.",
+        "I'm Weaver. I'm here, present, and happy to talk with you about whatever is on your mind.",
+    )
+
+    names = (
+        "_n8n_moe_chat", "_codebase_context_for_turn", "_state_summary",
+        "_bedrock_chat", "_record_state", "_persist_memory_event",
+    )
+    originals = {name: getattr(brain, name) for name in names}
+    n8n_calls = 0
+    model_calls = []
+
+    async def empty_context(_messages, _user_text):
+        return ""
+
+    async def state_summary(_query):
+        return "private test state"
+
+    async def unsafe_n8n(_user_text, _context=""):
+        nonlocal n8n_calls
+        n8n_calls += 1
+        return (
+            "I cannot have a normal conversation about music. The system's core functionality is code review.",
+            {
+                "latency_ms": 1,
+                "usage": {},
+                "stop_reason": "stop",
+                "route": {
+                    "alias": "weaver-one",
+                    "pipeline": "test",
+                    "speaker_boundary_applied": True,
+                    "speaker_model": brain.PUBLIC_SPEAKER_MODEL,
+                    "internal_draft_hidden": True,
+                },
+            },
+        )
+
+    async def fake_bedrock(route, messages, max_tokens=None, temperature=None):
+        model_calls.append((route.alias, messages[0].get("content", "")))
+        if route.alias == "weaver-speed":
+            text = "private reflex"
+        elif route.alias == "weaver-code":
+            text = "def fixed():\n    return True"
+        else:
+            text = "I'm Weaver. Music sounds like a wonderful place to start—what have you been listening to?"
+        return text, {"latency_ms": 1, "usage": {}, "stop_reason": "stop"}
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    try:
+        brain._n8n_moe_chat = unsafe_n8n
+        brain._codebase_context_for_turn = empty_context
+        brain._state_summary = state_summary
+        brain._bedrock_chat = fake_bedrock
+        brain._record_state = noop
+        brain._persist_memory_event = noop
+
+        conversation_text, conversation_meta = await brain._cortex_chat_inner([
+            {"role": "user", "content": "Can we have a normal conversation about music?"}
+        ])
+        rejected_private_draft = (
+            conversation_text.startswith("I'm Weaver.")
+            and conversation_meta["route"].get("n8n_public_draft_rejected") is True
+            and "conversation-refusal" in conversation_meta["route"].get("n8n_rejection_reasons", [])
+            and [alias for alias, _ in model_calls] == ["weaver-speed", "weaver-brain"]
+        )
+
+        n8n_calls = 0
+        model_calls.clear()
+        code_text, code_meta = await brain._cortex_chat_inner([
+            {"role": "user", "content": "Fix the bug in bedrock_brain_api.py"}
+        ])
+        routed_calls = code_meta["route"].get("calls", [])
+        coder_is_private = (
+            n8n_calls == 0
+            and code_text.startswith("I'm Weaver.")
+            and [alias for alias, _ in model_calls] == ["weaver-speed", "weaver-code", "weaver-brain"]
+            and any(call.get("alias") == "weaver-code" and call.get("silent_specialist") is True for call in routed_calls)
+            and any(call.get("alias") == "weaver-brain" and call.get("speaker") is True for call in routed_calls)
+            and code_meta["route"].get("public_speaker") == "weaver-brain"
+            and brain.PUBLIC_SPEAKER_BOUNDARY in model_calls[-1][1]
+        )
+
+        repair_calls = []
+
+        async def repairing_bedrock(route, messages, max_tokens=None, temperature=None):
+            repair_calls.append(route.alias)
+            if route.alias == "weaver-brain":
+                text = "As an AI coding assistant, I can only assist with coding."
+            elif len(repair_calls) == 1:
+                text = "private reflex"
+            else:
+                text = "I'm Weaver. Yes—we can talk about music naturally."
+            return text, {"latency_ms": 1, "usage": {}, "stop_reason": "stop"}
+
+        brain._bedrock_chat = repairing_bedrock
+        repaired_text, repaired_meta = await brain._cortex_chat_inner([
+            {"role": "user", "content": "Let's talk about music."}
+        ])
+        direct_leak_repaired = (
+            repaired_text.startswith("I'm Weaver.")
+            and repair_calls == ["weaver-speed", "weaver-brain", "weaver-speed"]
+            and repaired_meta["route"].get("speaker_repair_applied") is True
+            and "model-preface" in repaired_meta["route"].get("speaker_repair_reasons", [])
+        )
+    finally:
+        for name, value in originals.items():
+            setattr(brain, name, value)
+
+    old_key = brain.WEAVER_KEY
+    old_cortex = brain._cortex_chat
+    old_direct = brain._chat_direct_alias
+    api_cortex_calls = 0
+    api_direct_calls = 0
+
+    async def api_cortex(_messages, max_tokens=None, temperature=None):
+        nonlocal api_cortex_calls
+        api_cortex_calls += 1
+        return "I'm Weaver, and I'm listening.", {
+            "latency_ms": 1,
+            "usage": {},
+            "stop_reason": "stop",
+            "route": {"alias": "weaver-one", "speaker_boundary_applied": True},
+        }
+
+    async def api_direct(_route, _messages, max_tokens=None, temperature=None):
+        nonlocal api_direct_calls
+        api_direct_calls += 1
+        return "private coder leak", {"latency_ms": 1, "usage": {}}
+
+    try:
+        brain.WEAVER_KEY = "speaker-boundary-test-key"
+        brain._cortex_chat = api_cortex
+        brain._chat_direct_alias = api_direct
+        transport = httpx.ASGITransport(app=brain.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            coder_alias_response = await client.post(
+                "/v1/chat/completions",
+                headers={"X-Weaver-Key": "speaker-boundary-test-key"},
+                json={
+                    "model": "weaver-code",
+                    "messages": [{"role": "user", "content": "Hello Weaver."}],
+                },
+            )
+    finally:
+        brain.WEAVER_KEY = old_key
+        brain._cortex_chat = old_cortex
+        brain._chat_direct_alias = old_direct
+
+    api_alias_bounded = (
+        coder_alias_response.status_code == 200
+        and coder_alias_response.json().get("model") == "weaver-one"
+        and coder_alias_response.json()["choices"][0]["message"]["content"].startswith("I'm Weaver")
+        and api_cortex_calls == 1
+        and api_direct_calls == 0
+    )
+
+    passed = all((
+        strict_intent_routing,
+        leak_detector,
+        rejected_private_draft,
+        coder_is_private,
+        direct_leak_repaired,
+        api_alias_bounded,
+    ))
+    detail = "\n".join([
+        f"  Coder requires explicit programming intent: {strict_intent_routing}",
+        f"  Known production identity leaks detected: {leak_detector}",
+        f"  Unsafe n8n draft is never returned:       {rejected_private_draft}",
+        f"  Coder works silently; Weaver answers:     {coder_is_private}",
+        f"  Direct-model identity leak is rewritten:   {direct_leak_repaired}",
+        f"  Public coder alias cannot bypass Weaver:   {api_alias_bounded}",
+    ])
+    _result("AO", "Only Weaver speaks while the coder stays private", passed, detail)
+    return passed
+
+
 TESTS = {
     "G": ("Quantum parse invariants", test_G),
     "H": ("Quantum description + state write persistence", test_H),
@@ -3467,6 +3700,7 @@ TESTS = {
     "AL": ("High-fidelity original avatar LOD, physical scan maps, and safe runtime fallback", test_AL),
     "AM": ("iPhone 16e A18 adaptive mobile performance without embodiment loss", test_AM),
     "AN": ("Resilient visual boot, seamless clothing, and compositor-safe headless controls", test_AN),
+    "AO": ("Only Weaver speaks while the coder stays private", test_AO),
 }
 
 
@@ -3494,6 +3728,6 @@ async def main(which: str):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("test", nargs="?", default="all", help="G-AN or all")
+    ap.add_argument("test", nargs="?", default="all", help="G-AO or all")
     args = ap.parse_args()
     raise SystemExit(0 if asyncio.run(main(args.test)) else 1)

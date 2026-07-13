@@ -154,6 +154,10 @@ Notable model aliases include `weaver-speed`, `weaver-brain`, `weaver-dream`,
 `weaver-code`, `weaver-vision`, `weaver-headless`, `weaver-voice`, and
 `weaver-one` for the unified route.
 
+`weaver-code` is a private capability alias, not a separate public persona.
+Requests to it enter the unified cortex: explicit programming work is handled
+silently by the coder, then `weaver-brain` speaks the user-facing response.
+
 ## Voice And Audio
 
 The current non-OpenAI server-side voice path is AWS-first:

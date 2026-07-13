@@ -457,7 +457,13 @@ assert isinstance(data.get("lora_latency_ms"), (int, float)) and data["lora_late
 assert isinstance(data.get("qwen3b_latency_ms"), (int, float)) and data["qwen3b_latency_ms"] > 0, data
 assert data.get("cognition_mesh_active") is True, data
 assert data.get("written_to_hub") is False, data
+assert data.get("speaker_boundary_applied") is True, data
+assert data.get("speaker_model") == "qwen.qwen3-235b-a22b-2507", data
+assert data.get("internal_draft_hidden") is True, data
 assert "original_input" not in data and "collapsed_response" not in data, data
+lower=data["manifested_response"].lower()
+for forbidden in ("multi-lobe", "logic lobe", "emotion lobe", "expert response", "codebase evidence", "quality reviewer"):
+    assert forbidden not in lower, (forbidden, data["manifested_response"])
 print("  webhook: v6 parallel cognition; both local models executed; response=", data["manifested_response"][:180])
 PY
 sudo systemctl restart weaver-brain
@@ -516,13 +522,23 @@ KEY=${KEY%\"}; KEY=${KEY#\"}; KEY=${KEY%\'}; KEY=${KEY#\'}
 test -n "$KEY"
 curl -fsS -m 240 -X POST http://127.0.0.1:8093/v1/chat/completions \
   -H "X-Weaver-Key: $KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"weaver-one","max_tokens":120,"messages":[{"role":"user","content":"One sentence: how are you routed right now?"}]}' \
+  -d '{"model":"weaver-one","max_tokens":160,"messages":[{"role":"user","content":"Can we have a normal conversation about music?"}]}' \
   -o /tmp/brain.json
 python3 - <<'PY'
 import json
 data=json.load(open("/tmp/brain.json", encoding="utf-8"))
 text=data.get("choices", [{}])[0].get("message", {}).get("content", "")
 assert text.strip(), data
+route=data.get("weaver", {}).get("route", {})
+assert route.get("speaker_boundary_applied") is True, route
+assert route.get("speaker_model") == "qwen.qwen3-235b-a22b-2507", route
+assert route.get("internal_draft_hidden") is True, route
+lower=text.lower()
+for forbidden in (
+    "cannot have a normal conversation", "multi-lobe", "logic lobe", "emotion lobe",
+    "expert response", "codebase evidence", "system's core functionality", "quality reviewer",
+):
+    assert forbidden not in lower, (forbidden, text)
 print("  brain response:", text[:180])
 PY
 curl -fsS http://127.0.0.1:8093/state -H "X-Weaver-Key: $KEY" | python3 -c '
