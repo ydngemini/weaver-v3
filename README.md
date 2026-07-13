@@ -154,8 +154,9 @@ privacy invariants, and latency budgets before import or deployment.
   frequencies; amplitudes are clamped to anatomical limits.
 - Texture-preserving skin, woven plum fabric with a close-tailored layered skirt,
   deterministic pore microdetail, wet-cornea eye response, softened portrait
-  lighting, pleated cloth normals, and 18/30-strand tapered gravity-constrained
-  micro-braid profiles for low-power/full-quality devices.
+  lighting, pleated cloth normals, and 18/24/26/30-strand tapered
+  gravity-constrained micro-braid profiles across performance, iPhone 16e,
+  lite, and full-quality tiers.
 - Full, medium, and portrait camera framing presets. Voice playback blends to a
   conversation shot so small eye and lip motion remains legible, then returns to
   full-body/environment framing.
@@ -165,11 +166,20 @@ privacy invariants, and latency budgets before import or deployment.
   preserving all 168 nodes, 163 rig bones, skin weights, UV seams, and animation
   accessors. The same build derives UV-aligned 2K normal, roughness, and specular
   maps from Weaver's own skin texture.
-- Desktop rendering automatically selects `weaver_avatar_dress_hifi.glb`, three
-  physical skin maps, PMREM studio image-based lighting, and two layered corneal
-  shells. Coarse-pointer, memory-constrained, and software-rendered devices keep
-  the standard LOD; `?avatar=hifi` and `?avatar=standard` provide deterministic
-  operator overrides.
+- Desktop and iPhone 16e-class rendering automatically select
+  `weaver_avatar_dress_hifi.glb`, three physical skin maps, PMREM studio
+  image-based lighting, and two layered corneal shells when hardware rendering
+  and the network policy allow it. Data-saver, constrained, and
+  software-rendered devices keep the standard LOD; `?avatar=hifi` and
+  `?avatar=standard` provide deterministic operator overrides.
+- The iPhone 16e A18 tier targets 60 fps for touch, body control, face, and
+  camera response at a bounded 1.25 pixel ratio. Environment shaders and
+  gravity-hair constraints run at 30 Hz, startup stalls are excluded from the
+  thermal governor, and dynamic resolution is reduced before body cadence.
+  Safe-area layout, `100dvh`, debounced `visualViewport` resizing, hidden-page
+  suspension, and WebGL context recovery are built in. Inspect the live policy
+  with `__weaverMobilePerformanceAudit()`; `?device=iphone16e` is a deterministic
+  test override for Safari emulation.
 - Twenty stateful penthouse interactions across 72 indexed environment objects;
   navigation and interaction outcomes feed body/environment awareness.
 - Private internal thoughts/daydreams that update evolution memory, motion, and self-state without speaking aloud.
@@ -185,6 +195,9 @@ the browser contracts and verifies the required deformation bones directly from
 the local GLB with `cd CascadeProjects/windsurf-project && venv/bin/python3 whole_codebase_tests.py AK`.
 High-fidelity geometry, skin weights, PBR maps, LOD selection, and deployment
 checks are covered by the adjacent `AL` test.
+The iPhone 16e device profile, split scheduling, dynamic-resolution ordering,
+Safari lifecycle behavior, and full-body-per-frame contract are covered by
+test `AM`.
 
 Rebuild the original high-fidelity asset and material maps with:
 

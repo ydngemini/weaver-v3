@@ -3,14 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <title>Weaver — She Sees You</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <link rel="icon" href="weaver-logo.svg" type="image/svg+xml" />
 <style>
   :root { --gold: #e6b84a; color-scheme: dark; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overscroll-behavior: none; }
   body { background: #07080c; color: #e8e6e0; font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
-  #stage { position: fixed; inset: 0; overflow: hidden; background: #07080c; }
-  #stage canvas { position: absolute; inset: 0; z-index: 1; display: block; }
+  #stage { position: fixed; inset: 0; width: 100vw; height: 100dvh; overflow: hidden; background: #07080c; contain: strict; }
+  #stage canvas { position: absolute; inset: 0; z-index: 1; display: block; touch-action: none; }
   #gpu-render-stream {
     position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%;
     object-fit: cover; display: none; opacity: 1;
@@ -68,8 +69,33 @@
   #facebox { position: fixed; border: 1.5px solid var(--gold); border-radius: 8px; z-index: 11;
              pointer-events: none; display: none; opacity: .8; }
   @media (max-width: 720px) {
-    .hud { left: 12px; top: 12px; padding: 12px 14px; }
-    #cam { width: 142px; right: 12px; bottom: 12px; }
+    #stage::after {
+      background: radial-gradient(circle at 50% 48%, transparent 42%, rgba(0,0,0,0.22) 100%);
+      mix-blend-mode: normal; opacity: 0.38;
+    }
+    .hud {
+      left: max(10px, env(safe-area-inset-left));
+      top: max(10px, env(safe-area-inset-top));
+      max-width: min(350px, calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+      padding: 10px 12px; border-radius: 12px;
+      background: rgba(12,14,20,0.88); backdrop-filter: none;
+      contain: layout paint;
+    }
+    .hud h1 { font-size: 12px; letter-spacing: 2.4px; }
+    .row { gap: 7px; margin-top: 6px; font-size: 12px; }
+    #heard, #said { margin-top: 7px; font-size: 12px; line-height: 1.35; }
+    #cam {
+      width: 118px;
+      right: max(10px, env(safe-area-inset-right));
+      bottom: max(10px, env(safe-area-inset-bottom));
+      border-radius: 10px;
+    }
+    #start.awake {
+      top: max(10px, env(safe-area-inset-top));
+      right: max(10px, env(safe-area-inset-right));
+    }
+    #start button { min-width: 56px; min-height: 56px; touch-action: manipulation; }
+    #start.awake button { min-height: 44px; padding: 9px 16px; }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
@@ -383,6 +409,35 @@ function evolveFromDream(dream) {
 const params = new URLSearchParams(location.search);
 const qualityParam = params.get('quality');
 const savedQuality = qualityParam || localStorage.getItem('weaver_quality') || 'auto';
+const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const coarsePointer = matchMedia('(pointer: coarse)').matches;
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const displayDpr = Math.max(1, Number(devicePixelRatio) || 1);
+const displayShortCss = Math.min(screen.width || innerWidth, screen.height || innerHeight);
+const displayLongCss = Math.max(screen.width || innerWidth, screen.height || innerHeight);
+const displayShortNative = Math.round(displayShortCss * displayDpr);
+const displayLongNative = Math.round(displayLongCss * displayDpr);
+const explicitIPhone16e = String(params.get('device') || '').toLowerCase() === 'iphone16e';
+const iphone16ePanelClass = isiOS && displayDpr >= 2.75 && (
+  (Math.abs(displayShortCss - 390) <= 3 && Math.abs(displayLongCss - 844) <= 5) ||
+  (Math.abs(displayShortNative - 1170) <= 12 && Math.abs(displayLongNative - 2532) <= 18)
+);
+const iphone16eClass = explicitIPhone16e || iphone16ePanelClass;
+const connectionInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
+const deviceProfile = Object.freeze({
+  name: iphone16eClass ? 'iphone-16e-a18-class' : (isiOS ? 'ios-adaptive' : (coarsePointer ? 'mobile-adaptive' : 'desktop')),
+  isiOS,
+  iphone16eClass,
+  explicitIPhone16e,
+  displayCss: [displayShortCss, displayLongCss],
+  displayNative: [displayShortNative, displayLongNative],
+  dpr: displayDpr,
+  cores: Number(navigator.hardwareConcurrency) || null,
+  memoryGb: Number(navigator.deviceMemory) || null,
+  saveData: Boolean(connectionInfo?.saveData),
+  effectiveType: String(connectionInfo?.effectiveType || 'unknown')
+});
 const BOOT_MARKER_KEY = 'weaver_scene_booting_v2';
 let priorBootIssue = false;
 try {
@@ -392,43 +447,60 @@ try {
 } catch (e) {}
 const lowPowerDevice = (
   priorBootIssue ||
-  matchMedia('(pointer: coarse)').matches ||
-  matchMedia('(prefers-reduced-motion: reduce)').matches ||
-  (navigator.deviceMemory && navigator.deviceMemory <= 8) ||
-  (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 8) ||
-  (innerWidth * innerHeight > 2600000) ||
-  innerWidth < 760
+  reducedMotion ||
+  (!iphone16eClass && (
+    coarsePointer ||
+    (navigator.deviceMemory && navigator.deviceMemory <= 8) ||
+    (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 8) ||
+    (innerWidth * innerHeight > 2600000) ||
+    innerWidth < 760
+  ))
 );
 function resolveQuality(mode) {
-  const selected = mode === 'auto' ? (lowPowerDevice ? 'performance' : 'lite') : mode;
+  const selected = mode === 'auto'
+    ? (iphone16eClass && !reducedMotion ? 'iphone16e' : (lowPowerDevice ? 'performance' : 'lite'))
+    : mode;
   const presets = {
     performance: {
       name: 'performance', fps: 60, frameCap: 45, pixelRatio: 0.66, minPixelRatio: 0.55,
       antialias: false, shadows: false, heavyGpu: false,
       shadowScale: 0.28, faceInterval: 560, webcamWidth: 280, webcamFps: 10,
       cityWidth: 480, cityHeight: 144, cityWindows: 260, reflectionSplats: 32,
-      cityUpdateMs: 1100, captureFps: 24, captureBitrate: 4200000
+      cityUpdateMs: 1100, captureFps: 24, captureBitrate: 4200000,
+      environmentFps: 24, secondaryFps: 24, hairStrands: 18, hairNodes: 6, hairIterations: 2
+    },
+    iphone16e: {
+      name: 'iphone16e', fps: 60, frameCap: 60, frameFloor: 45,
+      pixelRatio: 1.25, minPixelRatio: 0.78,
+      antialias: false, shadows: false, heavyGpu: true,
+      shadowScale: 0.38, faceInterval: 480, webcamWidth: 320, webcamFps: 12,
+      cityWidth: 640, cityHeight: 192, cityWindows: 480, reflectionSplats: 64,
+      cityUpdateMs: 760, captureFps: 30, captureBitrate: 5200000,
+      environmentFps: 30, secondaryFps: 30, hairStrands: 24, hairNodes: 7, hairIterations: 3
     },
     lite: {
       name: 'lite', fps: 60, frameCap: 60, pixelRatio: 0.78, minPixelRatio: 0.6,
       antialias: false, shadows: false, heavyGpu: true,
       shadowScale: 0.35, faceInterval: 420, webcamWidth: 320, webcamFps: 12,
       cityWidth: 560, cityHeight: 168, cityWindows: 360, reflectionSplats: 48,
-      cityUpdateMs: 900, captureFps: 30, captureBitrate: 5200000
+      cityUpdateMs: 900, captureFps: 30, captureBitrate: 5200000,
+      environmentFps: 45, secondaryFps: 45, hairStrands: 26, hairNodes: 7, hairIterations: 3
     },
     balanced: {
       name: 'balanced', fps: 60, frameCap: 60, pixelRatio: 0.95, minPixelRatio: 0.62,
       antialias: false, shadows: false, heavyGpu: true,
       shadowScale: 0.45, faceInterval: 300, webcamWidth: 420, webcamFps: 15,
       cityWidth: 720, cityHeight: 216, cityWindows: 680, reflectionSplats: 96,
-      cityUpdateMs: 640, captureFps: 30, captureBitrate: 6400000
+      cityUpdateMs: 640, captureFps: 30, captureBitrate: 6400000,
+      environmentFps: 60, secondaryFps: 60, hairStrands: 30, hairNodes: 8, hairIterations: 4
     },
     cinematic: {
       name: 'cinematic', fps: 60, frameCap: 60, pixelRatio: 1.15, minPixelRatio: 0.65,
       antialias: true, shadows: true, heavyGpu: true,
       shadowScale: 0.75, faceInterval: 200, webcamWidth: 560, webcamFps: 18,
       cityWidth: 1040, cityHeight: 312, cityWindows: 1350, reflectionSplats: 220,
-      cityUpdateMs: 360, captureFps: 30, captureBitrate: 7600000
+      cityUpdateMs: 360, captureFps: 30, captureBitrate: 7600000,
+      environmentFps: 60, secondaryFps: 60, hairStrands: 30, hairNodes: 8, hairIterations: 4
     }
   };
   return presets[selected] || presets.lite;
@@ -459,14 +531,31 @@ const renderPerf = {
   softwareRenderer: false,
   localHeavyGpu: Boolean(QUALITY.heavyGpu),
   faceCadenceScale: 1,
-  hairConstraintBudget: 4
+  hairConstraintBudget: QUALITY.hairIterations || 4,
+  environmentFps: QUALITY.environmentFps || QUALITY.frameCap || 60,
+  secondaryFps: QUALITY.secondaryFps || QUALITY.frameCap || 60,
+  lastEnvironmentMs: 0,
+  secondaryAccumulator: 0,
+  pressureStreak: 0,
+  bootLongFrames: 0,
+  dynamicResolutionChanges: 0,
+  renderPixels: 0,
+  thermalTier: 'nominal'
 };
+function minimumPixelScale() {
+  return THREE.MathUtils.clamp(
+    (QUALITY.minPixelRatio || 0.65) / Math.max(QUALITY.pixelRatio || 1, 0.01),
+    0.45,
+    1
+  );
+}
 const OPS_EVENT_LIMIT = 160;
 const OPS_SESSION_KEY = 'weaver_ops_flight_v1';
 const OPS_FIELD_ALLOWLIST = new Set([
   'mode', 'reason', 'fps', 'targetFps', 'pixelScale', 'durationMs', 'longTaskMs',
   'reactionMs', 'semanticMs', 'queueMs', 'cortexMs', 'synthMs', 'firstAudioMs',
-  'cadenceScale', 'hairIterations', 'interaction', 'zone', 'revision', 'success'
+  'cadenceScale', 'hairIterations', 'interaction', 'zone', 'revision', 'success',
+  'profile', 'renderPixels', 'pressureStreak', 'thermalTier'
 ]);
 function safeOpsValue(key, value) {
   if (!OPS_FIELD_ALLOWLIST.has(key)) return undefined;
@@ -587,10 +676,17 @@ function prioritizeVoice(reason = 'live-turn', durationMs = 9000) {
   }, Math.max(0, opsState.voicePriorityUntil - now) + 40);
   renderPerf.degraded = true;
   renderPerf.lastDegradeMs = now;
-  renderPerf.dynamicFps = Math.min(renderPerf.dynamicFps, renderPerf.softwareRenderer ? 24 : 36);
-  renderPerf.pixelScale = Math.max(QUALITY.minPixelRatio || 0.6, Math.min(renderPerf.pixelScale, 0.86));
+  renderPerf.dynamicFps = Math.min(
+    renderPerf.dynamicFps,
+    renderPerf.softwareRenderer ? 24 : (iphone16eClass ? 45 : 36)
+  );
+  renderPerf.pixelScale = Math.max(
+    minimumPixelScale(),
+    Math.min(renderPerf.pixelScale, iphone16eClass ? 0.78 : 0.86)
+  );
   renderPerf.faceCadenceScale = 2.25;
   renderPerf.hairConstraintBudget = 2;
+  renderPerf.thermalTier = 'voice-priority';
   renderer.shadowMap.enabled = false;
   setLocalHeavyGpu(false);
   applyRendererSize();
@@ -605,13 +701,16 @@ function updateOpsController(now = performance.now()) {
     setOpsMode('voice-priority', opsState.reason || 'live-turn');
     return;
   }
-  renderPerf.faceCadenceScale = renderPerf.degraded ? 1.6 : 1;
-  renderPerf.hairConstraintBudget = renderPerf.degraded ? 3 : outfitState.physics.hairConstraintIterations;
+  renderPerf.faceCadenceScale = renderPerf.degraded ? (iphone16eClass ? 1.8 : 1.6) : 1;
+  renderPerf.hairConstraintBudget = renderPerf.degraded
+    ? Math.min(2, outfitState.physics.hairConstraintIterations)
+    : outfitState.physics.hairConstraintIterations;
   setOpsMode(renderPerf.degraded ? 'guarded' : (renderPerf.bootStable ? 'nominal' : 'warming'), renderPerf.degraded ? 'render-pressure' : 'stable');
 }
 function opsAudit() {
   return {
     version: opsState.version,
+    device: { ...deviceProfile },
     mode: opsState.mode,
     reason: opsState.reason,
     modeChanges: opsState.modeChanges,
@@ -625,7 +724,12 @@ function opsAudit() {
       pixelScale: Number(renderPerf.pixelScale.toFixed(3)),
       faceCadenceScale: renderPerf.faceCadenceScale,
       hairConstraintBudget: renderPerf.hairConstraintBudget,
-      degraded: renderPerf.degraded
+      degraded: renderPerf.degraded,
+      renderPixels: renderPerf.renderPixels,
+      pressureStreak: renderPerf.pressureStreak,
+      thermalTier: renderPerf.thermalTier,
+      environmentFps: renderPerf.environmentFps,
+      secondaryFps: renderPerf.secondaryFps
     },
     slo: { ...opsState.slo, turnStartedAt: undefined },
     eventCount: opsState.events.length,
@@ -647,11 +751,10 @@ globalThis.__weaverFlightRecorder = Object.freeze({
 });
 recordOpsEvent('boot', { mode: opsState.mode, reason: 'module-start', targetFps: renderPerf.dynamicFps });
 updateOpsHud();
-const DREAM_MIN_IDLE_MS = lowPowerDevice ? 22000 : 10000;
-const DREAM_INTERVAL_MS = lowPowerDevice ? 70000 : 38000;
-const INNER_THOUGHT_INTERVAL_MS = lowPowerDevice ? 30000 : 16000;
-const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const conservativeBackgroundCadence = lowPowerDevice || isiOS;
+const DREAM_MIN_IDLE_MS = conservativeBackgroundCadence ? 22000 : 10000;
+const DREAM_INTERVAL_MS = conservativeBackgroundCadence ? 70000 : 38000;
+const INNER_THOUGHT_INTERVAL_MS = conservativeBackgroundCadence ? 30000 : 16000;
 const MEDIA_TIMEOUT_MS = isiOS ? 12000 : 8000;
 const MEDIAPIPE_VERSION = '0.10.35';
 const MEDIAPIPE_ROOT = `/vendor/mediapipe/${MEDIAPIPE_VERSION}`;
@@ -661,11 +764,12 @@ const CPU_FACE_MODEL_URL = `${MEDIAPIPE_ROOT}/blaze_face_short_range.tflite`;
 const PREFERRED_FACE_DELEGATE = String(
   params.get('faceDelegate') || (isiOS ? 'GPU' : 'CPU')
 ).toUpperCase() === 'GPU' ? 'GPU' : 'CPU';
-const GPU_FACE_INTERVAL_MS = 90;
+const GPU_FACE_INTERVAL_MS = iphone16eClass ? 125 : 90;
 const CPU_FACE_INTERVAL_MS = isiOS
   ? 240
   : Math.max(180, Math.min(QUALITY.faceInterval, 320));
 globalThis.__weaverQuality = QUALITY;
+globalThis.__weaverDeviceProfile = deviceProfile;
 globalThis.__weaverSetQuality = (mode) => {
   localStorage.setItem('weaver_quality', mode);
   location.reload();
@@ -726,9 +830,15 @@ const rendererSizing = { width: 0, height: 0, pixelRatio: 0 };
 function targetPixelRatio() {
   return Math.max(QUALITY.minPixelRatio || 0.65, Math.min(devicePixelRatio || 1, QUALITY.pixelRatio) * renderPerf.pixelScale);
 }
+function viewportRenderSize() {
+  const rect = stage.getBoundingClientRect();
+  return {
+    width: Math.max(1, Math.floor(rect.width || innerWidth)),
+    height: Math.max(1, Math.floor(rect.height || innerHeight))
+  };
+}
 function applyRendererSize(force = false) {
-  const width = Math.max(1, Math.floor(innerWidth));
-  const height = Math.max(1, Math.floor(innerHeight));
+  const { width, height } = viewportRenderSize();
   const pixelRatio = Number(targetPixelRatio().toFixed(3));
   if (
     !force &&
@@ -739,6 +849,7 @@ function applyRendererSize(force = false) {
   rendererSizing.width = width;
   rendererSizing.height = height;
   rendererSizing.pixelRatio = pixelRatio;
+  renderPerf.renderPixels = Math.round(width * height * pixelRatio * pixelRatio);
   renderer.setPixelRatio(pixelRatio);
   renderer.setSize(width, height);
 }
@@ -1383,7 +1494,7 @@ const outfitState = {
   physics: {
     gravity: -9.81,
     hairDamping: 0.91,
-    hairConstraintIterations: 4,
+    hairConstraintIterations: QUALITY.hairIterations || 4,
     clothDamping: 0.86,
     collisionFloor: AVATAR_FLOOR_Y
   }
@@ -1394,7 +1505,7 @@ const secondaryMotion = {
   strands: [],
   lastHeadPosition: new THREE.Vector3(),
   headVelocity: new THREE.Vector3(),
-  segmentLength: lowPowerDevice ? 0.082 : 0.068,
+  segmentLength: (QUALITY.hairNodes || 8) <= 6 ? 0.082 : 0.068,
   gravityScale: 0.055,
   updates: 0,
   maxStretchError: 0
@@ -2627,13 +2738,20 @@ globalThis.__weaverSceneAudit = () => {
       measuredFps: measuredFrameRate(),
       pixelRatio: targetPixelRatio(),
       pixelScale: renderPerf.pixelScale,
+      renderPixels: renderPerf.renderPixels,
       localHeavyGpu: renderPerf.localHeavyGpu,
       degraded: renderPerf.degraded,
       longFrames: renderPerf.longFrames,
+      bootLongFramesIgnored: renderPerf.bootLongFrames,
+      pressureStreak: renderPerf.pressureStreak,
+      thermalTier: renderPerf.thermalTier,
+      environmentFps: renderPerf.environmentFps,
+      secondaryFps: renderPerf.secondaryFps,
       webglRenderer: renderPerf.webglRenderer,
       softwareRenderer: renderPerf.softwareRenderer,
       remoteRunpod: { ...remoteGpuState }
     },
+    mobilePerformance: globalThis.__weaverMobilePerformanceAudit?.() || null,
     punctual,
     city: {
       count: cityOpacity.length || gpuCityWindows,
@@ -3632,7 +3750,7 @@ function applyHumanMotion(dt, nowSec = performance.now() * 0.001, navigationDt =
     stanceCalibration.dualFootContact = stanceCalibration.toeHeightDelta <= 0.025;
   }
   updateTailoredGarmentLayer();
-  updateSecondaryMotion(dt);
+  updateScheduledSecondaryMotion(dt);
   if (presenceHalo) {
     presenceHalo.position.x += (model.position.x - presenceHalo.position.x) * Math.min(1, dt * 8.0);
     presenceHalo.position.z += (model.position.z + 0.05 - presenceHalo.position.z) * Math.min(1, dt * 8.0);
@@ -4142,8 +4260,8 @@ const hairRotation = new THREE.Quaternion();
 const hairUp = new THREE.Vector3(0, 1, 0);
 function buildDynamicHair() {
   if (!headBone || secondaryMotion.hair) return;
-  const strandCount = lowPowerDevice ? 18 : 30;
-  const nodesPerStrand = lowPowerDevice ? 6 : 8;
+  const strandCount = QUALITY.hairStrands || (lowPowerDevice ? 18 : 30);
+  const nodesPerStrand = QUALITY.hairNodes || (lowPowerDevice ? 6 : 8);
   const segmentGeometry = new THREE.CylinderGeometry(0.0038, 0.0052, 1, 7, 1, false);
   const segmentMaterial = QUALITY.name === 'performance'
     ? new THREE.MeshStandardMaterial({
@@ -4194,7 +4312,7 @@ function buildDynamicHair() {
   secondaryMotion.hairCrown = crown;
   outfitState.hairVolumeMeshes = 1;
 
-  const columns = lowPowerDevice ? 6 : 10;
+  const columns = Math.max(6, Math.round(strandCount / 3));
   for (let strandIndex = 0; strandIndex < strandCount; strandIndex++) {
     const row = Math.floor(strandIndex / columns);
     const column = strandIndex % columns;
@@ -4284,6 +4402,22 @@ function updateSecondaryMotion(dt) {
   secondaryMotion.maxStretchError = Number(maxStretchError.toFixed(5));
   secondaryMotion.updates += 1;
 }
+function updateScheduledSecondaryMotion(dt) {
+  const targetFps = Math.max(20, renderPerf.secondaryFps || 60);
+  if (targetFps >= 59) {
+    updateSecondaryMotion(dt);
+    return;
+  }
+  const fixedStep = 1 / targetFps;
+  renderPerf.secondaryAccumulator = Math.min(
+    fixedStep * 2,
+    renderPerf.secondaryAccumulator + Math.max(0, dt)
+  );
+  if (renderPerf.secondaryAccumulator < fixedStep) return;
+  const step = renderPerf.secondaryAccumulator;
+  renderPerf.secondaryAccumulator = 0;
+  updateSecondaryMotion(step);
+}
 
 globalThis.__weaverOutfitAudit = () => ({
   ...outfitState,
@@ -4310,8 +4444,15 @@ function avatarAssetCandidates() {
     (!navigator.deviceMemory || navigator.deviceMemory >= 6) &&
     !renderPerf.softwareRenderer
   );
+  const mobileHighFidelityEligible = (
+    iphone16eClass &&
+    QUALITY.name === 'iphone16e' &&
+    !deviceProfile.saveData &&
+    !/^(slow-)?2g$/i.test(deviceProfile.effectiveType) &&
+    !renderPerf.softwareRenderer
+  );
   const preferHighFidelity = highFidelityState.requested === 'hifi' || (
-    highFidelityState.requested === 'auto' && desktopHighFidelityEligible
+    highFidelityState.requested === 'auto' && (desktopHighFidelityEligible || mobileHighFidelityEligible)
   );
   const candidates = [];
   if (preferHighFidelity) {
@@ -4424,10 +4565,20 @@ function measuredFrameRate() {
 function markRenderBootStable() {
   if (renderPerf.bootStable) return;
   const fps = measuredFrameRate();
-  if (fpsMeter.totalFrames > 45 && fps >= 42) {
+  const stableEntryFps = iphone16eClass ? 48 : 42;
+  if (fpsMeter.totalFrames > 45 && fps >= stableEntryFps) {
     renderPerf.bootStable = true;
+    renderPerf.pressureStreak = 0;
+    renderPerf.thermalTier = 'nominal';
     try { localStorage.removeItem(BOOT_MARKER_KEY); } catch (e) {}
-    recordOpsEvent('render-stable', { fps, targetFps: renderPerf.dynamicFps, pixelScale: renderPerf.pixelScale, success: true });
+    recordOpsEvent('render-stable', {
+      profile: deviceProfile.name,
+      fps,
+      targetFps: renderPerf.dynamicFps,
+      pixelScale: renderPerf.pixelScale,
+      renderPixels: renderPerf.renderPixels,
+      success: true
+    });
     updateOpsController();
   }
 }
@@ -4437,18 +4588,40 @@ function degradeRender(reason) {
   renderPerf.lastDegradeMs = now;
   renderPerf.degraded = true;
   renderPerf.stableFpsWindows = 0;
-  renderPerf.pixelScale = Math.max(0.58, renderPerf.pixelScale * 0.82);
-  if (reason === 'long-frame' || reason === 'low-fps') {
-    renderPerf.dynamicFps = Math.min(renderPerf.dynamicFps, renderPerf.softwareRenderer ? 24 : 30);
+  renderPerf.pressureStreak += 1;
+  const minScale = minimumPixelScale();
+  if (iphone16eClass && !renderPerf.softwareRenderer) {
+    // Preserve touch/body cadence first. The A18-class tier sheds pixel work,
+    // environment passes and secondary-physics iterations before lowering FPS.
+    renderPerf.pixelScale = Math.max(minScale, renderPerf.pixelScale * 0.88);
+    if (renderPerf.pressureStreak >= 3 || renderPerf.pixelScale <= minScale + 0.04) {
+      renderPerf.dynamicFps = Math.min(renderPerf.dynamicFps, QUALITY.frameFloor || 45);
+    }
+    if (renderPerf.pressureStreak >= 6) renderPerf.dynamicFps = Math.min(renderPerf.dynamicFps, 36);
+    renderPerf.thermalTier = renderPerf.dynamicFps < (QUALITY.frameFloor || 45) ? 'sustained' : 'adaptive';
+  } else {
+    renderPerf.pixelScale = Math.max(minScale, renderPerf.pixelScale * 0.82);
+    if (reason === 'long-frame' || reason === 'low-fps') {
+      renderPerf.dynamicFps = Math.min(renderPerf.dynamicFps, renderPerf.softwareRenderer ? 24 : 30);
+    }
+    renderPerf.thermalTier = 'guarded';
   }
+  renderPerf.dynamicResolutionChanges += 1;
   renderer.shadowMap.enabled = false;
-  if (renderPerf.pixelScale <= 0.76 || reason === 'long-frame' || reason === 'low-fps') setLocalHeavyGpu(false);
+  if (
+    renderPerf.pixelScale <= (iphone16eClass ? 0.82 : 0.76) ||
+    renderPerf.pressureStreak >= 2 ||
+    (!iphone16eClass && (reason === 'long-frame' || reason === 'low-fps'))
+  ) setLocalHeavyGpu(false);
   applyRendererSize();
   recordOpsEvent('render-degrade', {
     reason,
     fps: measuredFrameRate(),
     targetFps: renderPerf.dynamicFps,
     pixelScale: renderPerf.pixelScale,
+    renderPixels: renderPerf.renderPixels,
+    pressureStreak: renderPerf.pressureStreak,
+    thermalTier: renderPerf.thermalTier,
     cadenceScale: renderPerf.faceCadenceScale,
     hairIterations: renderPerf.hairConstraintBudget
   });
@@ -4460,12 +4633,14 @@ function maybeRecoverRender() {
   const now = performance.now();
   const targetFps = renderPerf.dynamicFps || QUALITY.fps;
   const stableThreshold = Math.max(22, Math.min(56, targetFps - 2));
-  if (fpsMeter.measured < stableThreshold || now - renderPerf.lastDegradeMs < 9000) {
+  const recoveryHoldMs = iphone16eClass ? 7000 : 9000;
+  if (fpsMeter.measured < stableThreshold || now - renderPerf.lastDegradeMs < recoveryHoldMs) {
     renderPerf.stableFpsWindows = 0;
     return;
   }
   renderPerf.stableFpsWindows += 1;
-  if (renderPerf.stableFpsWindows < 8 || now - renderPerf.lastUpgradeMs < 6000) return;
+  const recoveryWindows = iphone16eClass ? 6 : 8;
+  if (renderPerf.stableFpsWindows < recoveryWindows || now - renderPerf.lastUpgradeMs < 6000) return;
   renderPerf.lastUpgradeMs = now;
   const previousFps = renderPerf.dynamicFps;
   const previousScale = renderPerf.pixelScale;
@@ -4473,14 +4648,28 @@ function maybeRecoverRender() {
     renderPerf.dynamicFps = Math.min(QUALITY.frameCap || QUALITY.fps, renderPerf.dynamicFps + 6);
   }
   renderPerf.pixelScale = Math.min(1, renderPerf.pixelScale * 1.08);
-  if (renderPerf.pixelScale >= 0.74) setLocalHeavyGpu(true);
-  if (renderPerf.pixelScale >= 0.98 && renderPerf.localHeavyGpu) renderPerf.degraded = false;
+  renderPerf.pressureStreak = Math.max(0, renderPerf.pressureStreak - 1);
+  if (renderPerf.pixelScale >= (iphone16eClass ? 0.82 : 0.74)) setLocalHeavyGpu(true);
+  if (
+    renderPerf.dynamicFps >= (QUALITY.frameCap || QUALITY.fps) &&
+    renderPerf.pixelScale >= 0.96 &&
+    renderPerf.localHeavyGpu
+  ) {
+    renderPerf.degraded = false;
+    renderPerf.thermalTier = 'nominal';
+    renderPerf.pressureStreak = 0;
+  } else {
+    renderPerf.thermalTier = 'recovering';
+  }
   applyRendererSize();
   recordOpsEvent('render-recover', {
     reason: renderPerf.degraded ? 'step' : 'complete',
     fps: fpsMeter.measured,
     targetFps: renderPerf.dynamicFps,
     pixelScale: renderPerf.pixelScale,
+    renderPixels: renderPerf.renderPixels,
+    pressureStreak: renderPerf.pressureStreak,
+    thermalTier: renderPerf.thermalTier,
     durationMs: now - renderPerf.lastDegradeMs,
     success: renderPerf.dynamicFps >= previousFps && renderPerf.pixelScale >= previousScale
   });
@@ -4493,8 +4682,12 @@ function renderFrame(nowMs = 0) {
   const activeFps = renderPerf.dynamicFps || QUALITY.fps;
   const longFrameMs = Math.max(80, (1000 / activeFps) * 4);
   if (frameGap > longFrameMs) {
-    renderPerf.longFrames += 1;
-    degradeRender('long-frame');
+    if (renderPerf.bootStable) {
+      renderPerf.longFrames += 1;
+      degradeRender('long-frame');
+    } else {
+      renderPerf.bootLongFrames += 1;
+    }
   }
   if (activeFps < 59) {
     const minFrameMs = (1000 / activeFps) - 0.75;
@@ -4514,7 +4707,8 @@ function renderFrame(nowMs = 0) {
     fpsMeter.frames = 0;
     fpsMeter.lastMs = perfMs;
     const lowFpsThreshold = Math.max(18, Math.floor(activeFps * 0.80));
-    if (fpsMeter.measured > 0 && fpsMeter.measured < lowFpsThreshold) degradeRender('low-fps');
+    const insideBootGrace = !renderPerf.bootStable && perfMs - fpsMeter.startMs < 4000;
+    if (fpsMeter.measured > 0 && fpsMeter.measured < lowFpsThreshold && !insideBootGrace) degradeRender('low-fps');
     else maybeRecoverRender();
     updateOpsController(perfMs);
     updateOpsHud();
@@ -4524,7 +4718,11 @@ function renderFrame(nowMs = 0) {
   if (mixer) mixer.update(dt);
   applyHumanMotion(dt, perfMs * 0.001, wallDt);
   applyCameraFollow(Math.min(wallDt, 0.12));
-  for (const animate of penthouseAnimators) animate(clock.elapsedTime);
+  const environmentIntervalMs = 1000 / Math.max(20, renderPerf.environmentFps || 60);
+  if (!renderPerf.lastEnvironmentMs || perfMs - renderPerf.lastEnvironmentMs >= environmentIntervalMs) {
+    renderPerf.lastEnvironmentMs = perfMs;
+    for (const animate of penthouseAnimators) animate(clock.elapsedTime);
+  }
   renderer.render(scene, camera);
   markRenderBootStable();
 }
@@ -4542,12 +4740,89 @@ globalThis.__weaverPauseScene = () => setSceneRunning(false);
 globalThis.__weaverResumeScene = () => setSceneRunning(true);
 renderer.setAnimationLoop(renderFrame);
 document.addEventListener('visibilitychange', () => setSceneRunning(!document.hidden));
-addEventListener('resize', () => {
-  camera.aspect = innerWidth/innerHeight;
-  camera.fov = cameraFovForViewport();
-  camera.updateProjectionMatrix();
-  applyRendererSize();
+let viewportResizeRaf = 0;
+function scheduleViewportResize() {
+  cancelAnimationFrame(viewportResizeRaf);
+  viewportResizeRaf = requestAnimationFrame(() => {
+    viewportResizeRaf = 0;
+    const { width, height } = viewportRenderSize();
+    camera.aspect = width / height;
+    camera.fov = cameraFovForViewport();
+    camera.updateProjectionMatrix();
+    applyRendererSize();
+  });
+}
+addEventListener('resize', scheduleViewportResize, { passive: true });
+addEventListener('orientationchange', scheduleViewportResize, { passive: true });
+globalThis.visualViewport?.addEventListener('resize', scheduleViewportResize, { passive: true });
+const viewportResizeObserver = typeof ResizeObserver === 'function'
+  ? new ResizeObserver(scheduleViewportResize)
+  : null;
+viewportResizeObserver?.observe(stage);
+addEventListener('pagehide', () => setSceneRunning(false));
+addEventListener('pageshow', () => { if (!document.hidden) setSceneRunning(true); });
+renderer.domElement.addEventListener('webglcontextlost', event => {
+  event.preventDefault();
+  renderPerf.degraded = true;
+  renderPerf.thermalTier = 'context-lost';
+  setSceneRunning(false);
+  recordOpsEvent('render-degrade', { reason: 'context-lost', success: false });
 });
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  applyRendererSize(true);
+  renderPerf.thermalTier = 'recovering';
+  if (!document.hidden) setSceneRunning(true);
+  recordOpsEvent('render-recover', { reason: 'context-restored', success: true });
+});
+globalThis.__weaverMobilePerformanceAudit = () => {
+  const cssPixels = Math.max(1, Math.round(innerWidth * innerHeight));
+  const fullQualityPixels = Math.round(cssPixels * Math.pow(QUALITY.pixelRatio || 1, 2));
+  const desktopLiteReferencePixels = Math.round(1440 * 900 * Math.pow(0.78, 2));
+  return {
+    version: 1,
+    profile: { ...deviceProfile },
+    quality: QUALITY.name,
+    budgets: {
+      bodyAndTouchFps: QUALITY.frameCap || QUALITY.fps,
+      sustainedFrameFloor: QUALITY.frameFloor || 30,
+      environmentFps: renderPerf.environmentFps,
+      secondaryPhysicsFps: renderPerf.secondaryFps,
+      faceTrackingFps: Number((1000 / GPU_FACE_INTERVAL_MS).toFixed(1)),
+      maxPixelRatio: QUALITY.pixelRatio,
+      minPixelRatio: QUALITY.minPixelRatio,
+      startupGraceMs: 4000
+    },
+    workload: {
+      cssPixels,
+      fullQualityPixels,
+      activeRenderPixels: renderPerf.renderPixels,
+      desktopLiteReferencePixels,
+      fullQualityVsDesktop: Number((fullQualityPixels / desktopLiteReferencePixels).toFixed(3))
+    },
+    actual: {
+      measuredFps: measuredFrameRate(),
+      targetFps: renderPerf.dynamicFps,
+      pixelRatio: targetPixelRatio(),
+      pixelScale: renderPerf.pixelScale,
+      pressureStreak: renderPerf.pressureStreak,
+      thermalTier: renderPerf.thermalTier,
+      dynamicResolutionChanges: renderPerf.dynamicResolutionChanges,
+      bootLongFramesIgnored: renderPerf.bootLongFrames,
+      heavyEnvironment: renderPerf.localHeavyGpu,
+      sceneRunning
+    },
+    policy: {
+      resolutionBeforeCadence: iphone16eClass,
+      bodyControlEveryRenderedFrame: true,
+      splitEnvironmentCadence: renderPerf.environmentFps < (QUALITY.frameCap || QUALITY.fps),
+      splitSecondaryCadence: renderPerf.secondaryFps < (QUALITY.frameCap || QUALITY.fps),
+      visualViewportDebounced: Boolean(globalThis.visualViewport),
+      pausesWhenHidden: true,
+      hifiEligible: iphone16eClass && !deviceProfile.saveData && !renderPerf.softwareRenderer,
+      sameOrBetterTarget: (QUALITY.frameCap || QUALITY.fps) >= 60 && fullQualityPixels <= desktopLiteReferencePixels
+    }
+  };
+};
 
 /* ── capture controls: Shift+S screenshot, Shift+R+E record ── */
 const captureCanvas = document.createElement('canvas');

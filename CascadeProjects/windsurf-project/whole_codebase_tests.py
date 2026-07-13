@@ -1838,13 +1838,14 @@ async def test_AF():
         "WeaverWovenFabricMicrotexture",
         "weaver_woven_a_line_skirt",
         "weaver_soft_hair_crown",
-        "strandCount = lowPowerDevice ? 18 : 30",
+        "const strandCount = QUALITY.hairStrands",
         "function buildDynamicHair()",
         "function buildTailoredGarmentLayer()",
         "function updateSecondaryMotion(dt)",
+        "function updateScheduledSecondaryMotion(dt)",
         "weaver_gravity_braid_strands",
         "gravity: -9.81",
-        "hairConstraintIterations: 4",
+        "hairConstraintIterations: QUALITY.hairIterations",
         "maxStretchError",
     ))
     silent_coder = all(marker in brain_source + workflow_source for marker in (
@@ -3204,6 +3205,108 @@ async def test_AL():
     return passed
 
 
+async def test_AM():
+    _header("AM", "iPhone 16e A18 adaptive mobile performance without embodiment loss")
+
+    repo_root = os.path.abspath(os.path.join(PROJ, "..", ".."))
+    embodiment_path = os.path.join(repo_root, "avatar", "embodiment.html")
+    with open(embodiment_path, "r", encoding="utf-8") as fh:
+        embodiment = fh.read()
+
+    device_detection = all(marker in embodiment for marker in (
+        "const iphone16ePanelClass",
+        "Math.abs(displayShortCss - 390)",
+        "Math.abs(displayLongCss - 844)",
+        "Math.abs(displayShortNative - 1170)",
+        "Math.abs(displayLongNative - 2532)",
+        "'iphone-16e-a18-class'",
+        "globalThis.__weaverDeviceProfile = deviceProfile",
+    ))
+    a18_quality_tier = all(marker in embodiment for marker in (
+        "iphone16e: {",
+        "name: 'iphone16e', fps: 60, frameCap: 60, frameFloor: 45",
+        "pixelRatio: 1.25, minPixelRatio: 0.78",
+        "environmentFps: 30, secondaryFps: 30",
+        "hairStrands: 24, hairNodes: 7, hairIterations: 3",
+        "const GPU_FACE_INTERVAL_MS = iphone16eClass ? 125 : 90",
+    ))
+    adaptive_governor = all(marker in embodiment for marker in (
+        "function minimumPixelScale()",
+        "renderPerf.pixelScale * 0.88",
+        "renderPerf.pressureStreak >= 3",
+        "QUALITY.frameFloor || 45",
+        "renderPerf.pressureStreak >= 6",
+        "renderPerf.dynamicResolutionChanges += 1",
+        "renderPerf.bootLongFrames += 1",
+        "const insideBootGrace = !renderPerf.bootStable",
+        "resolutionBeforeCadence: iphone16eClass",
+    ))
+    split_scheduling = all(marker in embodiment for marker in (
+        "function updateScheduledSecondaryMotion(dt)",
+        "updateScheduledSecondaryMotion(dt)",
+        "const environmentIntervalMs = 1000 / Math.max(20, renderPerf.environmentFps || 60)",
+        "bodyControlEveryRenderedFrame: true",
+        "splitEnvironmentCadence",
+        "splitSecondaryCadence",
+    ))
+    render_section = embodiment[embodiment.index("function renderFrame("):embodiment.index("function setSceneRunning(")]
+    full_body_priority = (
+        render_section.index("applyHumanMotion(")
+        < render_section.index("const environmentIntervalMs")
+        < render_section.index("renderer.render(")
+    )
+    safari_lifecycle = all(marker in embodiment for marker in (
+        "viewport-fit=cover",
+        "height: 100dvh",
+        "env(safe-area-inset-top)",
+        "backdrop-filter: none",
+        "touch-action: manipulation",
+        "globalThis.visualViewport?.addEventListener('resize', scheduleViewportResize",
+        "new ResizeObserver(scheduleViewportResize)",
+        "const { width, height } = viewportRenderSize()",
+        "addEventListener('pagehide', () => setSceneRunning(false))",
+        "webglcontextlost",
+        "webglcontextrestored",
+    ))
+    mobile_hifi_policy = all(marker in embodiment for marker in (
+        "const mobileHighFidelityEligible",
+        "QUALITY.name === 'iphone16e'",
+        "!deviceProfile.saveData",
+        "desktopHighFidelityEligible || mobileHighFidelityEligible",
+    ))
+    measurable_contract = all(marker in embodiment for marker in (
+        "globalThis.__weaverMobilePerformanceAudit",
+        "desktopLiteReferencePixels",
+        "fullQualityVsDesktop",
+        "sameOrBetterTarget",
+        "activeRenderPixels",
+        "thermalTier",
+    ))
+
+    passed = all((
+        device_detection,
+        a18_quality_tier,
+        adaptive_governor,
+        split_scheduling,
+        full_body_priority,
+        safari_lifecycle,
+        mobile_hifi_policy,
+        measurable_contract,
+    ))
+    detail = "\n".join([
+        f"  390x844 / 1170x2532 16e-class detection: {device_detection}",
+        f"  A18 tier targets 60 fps at bounded pixels:  {a18_quality_tier}",
+        f"  Resolution sheds before body cadence:       {adaptive_governor}",
+        f"  Environment/hair use split scheduling:      {split_scheduling}",
+        f"  Full body control remains every frame:       {full_body_priority}",
+        f"  Safari viewport/lifecycle costs are bounded: {safari_lifecycle}",
+        f"  HiFi auto policy respects data/pressure:     {mobile_hifi_policy}",
+        f"  Runtime performance is directly auditable:  {measurable_contract}",
+    ])
+    _result("AM", "iPhone 16e A18 adaptive mobile performance without embodiment loss", passed, detail)
+    return passed
+
+
 TESTS = {
     "G": ("Quantum parse invariants", test_G),
     "H": ("Quantum description + state write persistence", test_H),
@@ -3237,6 +3340,7 @@ TESTS = {
     "AJ": ("Seven-angle Cognition Mesh and validated parallel n8n v6 workflow", test_AJ),
     "AK": ("Cinematic facial articulation, layered body dynamics, and bounded material response", test_AK),
     "AL": ("High-fidelity original avatar LOD, physical scan maps, and safe runtime fallback", test_AL),
+    "AM": ("iPhone 16e A18 adaptive mobile performance without embodiment loss", test_AM),
 }
 
 
@@ -3264,6 +3368,6 @@ async def main(which: str):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("test", nargs="?", default="all", help="G-AJ or all")
+    ap.add_argument("test", nargs="?", default="all", help="G-AM or all")
     args = ap.parse_args()
     raise SystemExit(0 if asyncio.run(main(args.test)) else 1)
