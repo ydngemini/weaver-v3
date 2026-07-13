@@ -2877,9 +2877,13 @@ async def test_AJ():
             'sudo docker image inspect "$N8N_IMAGE"',
             "cat > /tmp/n8n_cred.json",
             "cat > /tmp/wf.json",
+            'data.get("lora_latency_ms")',
+            'data.get("qwen3b_latency_ms")',
             "n8n container: pinned, read-only, capability-dropped, sandboxed",
         ))
         and "docker cp" not in deploy_source
+        and 'assert data.get("soul_voice_active") is True' not in deploy_source
+        and 'assert data.get("dual_model_active") is True' not in deploy_source
     )
 
     passed = all((

@@ -446,15 +446,15 @@ assert data.get("pipeline_architecture") == "parallel-fanout-barrier", data
 assert data.get("expert_count") == 5, data
 assert data.get("experts_completed") == 5, data
 assert data.get("expert_parallel") is True, data
-assert data.get("soul_voice_active") is True, data
 assert data.get("qwen3b_active") is True, data
-assert data.get("dual_model_active") is True, data
 assert not data.get("lora_error"), data.get("lora_error")
 assert not data.get("qwen3b_error"), data.get("qwen3b_error")
+assert isinstance(data.get("lora_latency_ms"), (int, float)) and data["lora_latency_ms"] > 0, data
+assert isinstance(data.get("qwen3b_latency_ms"), (int, float)) and data["qwen3b_latency_ms"] > 0, data
 assert data.get("cognition_mesh_active") is True, data
 assert data.get("written_to_hub") is False, data
 assert "original_input" not in data and "collapsed_response" not in data, data
-print("  webhook: v6 parallel cognition; dual-model active; response=", data["manifested_response"][:180])
+print("  webhook: v6 parallel cognition; both local models executed; response=", data["manifested_response"][:180])
 PY
 sudo systemctl restart weaver-brain
 wait_http "brain after n8n recovery" http://127.0.0.1:8093/health 45
