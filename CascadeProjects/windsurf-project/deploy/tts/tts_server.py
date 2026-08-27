@@ -31,11 +31,17 @@ DEVICE = os.getenv("TTS_DEVICE", "cpu")
 HOST = os.getenv("TTS_HOST", "127.0.0.1")
 PORT = int(os.getenv("TTS_PORT", "8092"))
 KEY = os.getenv("WEAVER_TTS_KEY", "")  # if set, require X-Weaver-Key header
-TTS_PROVIDER = os.getenv("TTS_PROVIDER", "polly").strip().lower()
-TTS_FALLBACK_PROVIDER = os.getenv("TTS_FALLBACK_PROVIDER", "none").strip().lower()
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "azure").strip().lower()
+TTS_FALLBACK_PROVIDER = os.getenv("TTS_FALLBACK_PROVIDER", "polly").strip().lower()
 
-# Amazon Polly. Generative Ruth in us-east-1 is a warm, realistic default for
-# Weaver; override these without touching browser code.
+# Azure Speech Services (primary TTS provider for Azure deployment).
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", os.getenv("AZURE_OPENAI_KEY", ""))
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "eastus")
+AZURE_SPEECH_VOICE = os.getenv("AZURE_SPEECH_VOICE", "en-US-AriaNeural")
+AZURE_SPEECH_STYLE = os.getenv("AZURE_SPEECH_STYLE", "warm")
+AZURE_OUTPUT_FORMAT = os.getenv("AZURE_TTS_OUTPUT_FORMAT", "riff-24khz-16bit-mono-pcm")
+
+# Amazon Polly (fallback TTS provider).
 POLLY_REGION = (
     os.getenv("TTS_AWS_REGION")
     or os.getenv("AWS_REGION")
@@ -95,9 +101,11 @@ def provider_chain() -> list[str]:
         value = (value or "").strip().lower()
         if value in ("aws", "aws-polly"):
             value = "polly"
+        if value in ("azure", "azure-speech"):
+            value = "azure"
         if value and value != "none" and value not in providers:
             providers.append(value)
-    return providers or ["polly"]
+    return providers or ["azure"]
 
 
 def cache_count() -> int:
@@ -132,6 +140,9 @@ def cache_identity(provider: str, text: str) -> tuple[str, str, str]:
             text.lower(),
         ])
         return identity, EXTENSIONS.get(audio_format, "mp3"), media_type
+    if provider == "azure":
+        identity = "|".join([provider, AZURE_SPEECH_REGION, AZURE_SPEECH_VOICE, AZURE_SPEECH_STYLE, AZURE_OUTPUT_FORMAT, text.lower()])
+        return identity, "wav", "audio/wav"
     if provider == "openvoice":
         identity = "|".join([provider, DEVICE, "openvoice-v2", text.lower()])
         return identity, "wav", "audio/wav"
@@ -165,6 +176,38 @@ def prune_cache() -> None:
             os.remove(path)
         except FileNotFoundError:
             pass
+
+
+_azure_speech_synthesizer = None
+
+
+def azure_speech_synthesizer():
+    global _azure_speech_synthesizer
+    if _azure_speech_synthesizer is None:
+        import azure.cognitiveservices.speech as speechsdk
+        speech_config = speechsdk.SpeechConfig(subscription=AZURE_SPEECH_KEY, region=AZURE_SPEECH_REGION)
+        speech_config.set_speech_synthesis_output_format(
+            speechsdk.SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm
+        )
+        _azure_speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
+    return _azure_speech_synthesizer
+
+
+def synth_azure(text: str) -> tuple[bytes, str]:
+    try:
+        ssml = (
+            f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+            f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">'
+            f'<voice name="{AZURE_SPEECH_VOICE}">'
+            f'<mstts:express-as style="{AZURE_SPEECH_STYLE}">'
+            f'{text}</mstts:express-as></voice></speak>'
+        )
+        result = azure_speech_synthesizer().speak_ssml_async(ssml).get()
+        if result.reason.name == "SynthesizingAudioCompleted":
+            return result.audio_data, "audio/wav"
+        raise RuntimeError(f"Azure TTS failed: {result.reason}")
+    except Exception as exc:
+        raise RuntimeError(f"Azure Speech synthesis error: {exc}")
 
 
 def polly_client():
@@ -257,6 +300,8 @@ def synth_openvoice(text: str) -> tuple[bytes, str]:
 
 
 def synth_provider(provider: str, text: str) -> tuple[bytes, str]:
+    if provider == "azure":
+        return synth_azure(text)
     if provider == "polly":
         return synth_polly(text)
     if provider == "openvoice":
@@ -289,6 +334,11 @@ def health():
         "provider": TTS_PROVIDER,
         "fallback_provider": TTS_FALLBACK_PROVIDER,
         "cached": cache_count(),
+        "azure": {
+            "region": AZURE_SPEECH_REGION,
+            "voice": AZURE_SPEECH_VOICE,
+            "style": AZURE_SPEECH_STYLE,
+        },
         "polly": {
             "region": POLLY_REGION,
             "engine": POLLY_ENGINE,

@@ -17,12 +17,17 @@ psutil>=6.0.0
 
 # AI / LLM
 openai>=1.50.0
-boto3>=1.34.0
-aws-sdk-bedrock-runtime>=0.7.0
-smithy-aws-core>=0.7.0
 langchain>=0.3.0
 langchain-openai>=0.2.0
 langchain-core>=0.3.0
+
+# Azure (primary cloud)
+azure-identity>=1.18.0
+azure-cognitiveservices-speech>=1.41.0
+azure-storage-blob>=12.23.0
+
+# AWS (legacy fallback — only if using WEAVER_LLM_BACKEND=bedrock)
+# boto3>=1.34.0
 
 # Telephony
 twilio>=9.0.0

@@ -1,0 +1,11 @@
+subscription_id = "120ea104-5498-44f6-8e86-5654a1f4419b"
+location        = "eastus"
+resource_group_name = "weaver"
+vm_size         = "Standard_E4s_v5"
+root_volume_gb  = 128
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+# Set to your public IP: "$(curl -s ifconfig.me)/32"
+ssh_ingress_cidrs = ["203.0.113.4/32"]
+
+dns_label = "weaver-brain"

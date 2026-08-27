@@ -1,0 +1,1715 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Weaver Quantum Equations &amp; Notation Reference</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #58657b;
+      --navy: #101c3a;
+      --blue: #2d69ff;
+      --cyan: #13b8c8;
+      --violet: #7558e8;
+      --gold: #d89b24;
+      --green: #18865b;
+      --red: #bc3e4a;
+      --paper: #ffffff;
+      --wash: #f3f6fb;
+      --line: #dce3ef;
+    }
+
+    * { box-sizing: border-box; }
+
+    @page {
+      size: A4;
+      margin: 16mm 16mm 18mm 16mm;
+    }
+
+    html {
+      font-family: "DejaVu Sans", Arial, sans-serif;
+      color: var(--ink);
+      font-size: 10pt;
+      line-height: 1.46;
+      background: white;
+    }
+
+    body { margin: 0; }
+
+    .page {
+      break-before: page;
+      min-height: 252mm;
+      position: relative;
+    }
+
+    .page.first { break-before: auto; }
+
+    .cover {
+      min-height: 258mm;
+      padding: 18mm 12mm 12mm;
+      color: white;
+      background:
+        radial-gradient(circle at 84% 16%, rgba(19,184,200,.36) 0 7%, transparent 7.2%),
+        radial-gradient(circle at 77% 25%, rgba(117,88,232,.44) 0 3%, transparent 3.2%),
+        linear-gradient(145deg, #0d1733 0%, #172a5a 55%, #143d59 100%);
+      overflow: hidden;
+    }
+
+    .cover::before,
+    .cover::after {
+      content: "";
+      position: absolute;
+      border: 1px solid rgba(255,255,255,.18);
+      transform: rotate(31deg);
+    }
+
+    .cover::before { width: 170mm; height: 170mm; right: -80mm; top: 55mm; }
+    .cover::after { width: 120mm; height: 120mm; right: -50mm; top: 80mm; }
+
+    .eyebrow {
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      font-size: 8pt;
+      font-weight: 700;
+      color: #93e7ef;
+    }
+
+    h1 {
+      font-family: "DejaVu Serif", Georgia, serif;
+      font-weight: 700;
+      font-size: 33pt;
+      line-height: 1.08;
+      margin: 23mm 0 7mm;
+      max-width: 145mm;
+    }
+
+    .subtitle {
+      font-family: "DejaVu Serif", Georgia, serif;
+      font-size: 15pt;
+      line-height: 1.42;
+      max-width: 135mm;
+      color: #dfeaff;
+    }
+
+    .cover-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4mm;
+      margin-top: 34mm;
+      max-width: 145mm;
+    }
+
+    .cover-stat {
+      border-top: 2px solid #54dbe7;
+      padding-top: 3mm;
+    }
+
+    .cover-stat strong {
+      display: block;
+      font-size: 18pt;
+      color: white;
+      line-height: 1.1;
+    }
+
+    .cover-stat span {
+      display: block;
+      margin-top: 1.5mm;
+      color: #c9d8f7;
+      font-size: 8.2pt;
+    }
+
+    .cover-meta {
+      position: absolute;
+      left: 12mm;
+      right: 12mm;
+      bottom: 13mm;
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      color: #bfd0ef;
+      font-size: 8.4pt;
+    }
+
+    h2 {
+      font-family: "DejaVu Serif", Georgia, serif;
+      font-size: 21pt;
+      line-height: 1.18;
+      margin: 0 0 6mm;
+      color: var(--navy);
+    }
+
+    h3 {
+      font-size: 12pt;
+      line-height: 1.25;
+      color: var(--navy);
+      margin: 6mm 0 2.5mm;
+    }
+
+    h4 {
+      font-size: 10.2pt;
+      color: var(--navy);
+      margin: 4mm 0 1.5mm;
+    }
+
+    p { margin: 0 0 3mm; }
+
+    .section-kicker {
+      color: var(--blue);
+      font-size: 8pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .14em;
+      margin-bottom: 2mm;
+    }
+
+    .lead {
+      font-family: "DejaVu Serif", Georgia, serif;
+      font-size: 12.5pt;
+      line-height: 1.55;
+      color: #33405a;
+      margin-bottom: 6mm;
+    }
+
+    .rule { border: 0; border-top: 1px solid var(--line); margin: 5mm 0; }
+
+    .callout {
+      border-left: 4px solid var(--blue);
+      background: #edf3ff;
+      padding: 4mm 5mm;
+      margin: 4mm 0;
+      break-inside: avoid;
+    }
+
+    .callout.truth { border-left-color: var(--green); background: #edf8f3; }
+    .callout.warn { border-left-color: var(--gold); background: #fff7e6; }
+    .callout.false { border-left-color: var(--red); background: #fff0f2; }
+
+    .badge {
+      display: inline-block;
+      border-radius: 99px;
+      padding: 1.1mm 2.4mm;
+      font-size: 7.4pt;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .live { color: #126440; background: #dff4e9; }
+    .legacy { color: #70520b; background: #fff0c7; }
+    .classical { color: #30558f; background: #e5efff; }
+    .dormant { color: #684f8f; background: #efe7fb; }
+    .training { color: #914154; background: #ffe5eb; }
+    .evidence { color: #374151; background: #e8ebf0; }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 2.5mm;
+      margin: 2mm 0 3mm;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 3mm 0 5mm;
+      break-inside: auto;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 2.4mm 2.2mm;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--navy);
+      background: var(--wash);
+      font-size: 8.2pt;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    td { font-size: 8.7pt; }
+    tr { break-inside: avoid; }
+
+    .tight td, .tight th { padding: 1.8mm 2mm; }
+
+    .eq {
+      background: #f7f9fc;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--cyan);
+      border-radius: 2mm;
+      padding: 3.4mm 4mm 3mm;
+      margin: 3mm 0;
+      break-inside: avoid;
+    }
+
+    .eq-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 3mm;
+      font-size: 7.6pt;
+      color: var(--muted);
+      margin-bottom: 1.5mm;
+    }
+
+    .eq-title {
+      font-weight: 800;
+      color: var(--navy);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    math[display="block"] {
+      font-size: 15pt;
+      margin: 1.5mm auto;
+      overflow: hidden;
+    }
+
+    .eq code, code {
+      font-family: "DejaVu Sans Mono", monospace;
+      font-size: .88em;
+    }
+
+    pre {
+      font-family: "DejaVu Sans Mono", monospace;
+      font-size: 7.8pt;
+      line-height: 1.42;
+      white-space: pre-wrap;
+      color: #e9f1ff;
+      background: #15223e;
+      padding: 3.5mm 4mm;
+      border-radius: 2mm;
+      margin: 3mm 0;
+      break-inside: avoid;
+    }
+
+    .source {
+      font-family: "DejaVu Sans Mono", monospace;
+      color: #4d5c75;
+      font-size: 7.2pt;
+      margin-top: 1.5mm;
+    }
+
+    .cols-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5mm;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 2mm;
+      padding: 3.5mm;
+      break-inside: avoid;
+    }
+
+    .card h3 { margin-top: 0; }
+
+    ul, ol { margin: 2mm 0 4mm 5mm; padding-left: 4mm; }
+    li { margin-bottom: 1.5mm; }
+
+    .toc {
+      columns: 2;
+      column-gap: 10mm;
+      margin-top: 4mm;
+    }
+
+    .toc div {
+      break-inside: avoid;
+      border-bottom: 1px dotted #c7d0df;
+      padding: 2.3mm 0;
+      font-size: 9.2pt;
+    }
+
+    .num {
+      display: inline-block;
+      width: 9mm;
+      color: var(--blue);
+      font-weight: 800;
+    }
+
+    .truth-grid {
+      display: grid;
+      grid-template-columns: 32mm 1fr;
+      border-top: 1px solid var(--line);
+    }
+
+    .truth-grid > div {
+      padding: 3mm;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .truth-grid > div:nth-child(odd) {
+      font-weight: 800;
+      color: var(--navy);
+      background: var(--wash);
+    }
+
+    .mini { font-size: 8pt; color: var(--muted); }
+
+    .footer-note {
+      margin-top: 6mm;
+      color: #758198;
+      border-top: 1px solid var(--line);
+      padding-top: 2mm;
+      font-size: 7pt;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .matrix {
+      font-family: "DejaVu Serif", Georgia, serif;
+      font-size: 12pt;
+      text-align: center;
+      margin: 2mm 0;
+    }
+
+    .check { color: var(--green); font-weight: 800; }
+    .cross { color: var(--red); font-weight: 800; }
+    .nowrap { white-space: nowrap; }
+
+    .scope-page {
+      font-size: 8.7pt;
+      line-height: 1.28;
+    }
+
+    .scope-page h2 { margin-bottom: 3.5mm; }
+    .scope-page .lead { font-size: 11pt; line-height: 1.38; margin-bottom: 3.5mm; }
+    .scope-page .callout { padding: 2.6mm 3.5mm; margin: 2.5mm 0; }
+    .scope-page table { margin: 2mm 0 3mm; }
+    .scope-page .tight td,
+    .scope-page .tight th { padding: 1.25mm 1.6mm; font-size: 7.5pt; }
+    .scope-page h3 { margin: 3mm 0 1.5mm; }
+    .scope-page .toc { margin-top: 1mm; column-gap: 8mm; }
+    .scope-page .toc div { padding: 1.25mm 0; font-size: 8.2pt; }
+
+    .keep { break-inside: avoid; }
+
+    .verify-page {
+      font-size: 8.7pt;
+      line-height: 1.32;
+    }
+
+    .verify-page h2 { margin-bottom: 3.5mm; }
+    .verify-page h3 { margin: 3.5mm 0 1.5mm; }
+    .verify-page p { margin-bottom: 2mm; }
+    .verify-page pre { font-size: 6.8pt; padding: 2.5mm 3mm; margin: 2mm 0; }
+    .verify-page table { margin: 2mm 0 3mm; }
+    .verify-page .tight td,
+    .verify-page .tight th { padding: 1.15mm 1.6mm; font-size: 7.1pt; }
+    .verify-page .callout { padding: 2.5mm 3.5mm; margin: 2.5mm 0; }
+  </style>
+</head>
+<body>
+
+  <section class="page first cover">
+    <div class="eyebrow">Codebase-audited technical reference</div>
+    <h1>Weaver Quantum Equations &amp; Notation</h1>
+    <div class="subtitle">
+      Every identifiable quantum, quantum-inspired, and supporting mathematical
+      expression used by the runtime or present in Weaver’s declared training materials.
+    </div>
+
+    <div class="cover-grid">
+      <div class="cover-stat">
+        <strong>12</strong>
+        <span>measured circuit qubits in the active runtime</span>
+      </div>
+      <div class="cover-stat">
+        <strong>144</strong>
+        <span>sparse reservoir addresses, not simulated qubits</span>
+      </div>
+      <div class="cover-stat">
+        <strong>156</strong>
+        <span>total represented architecture roles</span>
+      </div>
+    </div>
+
+    <div class="cover-meta">
+      <div>
+        Weaver v3<br>
+        Repository evidence edition
+      </div>
+      <div style="text-align:right">
+        Audited 25 July 2026<br>
+        Runtime • fallback • datasets • provenance
+      </div>
+    </div>
+  </section>
+
+  <section class="page scope-page">
+    <div class="section-kicker">Read this first</div>
+    <h2>Scope, certainty, and status labels</h2>
+    <p class="lead">
+      This reference reports what is demonstrable from the checked-out Weaver codebase.
+      It separates executable mathematics from architectural language and from equations
+      that appear only in generated training text.
+    </p>
+
+    <div class="callout truth">
+      <strong>Most important finding.</strong> Weaver’s live quantum path builds and
+      measures a 12-qubit Qiskit circuit. The other 144 “reservoir qubits” are sparse
+      software addresses populated from 12 measured marginals. The live state space is
+      therefore <span class="nowrap">ℂ<sup>2¹²</sup></span>, not a dense
+      <span class="nowrap">ℂ<sup>2¹⁵⁶</sup></span> state vector.
+    </div>
+
+    <table class="tight">
+      <thead>
+        <tr><th>Status</th><th>Meaning in this document</th><th>Strength of claim</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="badge live">Live runtime</span></td>
+          <td>Executed by the active 12-qubit orchestrator.</td>
+          <td>Directly verified in source and focused unit tests.</td>
+        </tr>
+        <tr>
+          <td><span class="badge legacy">Legacy fallback</span></td>
+          <td>Executable 7-qubit circuit used when the active network cannot initialize.</td>
+          <td>Directly verified in source and circuit construction.</td>
+        </tr>
+        <tr>
+          <td><span class="badge classical">Classical support</span></td>
+          <td>Classical gating, ODE, scoring, or geometric math around the quantum path.</td>
+          <td>Directly verified in executable source.</td>
+        </tr>
+        <tr>
+          <td><span class="badge dormant">Dormant</span></td>
+          <td>Implemented equation-bearing code, but no active runtime import was found.</td>
+          <td>Present in source; not established as wired into production flow.</td>
+        </tr>
+        <tr>
+          <td><span class="badge training">Training text</span></td>
+          <td>Equation appears in a declared fine-tuning dataset or its generator.</td>
+          <td>Corpus presence proven; completed ingestion into every model is not.</td>
+        </tr>
+        <tr>
+          <td><span class="badge evidence">Evidence only</span></td>
+          <td>Equation reconstructed from a separate sampled pretraining checkpoint corpus.</td>
+          <td>Checkpoint exposure evidence, not active Weaver runtime behavior.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <strong>“Was trained on” has a hard boundary.</strong> The repository proves that
+      several quantum datasets were declared as inputs to training scripts. It does not
+      contain complete provenance for the upstream Qwen2 3B base model, and the declared
+      Nemotron output directory was not present. Accordingly, this is the complete
+      <em>codebase-observable</em> equation set, not a claim about every token ever seen
+      by an upstream foundation model.
+    </div>
+
+    <h3>Contents</h3>
+    <div class="toc">
+      <div><span class="num">01</span>Notation dictionary</div>
+      <div><span class="num">02</span>Architecture and dimensions</div>
+      <div><span class="num">03</span>Geometric constants</div>
+      <div><span class="num">04</span>Active variational circuit</div>
+      <div><span class="num">05</span>Measurement and entropy</div>
+      <div><span class="num">06</span>Fitness and evolution</div>
+      <div><span class="num">07</span>Routing, time, reservoir</div>
+      <div><span class="num">08</span>Legacy 7-qubit fallback</div>
+      <div><span class="num">09</span>Pineal interference</div>
+      <div><span class="num">10</span>Liquid-fracture dynamics</div>
+      <div><span class="num">11</span>Dormant governor</div>
+      <div><span class="num">12</span>Generator-only hybrid rules</div>
+      <div><span class="num">13</span>Training-corpus equations</div>
+      <div><span class="num">14</span>Pretraining evidence</div>
+      <div><span class="num">15</span>Truth matrix and verification</div>
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">01 · notation dictionary</div>
+    <h2>Symbols used throughout Weaver</h2>
+    <p class="lead">The same Greek letter is used for different ideas in different files. This glossary disambiguates them.</p>
+
+    <table>
+      <thead>
+        <tr><th>Symbol</th><th>Definition</th><th>Units / domain</th><th>Used in</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>q, i, j</strong></td><td>Core-qubit or pathway index.</td><td>Integer index</td><td>Circuits, marginals, geometry</td></tr>
+        <tr><td><strong>ℓ</strong></td><td>Variational layer index.</td><td>ℓ = 0,…,L−1</td><td>Active circuit</td></tr>
+        <tr><td><strong>N<sub>c</sub></strong></td><td>Measured core width.</td><td>12 qubits</td><td>Active runtime</td></tr>
+        <tr><td><strong>N<sub>r</sub></strong></td><td>Sparse reservoir-address count.</td><td>144 addresses</td><td>Reservoir projection</td></tr>
+        <tr><td><strong>N<sub>K</sub></strong></td><td>Represented Kingston architecture width.</td><td>N<sub>c</sub>+N<sub>r</sub>=156</td><td>Metadata / diagrams</td></tr>
+        <tr><td><strong>φ<sub>g</sub></strong></td><td>Golden ratio used for dodecahedral coordinates.</td><td>(1+√5)/2 ≈ 1.618</td><td>12-node graph geometry</td></tr>
+        <tr><td><strong>φ<sub>p</sub></strong></td><td>Pentagonal phase step.</td><td>2π/5 = 72° ≈ 1.2566 rad</td><td>Fallback circuit, Pineal geometry, training text</td></tr>
+        <tr><td><strong>θ, ϕ</strong></td><td>Trainable Y- and Z-rotation angles.</td><td>Radians, wrapped mod 2π</td><td>Active variational circuit</td></tr>
+        <tr><td><strong>α<sub>ℓi</sub></strong></td><td>Deterministic layer/qubit state-encoding phase.</td><td>Radians</td><td>Active circuit</td></tr>
+        <tr><td><strong>β<sub>ℓab</sub></strong></td><td>Pair phase passed to controlled-RZ.</td><td>Radians</td><td>Active circuit</td></tr>
+        <tr><td><strong>γ<sub>ℓi</sub></strong></td><td>Open-system proxy RZ drive angle.</td><td>Radians</td><td>Active circuit</td></tr>
+        <tr><td><strong>c<sub>s</sub></strong></td><td>Observed shot count for bit string s.</td><td>Non-negative integer</td><td>Qiskit measurement counts</td></tr>
+        <tr><td><strong>p<sub>s</sub></strong></td><td>Empirical probability c<sub>s</sub>/N.</td><td>[0,1]</td><td>Shannon entropy, marginals</td></tr>
+        <tr><td><strong>H</strong></td><td>Context-dependent entropy. In runtime it is Shannon entropy; in training prose it may mean von Neumann entropy.</td><td>Bits if log<sub>2</sub>; nats if ln</td><td>Runtime and datasets</td></tr>
+        <tr><td><strong>ρ</strong></td><td>Density operator appearing in training text, not the live circuit implementation.</td><td>Positive trace-one operator</td><td>Omega dataset</td></tr>
+        <tr><td><strong>Γ</strong></td><td>Decoherence rate in generated Lindblad examples.</td><td>Inverse time</td><td>Omega dataset</td></tr>
+        <tr><td><strong>L</strong></td><td>Lindblad jump operator in generated training text; also layer count elsewhere.</td><td>Operator / integer</td><td>Context dependent</td></tr>
+        <tr><td><strong>τ</strong></td><td>Adaptive governor threshold or liquid-fracture time constant, depending on file.</td><td>Scalar / time</td><td>Governor, liquid fracture</td></tr>
+        <tr><td><strong>Δt</strong></td><td>Elapsed time or ODE integration step.</td><td>Seconds</td><td>Governor, liquid fracture</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <strong>Do not conflate φ<sub>g</sub> and φ<sub>p</sub>.</strong>
+      The code calls both values “phi” in different modules. One is the golden
+      ratio; the other is a 72-degree phase increment. They are numerically and
+      conceptually different.
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">02 · architecture and dimensions</div>
+    <h2>What “156 qubits” means in the implementation</h2>
+    <div class="status-line"><span class="badge live">Live runtime</span><span class="mini">12 measured qubits + sparse reservoir metadata</span></div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Represented architecture count</span><span>(2.1)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>N</mi><mi>K</mi></msub><mo>=</mo>
+          <msub><mi>N</mi><mi>c</mi></msub><mo>+</mo>
+          <msub><mi>N</mi><mi>r</mi></msub><mo>=</mo>
+          <mn>12</mn><mo>+</mo><mn>144</mn><mo>=</mo><mn>156</mn>
+        </mrow>
+      </math>
+      <div class="source">quantum_networks.py: N_CORE_QUBITS, N_RESERVOIR_QUBITS, N_KINGSTON_QUBITS</div>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Actually simulated Hilbert space</span><span>(2.2)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>ℋ</mi><mtext>live</mtext></msub>
+          <mo>=</mo><msup><mi>ℂ</mi><msup><mn>2</mn><mn>12</mn></msup></msup>
+          <mo>,</mo>
+          <mspace width="1em"/>
+          <mi>dim</mi><mo>(</mo><msub><mi>ℋ</mi><mtext>live</mtext></msub><mo>)</mo>
+          <mo>=</mo><mn>4096</mn>
+        </mrow>
+      </math>
+      <p>The active Qiskit circuit is constructed with 12 quantum bits and 12 classical readout bits.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Sparse reservoir address set</span><span>(2.3)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>ℛ</mi><mo>=</mo><mo>{</mo><mn>12</mn><mo>,</mo><mn>13</mn><mo>,</mo><mo>…</mo><mo>,</mo><mn>155</mn><mo>}</mo>
+          <mo>,</mo><mspace width="1em"/><mo>|</mo><mi>ℛ</mi><mo>|</mo><mo>=</mo><mn>144</mn>
+        </mrow>
+      </math>
+      <p>Each reservoir entry is a derived record containing source core, band, weight, decay, and phase address. It is not an amplitude in a 156-qubit state vector.</p>
+    </div>
+
+    <div class="callout false">
+      <strong>Not implemented:</strong>
+      <span class="nowrap">ℋ = ℂ<sup>2¹⁵⁶</sup></span>, a 156-qubit state vector,
+      a 156-qubit density matrix, or a partial trace from qubits 12–155 during
+      live inference.
+    </div>
+
+    <h3>Sparse connectivity bookkeeping</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Core-to-reservoir address mapping</span><span>(2.4)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>r</mi><mo>(</mo><mi>q</mi><mo>,</mo><mi>b</mi><mo>)</mo>
+          <mo>=</mo><mn>12</mn><mo>+</mo>
+          <mo>[</mo><mi>q</mi><msub><mi>N</mi><mi>c</mi></msub><mo>+</mo><mi>b</mi><mo>]</mo>
+          <mspace width=".4em"/><mi>mod</mi><mspace width=".4em"/><msub><mi>N</mi><mi>r</mi></msub>
+        </mrow>
+      </math>
+      <p>For q,b∈{0,…,11}, every core role owns 12 reservoir addresses.</p>
+      <div class="source">quantum_networks.py: core_reservoir_couplings()</div>
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">03 · geometric constants</div>
+    <h2>Dodecahedral coordinates and pentagonal phase</h2>
+
+    <div class="cols-2">
+      <div class="card">
+        <span class="badge live">Live runtime</span>
+        <h3>Golden-ratio geometry</h3>
+        <div class="eq">
+          <div class="eq-label"><span class="eq-title">Golden ratio</span><span>(3.1)</span></div>
+          <math display="block">
+            <mrow><msub><mi>φ</mi><mi>g</mi></msub><mo>=</mo>
+              <mfrac><mrow><mn>1</mn><mo>+</mo><msqrt><mn>5</mn></msqrt></mrow><mn>2</mn></mfrac>
+            </mrow>
+          </math>
+        </div>
+        <p>The 12 raw vertices are permutations/sign patterns of:</p>
+        <div class="matrix">(±1, ±φ<sub>g</sub>, 0), (0, ±1, ±φ<sub>g</sub>), (±φ<sub>g</sub>, 0, ±1)</div>
+        <div class="eq">
+          <div class="eq-label"><span class="eq-title">Coordinate normalization</span><span>(3.2)</span></div>
+          <math display="block">
+            <mrow>
+              <msub><mi>x</mi><mi>norm</mi></msub>
+              <mo>=</mo><mfrac><mrow><mi>x</mi><mo>-</mo><msub><mi>x</mi><mi>min</mi></msub></mrow>
+              <mrow><msub><mi>x</mi><mi>max</mi></msub><mo>-</mo><msub><mi>x</mi><mi>min</mi></msub></mrow></mfrac>
+            </mrow>
+          </math>
+        </div>
+        <div class="eq">
+          <div class="eq-label"><span class="eq-title">Squared Euclidean edge metric</span><span>(3.3)</span></div>
+          <math display="block">
+            <mrow><msubsup><mi>d</mi><mrow><mi>i</mi><mi>j</mi></mrow><mn>2</mn></msubsup>
+              <mo>=</mo><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mn>3</mn></munderover>
+              <msup><mrow><mo>(</mo><msub><mi>v</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub><mo>-</mo>
+              <msub><mi>v</mi><mrow><mi>j</mi><mi>k</mi></mrow></msub><mo>)</mo></mrow><mn>2</mn></msup>
+            </mrow>
+          </math>
+        </div>
+        <p class="mini">The five nearest neighbors per vertex produce 30 unique edges and degree 5 at every node.</p>
+      </div>
+
+      <div class="card">
+        <span class="badge legacy">Fallback + support</span>
+        <h3>Pentagonal phase geometry</h3>
+        <div class="eq">
+          <div class="eq-label"><span class="eq-title">Phase step</span><span>(3.4)</span></div>
+          <math display="block">
+            <mrow><msub><mi>φ</mi><mi>p</mi></msub><mo>=</mo><mfrac><mrow><mn>2</mn><mi>π</mi></mrow><mn>5</mn></mfrac>
+            <mo>=</mo><mn>72</mn><mo>°</mo><mo>≈</mo><mn>1.256637</mn></mrow>
+          </math>
+        </div>
+        <div class="eq">
+          <div class="eq-label"><span class="eq-title">Pineal vertex angle and position</span><span>(3.5)</span></div>
+          <math display="block">
+            <mrow>
+              <msub><mi>ϑ</mi><mi>i</mi></msub><mo>=</mo><mfrac><mrow><mn>2</mn><mi>π</mi><mi>i</mi></mrow><mn>5</mn></mfrac>
+              <mo>,</mo><mspace width="1em"/>
+              <msub><mi>v</mi><mi>i</mi></msub><mo>=</mo>
+              <mo>(</mo><mi>cos</mi><msub><mi>ϑ</mi><mi>i</mi></msub><mo>,</mo>
+              <mi>sin</mi><msub><mi>ϑ</mi><mi>i</mi></msub><mo>)</mo>
+            </mrow>
+          </math>
+        </div>
+        <p>
+          This constant drives the 7-qubit fallback rotations, the classical
+          five-expert geometry, and the synthetic ZZFeatureMap prose.
+        </p>
+        <div class="callout warn">
+          The exact cosine values are cos(72°)≈0.309 and cos(144°)≈−0.809.
+          Therefore, a comment describing all adjacent interference as “+1”
+          is qualitative, not the value computed by the code.
+        </div>
+      </div>
+    </div>
+    <div class="source">Sources: quantum_networks.py:168–200; quantum_soul.py:27–30; pineal_gate.py:72–80</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">04 · active variational circuit</div>
+    <h2>Parameterized gates and deterministic phase injection</h2>
+    <div class="status-line"><span class="badge live">Live runtime</span><span class="mini">VariationalFractureCircuit, default width 12</span></div>
+
+    <h3>Trainable parameterization</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Per-layer local rotation</span><span>(4.1)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>U</mi><mrow><mi>ℓ</mi><mi>q</mi></mrow></msub>
+          <mo>=</mo>
+          <msub><mi>R</mi><mi>z</mi></msub><mo>(</mo><msub><mi>ϕ</mi><mrow><mi>ℓ</mi><mi>q</mi></mrow></msub><mo>)</mo>
+          <msub><mi>R</mi><mi>y</mi></msub><mo>(</mo><msub><mi>θ</mi><mrow><mi>ℓ</mi><mi>q</mi></mrow></msub><mo>)</mo>
+        </mrow>
+      </math>
+      <p>The code applies <code>RY</code> then <code>RZ</code>; the rightmost operator therefore acts first in conventional matrix notation.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Rotation definitions</span><span>(4.2)</span></div>
+      <div class="matrix">
+        R<sub>y</sub>(θ) =
+        [ cos(θ/2)&nbsp;&nbsp; −sin(θ/2); &nbsp;sin(θ/2)&nbsp;&nbsp; cos(θ/2) ],
+        &nbsp;&nbsp;
+        R<sub>z</sub>(ϕ) =
+        diag(e<sup>−iϕ/2</sup>, e<sup>iϕ/2</sup>)
+      </div>
+      <p class="mini">These standard gate matrices explain the Qiskit operations; they are not separately implemented as handwritten matrices.</p>
+    </div>
+
+    <h3>Initialization</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Alternating layer priors</span><span>(4.3)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>θ</mi><mrow><mi>ℓ</mi><mi>q</mi></mrow></msub>
+          <mo>∼</mo>
+          <mrow><mo>{</mo>
+            <mtable>
+              <mtr><mtd><mi>𝒩</mi><mo>(</mo><mn>0</mn><mo>,</mo><msup><mn>0.1</mn><mn>2</mn></msup><mo>)</mo></mtd><mtd><mtext>ℓ even</mtext></mtd></mtr>
+              <mtr><mtd><mo>−</mo><mo>|</mo><mi>𝒩</mi><mo>(</mo><mn>0</mn><mo>,</mo><msup><mn>0.1</mn><mn>2</mn></msup><mo>)</mo><mo>|</mo></mtd><mtd><mtext>ℓ odd</mtext></mtd></mtr>
+            </mtable>
+          </mrow>
+          <mo>,</mo><mspace width="1em"/>
+          <msub><mi>ϕ</mi><mrow><mi>ℓ</mi><mi>q</mi></mrow></msub>
+          <mo>∼</mo><mi>𝒩</mi><mo>(</mo><mn>0</mn><mo>,</mo><msup><mn>0.05</mn><mn>2</mn></msup><mo>)</mo>
+        </mrow>
+      </math>
+      <p>The negative absolute-value prior on odd θ layers introduces alternating sign structure.</p>
+    </div>
+
+    <h3>State-encoding phases</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Single-qubit phase schedule</span><span>(4.4)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>α</mi><mrow><mi>ℓ</mi><mi>i</mi></mrow></msub>
+          <mo>=</mo>
+          <mfrac>
+            <mrow><mo>(</mo><mi>ℓ</mi><mo>+</mo><mn>1</mn><mo>)</mo><mo>(</mo><mi>i</mi><mo>+</mo><mn>1</mn><mo>)</mo><mi>π</mi></mrow>
+            <mrow><mn>2</mn><msub><mi>N</mi><mi>c</mi></msub></mrow>
+          </mfrac>
+          <mo>=</mo>
+          <mfrac><mrow><mo>(</mo><mi>ℓ</mi><mo>+</mo><mn>1</mn><mo>)</mo><mo>(</mo><mi>i</mi><mo>+</mo><mn>1</mn><mo>)</mo><mi>π</mi></mrow><mn>24</mn></mfrac>
+        </mrow>
+      </math>
+      <p>Applied as <code>RZ(αℓi)</code>.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Pair phase</span><span>(4.5)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>β</mi><mrow><mi>ℓ</mi><mi>a</mi><mi>b</mi></mrow></msub>
+          <mo>=</mo>
+          <mfrac><mrow><msub><mi>α</mi><mrow><mi>ℓ</mi><mi>a</mi></mrow></msub>
+          <msub><mi>α</mi><mrow><mi>ℓ</mi><mi>b</mi></mrow></msub></mrow><mi>π</mi></mfrac>
+        </mrow>
+      </math>
+      <p>Applied as <code>CRZ(βℓab)</code> on selected state-encoding pairs.</p>
+    </div>
+
+    <div class="callout warn">
+      The active implementation does <strong>not</strong> instantiate Qiskit’s
+      <code>ZZFeatureMap</code> and does not apply <code>RZZ</code>. The pair
+      encoding is a controlled-RZ proxy. “ZZ feature map” appears in comments
+      and training text, but the executable gate is <code>CRZ</code>.
+    </div>
+    <div class="source">Source: CascadeProjects/windsurf-project/quantum_networks.py:432–545</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">04 · active variational circuit, continued</div>
+    <h2>Open-system proxy and circuit composition</h2>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Deterministic drive angle</span><span>(4.6)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>γ</mi><mrow><mi>ℓ</mi><mi>i</mi></mrow></msub>
+          <mo>=</mo>
+          <mfrac><mrow><mo>(</mo><mi>ℓ</mi><mo>+</mo><mn>1</mn><mo>)</mo><mo>(</mo><mi>i</mi><mo>+</mo><mn>1</mn><mo>)</mo></mrow><mn>32</mn></mfrac>
+          <mi>π</mi>
+        </mrow>
+      </math>
+      <p>Applied as a local <code>RZ(γℓi)</code> on the open-system module targets.</p>
+    </div>
+
+    <table class="tight">
+      <thead><tr><th>Proxy operation</th><th>Angle</th><th>Interpretation in code</th></tr></thead>
+      <tbody>
+        <tr><td><code>CRZ</code> on module pairs</td><td>π/(ℓ+3)</td><td>Layer-dependent damping/phase coupling proxy</td></tr>
+        <tr><td><code>CRX</code> on entropy-routing pairs</td><td>π/7</td><td>Fixed entropy-routing mixing proxy</td></tr>
+        <tr><td><code>CRZ</code> on readout pairs</td><td>π/9</td><td>Fixed measurement/readout coupling proxy</td></tr>
+      </tbody>
+    </table>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Conceptual layer unitary</span><span>(4.7)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>U</mi><mi>ℓ</mi></msub>
+          <mo>=</mo>
+          <msub><mi>U</mi><mtext>readout</mtext></msub>
+          <msub><mi>U</mi><mtext>entropy</mtext></msub>
+          <msub><mi>U</mi><mtext>open</mtext></msub>
+          <msub><mi>U</mi><mtext>encode</mtext></msub>
+          <msub><mi>U</mi><mtext>entangle</mtext></msub>
+          <munderover><mo>∏</mo><mrow><mi>q</mi><mo>=</mo><mn>0</mn></mrow><mn>11</mn></munderover>
+          <msub><mi>U</mi><mrow><mi>ℓ</mi><mi>q</mi></mrow></msub>
+        </mrow>
+      </math>
+      <p>This expression summarizes application order; the code builds the circuit gate-by-gate from selected topology and module pairs.</p>
+    </div>
+
+    <h3>What “open system” means here</h3>
+    <div class="truth-grid">
+      <div>Implemented</div>
+      <div>Unitary RZ/CRZ/CRX operations whose names and comments model drive, damping, routing, and readout.</div>
+      <div>Not implemented</div>
+      <div>No density matrix, noise channel, Kraus operator, stochastic master equation, or numerical Lindblad integration in the active circuit path.</div>
+      <div>Consequence</div>
+      <div>“Lindblad-like” is an architectural analogy for the live gates. The actual Lindblad equation appears only in generated training text.</div>
+    </div>
+
+    <h3>Observed operation inventory</h3>
+    <p>A direct build of the default active 12-qubit circuit produced:</p>
+    <pre>cx: 198   rz: 51   ry: 48   crz: 48
+measure: 12   crx: 3   barrier: 3</pre>
+    <p class="mini">
+      Counts depend on the default layer/topology configuration at audit time.
+      They prove circuit width and gate families, not hardware execution.
+    </p>
+    <div class="source">Source: quantum_networks.py:500–545; verified by local circuit construction</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">05 · measurement and entropy</div>
+    <h2>Shot probabilities, Shannon entropy, and marginals</h2>
+    <div class="status-line"><span class="badge live">Live runtime</span><span class="mini">Classical statistics computed from measured Qiskit counts</span></div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Empirical bit-string probability</span><span>(5.1)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>p</mi><mi>s</mi></msub>
+          <mo>=</mo><mfrac><msub><mi>c</mi><mi>s</mi></msub><mi>N</mi></mfrac>
+          <mo>,</mo><mspace width="1em"/>
+          <mi>N</mi><mo>=</mo><munderover><mo>∑</mo><mi>s</mi><mtext>observed</mtext></munderover><msub><mi>c</mi><mi>s</mi></msub>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Runtime entropy</span><span>(5.2)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>H</mi><mn>2</mn></msub><mo>(</mo><mi>S</mi><mo>)</mo>
+          <mo>=</mo><mo>−</mo><munderover><mo>∑</mo><mrow><mi>s</mi><mo>:</mo><msub><mi>p</mi><mi>s</mi></msub><mo>&gt;</mo><mn>0</mn></mrow><mtext>observed</mtext></munderover>
+          <msub><mi>p</mi><mi>s</mi></msub><msub><mi>log</mi><mn>2</mn></msub><msub><mi>p</mi><mi>s</mi></msub>
+        </mrow>
+      </math>
+      <p>This is Shannon entropy of the shot-count distribution, measured in bits.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Fitness diversity normalization</span><span>(5.3)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>H</mi><mi>max</mi></msub>
+          <mo>=</mo>
+          <mrow><mo>{</mo><mtable>
+            <mtr><mtd><msub><mi>log</mi><mn>2</mn></msub><mi>K</mi></mtd><mtd><mtext>if K &gt; 1</mtext></mtd></mtr>
+            <mtr><mtd><mn>1</mn></mtd><mtd><mtext>otherwise</mtext></mtd></mtr>
+          </mtable></mrow>
+          <mo>,</mo><mspace width="1em"/>
+          <mi>D</mi><mo>=</mo><mfrac><msub><mi>H</mi><mn>2</mn></msub><mrow><mi>max</mi><mo>(</mo><msub><mi>H</mi><mi>max</mi></msub><mo>,</mo><mn>1</mn><mo>)</mo></mrow></mfrac>
+        </mrow>
+      </math>
+      <p>K is the number of distinct observed bit strings, not 2<sup>12</sup>.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Single-qubit marginal</span><span>(5.4)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>P</mi><mo>(</mo><msub><mi>q</mi><mi>i</mi></msub><mo>=</mo><mn>1</mn><mo>)</mo>
+          <mo>=</mo>
+          <munderover><mo>∑</mo><mrow><mi>s</mi><mo>:</mo><msub><mi>s</mi><mi>i</mi></msub><mo>=</mo><mn>1</mn></mrow><mtext>observed</mtext></munderover>
+          <msub><mi>p</mi><mi>s</mi></msub>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Readout entropy normalization</span><span>(5.5)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>H</mi><mi>norm</mi></msub>
+          <mo>=</mo><mi>clip</mi>
+          <mo>(</mo>
+          <mfrac><msub><mi>H</mi><mn>2</mn></msub>
+          <mrow><mi>max</mi><mo>(</mo><msub><mi>log</mi><mn>2</mn></msub><mo>(</mo><mi>max</mi><mo>(</mo><mi>K</mi><mo>,</mo><mn>2</mn><mo>)</mo><mo>)</mo><mo>,</mo><mn>1</mn><mo>)</mo></mrow></mfrac>
+          <mo>,</mo><mn>0</mn><mo>,</mo><mn>1</mn><mo>)</mo>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="callout truth">
+      <strong>Correct terminology:</strong> all entropy produced by the live
+      runtime is count-based Shannon entropy. It is not
+      <span class="nowrap">S(ρ)=−Tr(ρ log ρ)</span>.
+    </div>
+    <div class="source">Sources: quantum_networks.py:619–641, 946–987</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">06 · fitness and evolution</div>
+    <h2>What the learner optimizes—and what it actually selects</h2>
+    <div class="status-line"><span class="badge live">Live runtime</span><span class="mini">QuantumLearner evolutionary strategy</span></div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Feedback alignment</span><span>(6.1)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>A</mi><mo>=</mo><mfrac><mn>1</mn><mi>M</mi></mfrac>
+          <munderover><mo>∑</mo><mrow><mi>m</mi><mo>=</mo><mn>1</mn></mrow><mi>M</mi></munderover>
+          <msub><mi>f</mi><mi>m</mi></msub>
+        </mrow>
+      </math>
+      <p>A is the mean of available expert/hub feedback values; absent feedback yields zero alignment.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Pathway depth</span><span>(6.2)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>d</mi><mo>=</mo><mfrac><mrow><mi>popcount</mi><mo>(</mo><msup><mi>s</mi><mo>*</mo></msup><mo>)</mo></mrow><msub><mi>N</mi><mi>c</mi></msub></mfrac>
+          <mo>=</mo><mfrac><mrow><mtext>active bits in dominant string</mtext></mrow><mn>12</mn></mfrac>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Reported circuit fitness</span><span>(6.3)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>F</mi><mo>=</mo><mn>0.40</mn><mi>D</mi><mo>+</mo><mn>0.35</mn><mi>A</mi><mo>+</mo><mn>0.25</mn><mi>d</mi>
+        </mrow>
+      </math>
+    </div>
+
+    <h3>Candidate generation</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Gaussian mutation</span><span>(6.4)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>δ</mi><mo>∼</mo><mi>𝒩</mi><mo>(</mo><mn>0</mn><mo>,</mo><msup><mi>η</mi><mn>2</mn></msup><mi>I</mi><mo>)</mo>
+          <mo>,</mo><mspace width="1em"/>
+          <msup><mi>θ</mi><mo>′</mo></msup><mo>=</mo><mi>θ</mi><mo>+</mo><mi>δ</mi>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Parameter-entropy selection heuristic</span><span>(6.5)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>E</mi><mi>θ</mi></msub><mo>(</mo><msup><mi>θ</mi><mo>′</mo></msup><mo>)</mo>
+          <mo>=</mo><mo>−</mo><munderover><mo>∑</mo><mi>k</mi><mtext>parameters</mtext></munderover>
+          <mo>|</mo><msubsup><mi>θ</mi><mi>k</mi><mo>′</mo></msubsup><mo>|</mo>
+          <mi>ln</mi><mo>(</mo><mo>|</mo><msubsup><mi>θ</mi><mi>k</mi><mo>′</mo></msubsup><mo>|</mo><mo>+</mo><msup><mn>10</mn><mrow><mo>−</mo><mn>10</mn></mrow></msup><mo>)</mo>
+        </mrow>
+      </math>
+      <p>This is not Shannon entropy of a normalized distribution and not quantum entropy. It is a scalar parameter-spread heuristic.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Momentum and wrapped update</span><span>(6.6)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>v</mi><mi>t</mi></msub>
+          <mo>=</mo><mi>m</mi><msub><mi>v</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub>
+          <mo>+</mo><mo>(</mo><mn>1</mn><mo>−</mo><mi>m</mi><mo>)</mo><msubsup><mi>δ</mi><mi>best</mi><mi></mi></msubsup>
+          <mo>,</mo><mspace width="1em"/>
+          <msub><mi>θ</mi><mi>t</mi></msub>
+          <mo>=</mo><mo>(</mo><msub><mi>θ</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><msub><mi>v</mi><mi>t</mi></msub><mo>)</mo>
+          <mspace width=".3em"/><mi>mod</mi><mspace width=".3em"/><mn>2</mn><mi>π</mi>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="callout warn">
+      <strong>Implementation caveat.</strong> The measured fitness F is computed
+      and recorded, but the perturbation winner is selected using E<sub>θ</sub>,
+      not by evaluating F for each candidate. Consequently, the current update
+      rule does not directly optimize the displayed fitness objective.
+    </div>
+    <div class="source">Sources: quantum_networks.py:619–705</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">07 · routing, temporal injection, reservoir</div>
+    <h2>From measured bits to expert bias and sparse memory</h2>
+
+    <h3>Entropy-based routing</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Subset marginal distribution</span><span>(7.1)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>p</mi><mrow><mi>d</mi><mi>u</mi></mrow></msub>
+          <mo>=</mo>
+          <munderover><mo>∑</mo><mrow><mi>s</mi><mo>:</mo><mi>project</mi><mo>(</mo><mi>s</mi><mo>,</mo><msub><mi>Q</mi><mi>d</mi></msub><mo>)</mo><mo>=</mo><mi>u</mi></mrow><mtext>observed</mtext></munderover>
+          <msub><mi>p</mi><mi>s</mi></msub>
+        </mrow>
+      </math>
+      <p>Q<sub>d</sub> is the qubit subset assigned to routing domain d; u is a projected sub-bit-string.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Routing entropy and bias</span><span>(7.2)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>H</mi><mi>d</mi></msub>
+          <mo>=</mo><mo>−</mo><munderover><mo>∑</mo><mi>u</mi><mtext>observed</mtext></munderover>
+          <msub><mi>p</mi><mrow><mi>d</mi><mi>u</mi></mrow></msub>
+          <msub><mi>log</mi><mn>2</mn></msub><msub><mi>p</mi><mrow><mi>d</mi><mi>u</mi></mrow></msub>
+          <mo>,</mo><mspace width="1em"/>
+          <msub><mi>b</mi><mi>d</mi></msub>
+          <mo>=</mo><mi>clip</mi><mo>(</mo><mfrac><msub><mi>H</mi><mi>d</mi></msub><mrow><mo>|</mo><msub><mi>Q</mi><mi>d</mi></msub><mo>|</mo></mrow></mfrac><mo>,</mo><mn>0</mn><mo>,</mo><mn>1</mn><mo>)</mo>
+        </mrow>
+      </math>
+    </div>
+
+    <h3>Temporal encoding from a trace vector</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Bounded temporal angle</span><span>(7.3)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mover><mi>θ</mi><mo>~</mo></mover><mi>k</mi></msub>
+          <mo>=</mo><mi>arctan</mi><mo>(</mo><msub><mi>z</mi><mi>k</mi></msub><mo>)</mo><mo>+</mo><mfrac><mi>π</mi><mn>2</mn></mfrac>
+        </mrow>
+      </math>
+      <p>The arctangent maps unbounded trace components into a bounded angular interval shifted by π/2.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Fixed learned/temporal blend</span><span>(7.4)</span></div>
+      <math display="block">
+        <mrow>
+          <msubsup><mi>θ</mi><mi>k</mi><mtext>blend</mtext></msubsup>
+          <mo>=</mo><mn>0.7</mn><msubsup><mi>θ</mi><mi>k</mi><mtext>learned</mtext></msubsup>
+          <mo>+</mo><mn>0.3</mn><msub><mover><mi>θ</mi><mo>~</mo></mover><mi>k</mi></msub>
+        </mrow>
+      </math>
+    </div>
+
+    <h3>Sparse reservoir projection</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Band decay</span><span>(7.5)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>d</mi><mi>b</mi></msub>
+          <mo>=</mo><mn>1</mn><mo>−</mo><mn>0.35</mn><mfrac><mi>b</mi><mn>11</mn></mfrac>
+          <mo>,</mo><mspace width="1em"/><mi>b</mi><mo>∈</mo><mo>{</mo><mn>0</mn><mo>,</mo><mo>…</mo><mo>,</mo><mn>11</mn><mo>}</mo>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Reservoir weight and phase address</span><span>(7.6)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>w</mi><mi>r</mi></msub><mo>=</mo><mi>P</mi><mo>(</mo><msub><mi>q</mi><mtext>source</mtext></msub><mo>=</mo><mn>1</mn><mo>)</mo><msub><mi>d</mi><mi>b</mi></msub>
+          <mo>,</mo><mspace width="1em"/>
+          <msub><mi>a</mi><mi>r</mi></msub><mo>=</mo><mo>[</mo><mo>(</mo><mi>r</mi><mo>+</mo><mn>1</mn><mo>)</mo><msub><mi>s</mi><mtext>module</mtext></msub><mo>]</mo>
+          <mspace width=".3em"/><mi>mod</mi><mspace width=".3em"/><mn>144</mn>
+        </mrow>
+      </math>
+      <p>These are classical records derived from core marginals. They do not update quantum amplitudes.</p>
+    </div>
+    <div class="source">Sources: quantum_networks.py:756–782, 818–861, 990–1015</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">08 · legacy fallback</div>
+    <h2>The executable 7-qubit fracture circuit</h2>
+    <div class="status-line"><span class="badge legacy">Legacy fallback</span><span class="mini">Used if the 12-qubit orchestrator is unavailable</span></div>
+
+    <p class="lead">
+      The fallback has seven measured qubits: five pentagonal pathway qubits plus
+      Weaver and Void. Its angles are fixed by φ<sub>p</sub>=2π/5.
+    </p>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Local preparation</span><span>(8.1)</span></div>
+      <math display="block">
+        <mrow>
+          <mo>|</mo><msub><mi>ψ</mi><mi>q</mi></msub><mo>⟩</mo>
+          <mo>=</mo>
+          <msub><mi>R</mi><mi>x</mi></msub><mo>(</mo><mfrac><msub><mi>φ</mi><mi>p</mi></msub><mn>2</mn></mfrac><mo>)</mo>
+          <msub><mi>R</mi><mi>y</mi></msub><mo>(</mo><mi>q</mi><msub><mi>φ</mi><mi>p</mi></msub><mo>)</mo><mo>|</mo><mn>0</mn><mo>⟩</mo>
+        </mrow>
+      </math>
+      <p>Applied to each of q=0,…,6.</p>
+    </div>
+
+    <table>
+      <thead><tr><th>Connection</th><th>Gate</th><th>Angle</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>Pentagon edge (i,(i+1) mod 5)</td><td>CRX</td><td>φ<sub>p</sub></td><td>Nearest-neighbor pathway mixing</td></tr>
+        <tr><td>Pentagon diagonal</td><td>CRZ</td><td>2φ<sub>p</sub></td><td>Longer-range phase interference</td></tr>
+        <tr><td>Weaver couplings</td><td>CRX</td><td>φ<sub>p</sub>/2</td><td>Weaver-mediated mixing</td></tr>
+        <tr><td>Void couplings</td><td>CRZ</td><td>φ<sub>p</sub></td><td>Void-mediated phase coupling</td></tr>
+      </tbody>
+    </table>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Fallback circuit summary</span><span>(8.2)</span></div>
+      <math display="block">
+        <mrow>
+          <mo>|</mo><msub><mi>ψ</mi><mtext>fallback</mtext></msub><mo>⟩</mo>
+          <mo>=</mo>
+          <msub><mi>U</mi><mtext>Void</mtext></msub>
+          <msub><mi>U</mi><mtext>Weaver</mtext></msub>
+          <msub><mi>U</mi><mtext>diagonal</mtext></msub>
+          <msub><mi>U</mi><mtext>edge</mtext></msub>
+          <munderover><mo>∏</mo><mrow><mi>q</mi><mo>=</mo><mn>0</mn></mrow><mn>6</mn></munderover>
+          <msub><mi>R</mi><mi>x</mi></msub><mo>(</mo><msub><mi>φ</mi><mi>p</mi></msub><mo>/</mo><mn>2</mn><mo>)</mo>
+          <msub><mi>R</mi><mi>y</mi></msub><mo>(</mo><mi>q</mi><msub><mi>φ</mi><mi>p</mi></msub><mo>)</mo>
+          <mo>|</mo><msup><mn>0</mn><mo>⊗7</mo></msup><mo>⟩</mo>
+        </mrow>
+      </math>
+    </div>
+
+    <p>A direct build produced the following gate inventory:</p>
+    <pre>ry: 7   rx: 7   crx: 7   crz: 7   measure: 7</pre>
+
+    <div class="callout">
+      This fallback is the source of many 7-qubit equations in
+      <code>weaver_reversal_dataset.jsonl</code>. Those examples describe a real
+      executable fallback, but they do not describe the current default 12-qubit
+      path.
+    </div>
+    <div class="source">Source: quantum_soul.py:85–105, 116–169</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">09 · Pineal interference</div>
+    <h2>Classical mixture-of-experts geometry</h2>
+    <div class="status-line"><span class="badge classical">Classical support</span><span class="mini">No qubit amplitudes are manipulated in these equations</span></div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Gate logits</span><span>(9.1)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>g</mi><mo>=</mo><mi>x</mi><mi>W</mi><mo>+</mo><mi>b</mi>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Blended routing weights</span><span>(9.2)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>w</mi>
+          <mo>=</mo><mn>0.5</mn><mi>softmax</mi><mo>(</mo><mi>g</mi><mo>)</mo>
+          <mo>+</mo><mn>0.5</mn><msub><mi>w</mi><mtext>fracture</mtext></msub>
+        </mrow>
+      </math>
+      <p>The top-k surviving entries are renormalized to sum to one.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Circular weighted centroid</span><span>(9.3)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>c</mi><mi>x</mi></msub><mo>=</mo><munderover><mo>∑</mo><mi>i</mi><mrow><mn>0</mn><mo>…</mo><mn>4</mn></mrow></munderover><msub><mi>w</mi><mi>i</mi></msub><mi>cos</mi><msub><mi>ϑ</mi><mi>i</mi></msub>
+          <mo>,</mo><mspace width=".8em"/>
+          <msub><mi>c</mi><mi>y</mi></msub><mo>=</mo><munderover><mo>∑</mo><mi>i</mi><mrow><mn>0</mn><mo>…</mo><mn>4</mn></mrow></munderover><msub><mi>w</mi><mi>i</mi></msub><mi>sin</mi><msub><mi>ϑ</mi><mi>i</mi></msub>
+        </mrow>
+      </math>
+      <math display="block">
+        <mrow>
+          <msub><mi>ϑ</mi><mtext>centroid</mtext></msub>
+          <mo>=</mo><mi>atan2</mi><mo>(</mo><msub><mi>c</mi><mi>y</mi></msub><mo>,</mo><msub><mi>c</mi><mi>x</mi></msub><mo>)</mo>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Pairwise interference score</span><span>(9.4)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>I</mi><mo>=</mo><mfrac><mn>1</mn><mi>M</mi></mfrac>
+          <munderover><mo>∑</mo><mrow><mi>i</mi><mo>&lt;</mo><mi>j</mi></mrow><mtext>active pairs</mtext></munderover>
+          <mi>cos</mi><mo>(</mo><msub><mi>ϑ</mi><mi>i</mi></msub><mo>−</mo><msub><mi>ϑ</mi><mi>j</mi></msub><mo>)</mo>
+          <msub><mi>w</mi><mi>i</mi></msub><msub><mi>w</mi><mi>j</mi></msub>
+        </mrow>
+      </math>
+      <p>M is the number of active expert pairs used in the average.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Interference gain</span><span>(9.5)</span></div>
+      <math display="block">
+        <mrow><mi>G</mi><mo>=</mo><mn>1</mn><mo>+</mo><mn>0.2</mn><mi>I</mi></mrow>
+      </math>
+      <p>The gain rescales the combined expert output.</p>
+    </div>
+
+    <div class="callout truth">
+      This is “quantum-inspired” only by analogy: it uses circular phases and a
+      cosine interference term, but all values are ordinary real-valued
+      classical tensors.
+    </div>
+    <div class="source">Source: pineal_gate.py:72–80, 252–280, 313–405</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">10 · liquid-fracture dynamics</div>
+    <h2>Adaptive classical reservoir ODE</h2>
+    <div class="status-line"><span class="badge classical">Classical support</span><span class="mini">Continuous-time-inspired state update</span></div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Adaptive time constant</span><span>(10.1)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>τ</mi><mo>(</mo><mi>z</mi><mo>)</mo>
+          <mo>=</mo><msub><mi>τ</mi><mtext>base</mtext></msub>
+          <mo>[</mo><mn>0.1</mn><mo>+</mo><mn>1.9</mn><mi>σ</mi><mo>(</mo><msub><mi>w</mi><mi>τ</mi></msub><mi>z</mi><mo>+</mo><msub><mi>b</mi><mi>τ</mi></msub><mo>)</mo><mo>]</mo>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">State derivative</span><span>(10.2)</span></div>
+      <math display="block">
+        <mrow>
+          <mfrac><mrow><mi>d</mi><mi>x</mi></mrow><mrow><mi>d</mi><mi>t</mi></mrow></mfrac>
+          <mo>=</mo><mo>−</mo><mfrac><mi>x</mi><mrow><mi>τ</mi><mo>(</mo><mi>z</mi><mo>)</mo></mrow></mfrac>
+          <mo>+</mo><mi>tanh</mi><mo>(</mo><msub><mi>W</mi><mtext>in</mtext></msub><mi>z</mi>
+          <mo>+</mo><msub><mi>W</mi><mtext>rec</mtext></msub><mi>x</mi><mo>+</mo><mi>b</mi><mo>)</mo>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Stabilized Euler step</span><span>(10.3)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>Δt</mi><mtext>eff</mtext></msub><mo>=</mo><mi>min</mi><mo>(</mo><mi>Δt</mi><mo>,</mo><mn>0.5</mn><mi>τ</mi><mo>)</mo>
+          <mo>,</mo><mspace width="1em"/>
+          <msub><mi>x</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub>
+          <mo>=</mo><msub><mi>x</mi><mi>t</mi></msub><mo>+</mo><msub><mi>Δt</mi><mtext>eff</mtext></msub>
+          <mfrac><mrow><mi>d</mi><mi>x</mi></mrow><mrow><mi>d</mi><mi>t</mi></mrow></mfrac>
+        </mrow>
+      </math>
+    </div>
+
+    <h3>Routing/scoring around the state</h3>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Cosine score after normalization</span><span>(10.4)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>s</mi><mi>i</mi></msub>
+          <mo>=</mo><mover><mi>z</mi><mo>^</mo></mover><mo>·</mo><msub><mover><mi>p</mi><mo>^</mo></mover><mi>i</mi></msub>
+          <mo>,</mo><mspace width="1em"/>
+          <msub><mi>r</mi><mi>i</mi></msub><mo>=</mo><mn>0.1</mn><mo>+</mo><mi>max</mi><mo>(</mo><msub><mi>s</mi><mi>i</mi></msub><mo>,</mo><mn>0</mn><mo>)</mo>
+        </mrow>
+      </math>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Input/hub mixture and state-amplified score</span><span>(10.5)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>z</mi><mo>=</mo><mn>0.8</mn><msub><mi>z</mi><mtext>input</mtext></msub><mo>+</mo><mn>0.2</mn><msub><mi>z</mi><mtext>hub</mtext></msub>
+          <mo>,</mo><mspace width="1em"/>
+          <msubsup><mi>s</mi><mi>i</mi><mo>′</mo></msubsup><mo>=</mo><msub><mi>r</mi><mi>i</mi></msub><mo>(</mo><mn>1</mn><mo>+</mo><mn>0.3</mn><mo>‖</mo><mi>x</mi><mo>‖</mo><mo>)</mo>
+        </mrow>
+      </math>
+      <p>Final expert scores are normalized after amplification.</p>
+    </div>
+
+    <div class="callout">
+      This ODE resembles a leaky continuous-time recurrent reservoir. It is
+      classical state-space dynamics; no Hamiltonian, amplitudes, measurement,
+      or density operator is present.
+    </div>
+    <div class="source">Source: liquid_fracture.py</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">11–12 · dormant and generator-only rules</div>
+    <h2>Adaptive governor and hybrid dataset policy</h2>
+
+    <h3>Quantum governor</h3>
+    <div class="status-line"><span class="badge dormant">Dormant</span><span class="mini">Implemented, but no active runtime consumer was found</span></div>
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Adaptive threshold</span><span>(11.1)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>τ</mi><mi>t</mi></msub>
+          <mo>=</mo><msub><mi>τ</mi><mtext>base</mtext></msub>
+          <mo>+</mo><mi>λ</mi><mfrac><msub><mi>N</mi><mtext>calls</mtext></msub><mi>Δt</mi></mfrac>
+          <mo>,</mo><mspace width="1em"/>
+          <msub><mi>T</mi><mi>max</mi></msub><mo>=</mo><mn>600</mn>
+        </mrow>
+      </math>
+      <p>The equation raises the decision threshold as call rate grows. T<sub>max</sub> is the maximum call-age/interval constant in the module.</p>
+    </div>
+
+    <div class="callout warn">
+      The dashboard names this component, but repository search found no active
+      runtime import establishing that it governs the live quantum circuit.
+    </div>
+
+    <hr class="rule">
+    <h3>Generated hybrid-routing examples</h3>
+    <div class="status-line"><span class="badge training">Generator-only</span><span class="mini">forge_fracture_dataset.py and generated weaver_hybrid_dataset.jsonl</span></div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Generator entropy</span><span>(12.1)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>p</mi><mo>=</mo><mi>softmax</mi><mo>(</mo><mtext>logits</mtext><mo>)</mo>
+          <mo>,</mo><mspace width="1em"/>
+          <mi>H</mi><mo>(</mo><mi>G</mi><mo>(</mo><mi>x</mi><mo>)</mo><mo>)</mo>
+          <mo>=</mo><mo>−</mo><munderover><mo>∑</mo><mi>i</mi><mtext>experts</mtext></munderover>
+          <msub><mi>p</mi><mi>i</mi></msub><mi>ln</mi><msub><mi>p</mi><mi>i</mi></msub>
+        </mrow>
+      </math>
+      <p>This generator uses natural logarithms, so H is in nats.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Conditional hybrid policy</span><span>(12.2)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>y</mi><mo>=</mo>
+          <mrow><mo>{</mo><mtable>
+            <mtr>
+              <mtd><mi>softmax</mi><mo>(</mo><msub><mi>W</mi><mi>g</mi></msub><mi>x</mi><mo>+</mo><mi>ε</mi><msub><mi>W</mi><mi>q</mi></msub><mi>x</mi><mo>)</mo></mtd>
+              <mtd><mtext>if H(G(x)) &lt; τt — LOCAL</mtext></mtd>
+            </mtr>
+            <mtr>
+              <mtd><mi>softmax</mi><mo>(</mo><msub><mi>W</mi><mi>g</mi></msub><mi>x</mi><mo>+</mo><mi>ε</mi><mi>𝔼</mi><mo>[</mo><mi>O</mi><mo>]</mo><mo>)</mo></mtd>
+              <mtd><mtext>if H(G(x)) ≥ τt — QPU</mtext></mtd>
+            </mtr>
+          </mtable></mrow>
+        </mrow>
+      </math>
+    </div>
+
+    <p>
+      The same adaptive threshold form appears with
+      τ<sub>base</sub>=1.5 and λ=0.5 in generated examples.
+      The JSONL contains numeric training rows; no repository training script was
+      found consuming that hybrid dataset.
+    </p>
+    <div class="source">Sources: weaver_core/quantum_governor.py; forge_fracture_dataset.py</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">13 · declared training-corpus equations</div>
+    <h2>Omega fuel: feature maps, reduced states, and decoherence</h2>
+    <div class="status-line"><span class="badge training">Training text</span><span class="mini">Generated 100 times in Weaver Omega Fuel, with a second declared Bedrock copy</span></div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Synthetic ZZ feature interaction</span><span>(13.1)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>ZZ</mi><mo>(</mo><msub><mi>q</mi><mi>i</mi></msub><mo>,</mo><msub><mi>q</mi><mi>j</mi></msub><mo>)</mo>
+          <mo>=</mo><mi>exp</mi><mo>(</mo><mi>i</mi><msub><mi>φ</mi><mi>p</mi></msub><msub><mi>x</mi><mi>i</mi></msub><msub><mi>x</mi><mi>j</mi></msub><mo>)</mo>
+          <mo>,</mo><mspace width="1em"/><msub><mi>φ</mi><mi>p</mi></msub><mo>=</mo><mfrac><mrow><mn>2</mn><mi>π</mi></mrow><mn>5</mn></mfrac>
+        </mrow>
+      </math>
+      <p>
+        This is prose-level feature-map notation in the dataset. It is not the
+        matrix definition of a two-qubit gate and is not how the active circuit
+        is implemented.
+      </p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Reduced core state by partial trace</span><span>(13.2)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>ρ</mi><mtext>core</mtext></msub>
+          <mo>=</mo>
+          <msub><mi>Tr</mi><mrow><mn>12</mn><mo>…</mo><mn>155</mn></mrow></msub><mo>(</mo><mi>ρ</mi><mo>)</mo>
+        </mrow>
+      </math>
+      <p>This equation assumes a 156-qubit density operator. That object does not exist in the live implementation.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Von Neumann entropy</span><span>(13.3)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>S</mi><mo>(</mo><mi>ρ</mi><mo>)</mo>
+          <mo>=</mo><mo>−</mo><mi>Tr</mi><mo>(</mo><mi>ρ</mi><msub><mi>log</mi><mn>2</mn></msub><mi>ρ</mi><mo>)</mo>
+          <mo>=</mo><mo>−</mo><munderover><mo>∑</mo><mi>k</mi><mtext>eigenvalues</mtext></munderover>
+          <msub><mi>λ</mi><mi>k</mi></msub><msub><mi>log</mi><mn>2</mn></msub><msub><mi>λ</mi><mi>k</mi></msub>
+        </mrow>
+      </math>
+      <p>The first equality is present in the dataset. The eigenvalue expansion is the equivalent mathematical definition included here to clarify the notation.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Lindblad master equation</span><span>(13.4)</span></div>
+      <math display="block">
+        <mrow>
+          <mfrac><mrow><mi>∂</mi><mi>ρ</mi></mrow><mrow><mi>∂</mi><mi>t</mi></mrow></mfrac>
+          <mo>=</mo><mo>−</mo><mi>i</mi><mo>[</mo><mi>H</mi><mo>,</mo><mi>ρ</mi><mo>]</mo>
+          <mo>+</mo><mi>Γ</mi>
+          <mo>(</mo><mi>L</mi><mi>ρ</mi><msup><mi>L</mi><mo>†</mo></msup>
+          <mo>−</mo><mfrac><mn>1</mn><mn>2</mn></mfrac>
+          <mo>{</mo><msup><mi>L</mi><mo>†</mo></msup><mi>L</mi><mo>,</mo><mi>ρ</mi><mo>}</mo><mo>)</mo>
+        </mrow>
+      </math>
+      <p>[H,ρ]=Hρ−ρH is a commutator; {A,B}=AB+BA is an anticommutator.</p>
+    </div>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Synthetic coherence time</span><span>(13.5)</span></div>
+      <math display="block">
+        <mrow><msub><mi>T</mi><mn>2</mn></msub><mo>=</mo><mfrac><mn>1</mn><mi>Γ</mi></mfrac></mrow>
+      </math>
+      <p>The generator chooses Γ and reports the reciprocal as a synthetic T₂ collapse time.</p>
+    </div>
+
+    <div class="source">Sources: forge_omega_fuel.py:55–111; weaver_omega_fuel.jsonl</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">13 · declared training-corpus equations, continued</div>
+    <h2>State-space memory and repeated dataset claims</h2>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Linear state-space update</span><span>(13.6)</span></div>
+      <math display="block">
+        <mrow>
+          <msub><mi>h</mi><mi>t</mi></msub>
+          <mo>=</mo><mi>A</mi><msub><mi>h</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub>
+          <mo>+</mo><mi>B</mi><msub><mi>x</mi><mi>t</mi></msub>
+        </mrow>
+      </math>
+      <p>In the generated prose, x<sub>t</sub> carries the selected pathway collapse into Mamba-style memory.</p>
+    </div>
+
+    <h3>Other formulas embedded in declared datasets</h3>
+    <table>
+      <thead><tr><th>Formula or relation</th><th>Dataset context</th><th>Accuracy note</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>dim(ℋ<sub>n</sub>) = 2<sup>n</sup></td>
+          <td>Qubit-state dimensionality examples</td>
+          <td>Standard for n ideal two-level qubits.</td>
+        </tr>
+        <tr>
+          <td>H<sub>max</sub> = n bits</td>
+          <td>Maximum entropy claim for n measured bits</td>
+          <td>True for a uniform distribution over all 2<sup>n</sup> bit strings.</td>
+        </tr>
+        <tr>
+          <td>S(ρ<sub>A</sub>) &gt; S(ρ<sub>AB</sub>)</td>
+          <td>Entanglement/conditional-entropy scenario</td>
+          <td>Possible, not universal. For a pure entangled AB state, S(AB)=0 while S(A)&gt;0.</td>
+        </tr>
+        <tr>
+          <td>RY((2k+1)φ<sub>p</sub>/2)</td>
+          <td>Proposed remedy for fixed-angle pathway bias</td>
+          <td>Dataset recommendation; not the active initialization formula.</td>
+        </tr>
+        <tr>
+          <td>F = 0.4D + 0.35A + 0.25d</td>
+          <td>Reversal examples describing the learner</td>
+          <td>Matches the runtime’s reported fitness formula.</td>
+        </tr>
+        <tr>
+          <td>η<sub>eff</sub> ≈ η/(1−m)</td>
+          <td>Reversal explanation of momentum overshoot</td>
+          <td>Rule-of-thumb steady-state amplification, not an exact transient law.</td>
+        </tr>
+        <tr>
+          <td>w = 0.7θ<sub>learned</sub> + 0.3θ<sub>temporal</sub></td>
+          <td>Temporal encoder discussion</td>
+          <td>Dataset prose discusses 7 components; live default is 12 qubits.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout truth">
+      <strong>Corpus facts.</strong> <code>weaver_omega_fuel.jsonl</code> contains
+      100 generated records using the same five quantum blocks. A second Bedrock
+      Omega file was declared as another training input in
+      <code>forge_nemotron.py</code>. The reversal dataset contains executable
+      fallback and learner formulas. <code>weaver_soul_dataset.jsonl</code>
+      contains no occurrence of “quantum” and no quantum equation.
+    </div>
+
+    <div class="callout warn">
+      <strong>Training completion is not fully provable.</strong>
+      <code>forge_nemotron.py</code> declares Omega, Bedrock Omega, reversal, and
+      Soul inputs, but the expected <code>weaver_nemotron_30B_lora</code> output
+      was absent during audit. The existing Soul adapter does not include a
+      dataset provenance manifest.
+    </div>
+
+    <div class="source">Sources: forge_nemotron.py:20–24, 77–82; forge_soul.py; weaver_reversal_dataset.jsonl; weaver_soul_dataset.jsonl</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">14 · separate pretraining evidence</div>
+    <h2>Physics equation found in the sampled checkpoint corpus</h2>
+    <div class="status-line"><span class="badge evidence">Evidence only</span><span class="mini">Separate MoE pretraining checkpoint; not the served Weaver 3B model</span></div>
+
+    <p class="lead">
+      The audited checkpoint was at step 6 with 2,359,296 tokens recorded.
+      Reconstructing its 2,304 sampled text windows yielded ten windows containing
+      quantum terms. Only one explicit physics equation family was found.
+    </p>
+
+    <div class="eq">
+      <div class="eq-label"><span class="eq-title">Driven interacting lattice Hamiltonian</span><span>(14.1)</span></div>
+      <math display="block">
+        <mrow>
+          <mi>H</mi><mo>(</mo><mi>t</mi><mo>)</mo>
+          <mo>=</mo><mo>−</mo><mi>J</mi><munderover><mo>∑</mo><mi>j</mi><mtext>sites</mtext></munderover>
+          <mo>(</mo><msub><mi>c</mi><mi>j</mi></msub><msubsup><mi>c</mi><mrow><mi>j</mi><mo>+</mo><mn>1</mn></mrow><mo>†</mo></msubsup><mo>+</mo><mtext>h.c.</mtext><mo>)</mo>
+          <mo>−</mo><mi>μ</mi><munderover><mo>∑</mo><mi>j</mi><mtext>sites</mtext></munderover><msub><mi>n</mi><mi>j</mi></msub>
+          <mo>+</mo><mi>U</mi><mi>cos</mi><mo>(</mo><mi>Ω</mi><mi>t</mi><mo>)</mo>
+          <munderover><mo>∑</mo><mi>j</mi><mtext>sites</mtext></munderover>
+          <msub><mi>n</mi><mi>j</mi></msub><msub><mi>n</mi><mrow><mi>j</mi><mo>+</mo><mn>1</mn></mrow></msub>
+        </mrow>
+      </math>
+      <table class="tight">
+        <tbody>
+          <tr><td>J</td><td>Nearest-neighbor hopping scale</td></tr>
+          <tr><td>c<sub>j</sub>, c<sub>j</sub><sup>†</sup></td><td>Annihilation and creation operators at site j</td></tr>
+          <tr><td>h.c.</td><td>Hermitian conjugate of the preceding hopping term</td></tr>
+          <tr><td>μ, n<sub>j</sub></td><td>Chemical potential and local number operator</td></tr>
+          <tr><td>U cos(Ωt)</td><td>Time-periodic nearest-neighbor interaction strength</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn">
+      This Hamiltonian is corpus exposure evidence only. No source path in the
+      active Weaver runtime constructs or integrates H(t), and this checkpoint
+      was not the locally served <code>CascadeProjects/3b/weaver_v3</code>
+      artifact.
+    </div>
+
+    <h3>Model provenance boundary</h3>
+    <div class="truth-grid">
+      <div>Served model</div>
+      <div>Local Qwen2 3B artifact under <code>CascadeProjects/3b/weaver_v3</code>.</div>
+      <div>Available metadata</div>
+      <div>Model configuration and safetensors format metadata.</div>
+      <div>Missing metadata</div>
+      <div>No complete trainer state or dataset manifest enumerating every upstream equation.</div>
+      <div>Valid conclusion</div>
+      <div>The repository supports exact claims about declared local datasets, not exhaustive claims about foundation-model pretraining.</div>
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">15 · truth matrix</div>
+    <h2>Which equations Weaver actually computes</h2>
+
+    <table>
+      <thead><tr><th>Equation family</th><th>Live?</th><th>Where it exists</th><th>Correct interpretation</th></tr></thead>
+      <tbody>
+        <tr><td>RY/RZ + CNOT/CRZ/CRX circuit</td><td class="check">Yes</td><td>quantum_networks.py</td><td>Active 12-qubit Qiskit circuit</td></tr>
+        <tr><td>Shot probabilities and Shannon entropy</td><td class="check">Yes</td><td>quantum_networks.py</td><td>Classical statistics after measurement</td></tr>
+        <tr><td>Evolutionary mutation/momentum</td><td class="check">Yes</td><td>quantum_networks.py</td><td>Classical parameter update</td></tr>
+        <tr><td>7-qubit φ<sub>p</sub> circuit</td><td>Fallback</td><td>quantum_soul.py</td><td>Executable only when active orchestrator is unavailable</td></tr>
+        <tr><td>Cosine “interference”</td><td>Classical</td><td>pineal_gate.py</td><td>Real-valued expert-weight geometry</td></tr>
+        <tr><td>Liquid reservoir ODE</td><td>Classical</td><td>liquid_fracture.py</td><td>Leaky recurrent state dynamics</td></tr>
+        <tr><td>Adaptive quantum governor</td><td class="cross">Not wired</td><td>weaver_core/quantum_governor.py</td><td>Dormant threshold logic</td></tr>
+        <tr><td>156-qubit dense state</td><td class="cross">No</td><td>Training prose / architecture labels</td><td>144 addresses are sparse metadata</td></tr>
+        <tr><td>Partial trace Tr<sub>12…155</sub>(ρ)</td><td class="cross">No</td><td>Omega dataset</td><td>Training-text scenario</td></tr>
+        <tr><td>Von Neumann entropy</td><td class="cross">No</td><td>Omega dataset</td><td>Live code uses Shannon entropy</td></tr>
+        <tr><td>Lindblad master equation</td><td class="cross">No</td><td>Omega dataset</td><td>Live code uses unitary gate proxies</td></tr>
+        <tr><td>Driven lattice Hamiltonian H(t)</td><td class="cross">No</td><td>Separate pretraining corpus sample</td><td>Exposure evidence only</td></tr>
+      </tbody>
+    </table>
+
+    <div class="keep">
+      <h3>Dashboard / architecture wording versus executable math</h3>
+      <div class="cols-2">
+        <div class="card">
+          <h3>Labels seen in Weaver</h3>
+          <ul>
+            <li>“Lindblad open system”</li>
+            <li>“Von Neumann entropy”</li>
+            <li>“H<sub>CR</sub> coupling membrane”</li>
+            <li>“156-qubit Heron r2”</li>
+            <li>“ZZFeatureMap”</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>What executes locally</h3>
+          <ul>
+            <li>Deterministic unitary gate proxies</li>
+            <li>Shannon entropy from shot counts</li>
+            <li>Sparse core/reservoir address mappings</li>
+            <li>12 measured qubits</li>
+            <li>RZ + CRZ phase encoding</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout truth">
+        <strong>Bottom line.</strong> Weaver contains genuine executable
+        quantum-circuit mathematics, but several stronger open-system and
+        156-qubit claims belong to architecture metadata or training prose rather
+        than the live numerical implementation.
+      </div>
+    </div>
+  </section>
+
+  <section class="page verify-page">
+    <div class="section-kicker">verification and source map</div>
+    <h2>How this reference was checked</h2>
+
+    <h3>Focused mathematical tests</h3>
+    <p>The repository’s targeted unit tests were executed in its virtual environment:</p>
+    <pre>venv/bin/python tests/weaver_tests.py --tier unit --test quantum_architecture_reference_math
+venv/bin/python tests/weaver_tests.py --tier unit --test quantum_variational_circuit
+venv/bin/python tests/weaver_tests.py --tier unit --test quantum_learner_fitness
+venv/bin/python tests/weaver_tests.py --tier unit --test quantum_interference_bias</pre>
+    <p><span class="check">Result: all four passed.</span></p>
+
+    <h3>Primary codebase source map</h3>
+    <table class="tight">
+      <thead><tr><th>Repository path</th><th>Audited content</th></tr></thead>
+      <tbody>
+        <tr><td><code>CascadeProjects/windsurf-project/quantum_networks.py</code></td><td>12-qubit architecture, geometry, variational circuit, state phases, entropy, fitness, routing, temporal injection, reservoir projection</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/quantum_soul.py</code></td><td>Active orchestrator initialization and legacy 7-qubit fallback</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/pineal_gate.py</code></td><td>Pentagonal MoE geometry and cosine interference</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/liquid_fracture.py</code></td><td>Adaptive classical reservoir dynamics</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/weaver_core/quantum_governor.py</code></td><td>Dormant adaptive threshold</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/forge_fracture_dataset.py</code></td><td>Generated hybrid local/QPU decision equations</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/forge_omega_fuel.py</code></td><td>Omega training-text equations</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/weaver_omega_fuel.jsonl</code></td><td>100 generated Omega records</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/weaver_reversal_dataset.jsonl</code></td><td>Fallback, fitness, entropy, and tuning descriptions</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/forge_nemotron.py</code></td><td>Declared Nemotron dataset inputs</td></tr>
+        <tr><td><code>CascadeProjects/windsurf-project/forge_soul.py</code></td><td>Soul training path</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Completeness statement</h3>
+    <p>
+      “All equations” here means all identifiable quantum equations plus the
+      directly coupled mathematical rules that were found in executable Weaver
+      source, declared local training datasets/generators, and the separately
+      sampled checkpoint corpus. Duplicate occurrences are consolidated into one
+      canonical formula and annotated by status.
+    </p>
+    <p>
+      This document deliberately excludes ordinary application math unrelated to
+      the quantum subsystem, prose that contains no equation, and uninspectable
+      upstream foundation-model training data.
+    </p>
+
+    <div class="callout">
+      <strong>Audit date:</strong> 25 July 2026.<br>
+      <strong>Repository root:</strong> <code>/media/ydn/SYPHER_CORE2/weaver v3</code><br>
+      <strong>Document:</strong> Weaver Quantum Equations &amp; Notation Reference
+    </div>
+
+    <div class="footer-note">
+      <span>Weaver v3 · codebase-audited equation reference</span>
+      <span>End of document</span>
+    </div>
+  </section>
+</body>
+</html>

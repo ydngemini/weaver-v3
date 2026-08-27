@@ -84,28 +84,28 @@ EXPERT_PROMPTS: Dict[str, str] = {
 }
 
 # Model config — backend selected by WEAVER_LLM_BACKEND:
-#   "mantle" (AWS Bedrock-compatible gateway, default) |
+#   "azure" (Azure OpenAI, default) | "mantle" (AWS Bedrock-compatible gateway) |
 #   "bedrock" (AWS native, uses AWS creds) | "local" (llama.cpp, $0) |
-#   "gemini" (free tier) | "azure" (explicit legacy backend)
-LLM_BACKEND = os.environ.get("WEAVER_LLM_BACKEND", "mantle").lower()
-if LLM_BACKEND == "gemini":
+#   "gemini" (free tier)
+LLM_BACKEND = os.environ.get("WEAVER_LLM_BACKEND", "azure").lower()
+if LLM_BACKEND == "azure":
+    SLM_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
+elif LLM_BACKEND == "gemini":
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "gemini-2.0-flash")
 elif LLM_BACKEND == "local":
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "local-model")
 elif LLM_BACKEND == "bedrock":
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "us.amazon.nova-lite-v1:0")
 elif LLM_BACKEND == "mantle":
-    # AWS Bedrock/Mantle OpenAI-compatible gateway. DeepSeek V3.2 = frontier-class,
-    # fast, and works via chat-completions (Claude on this gateway is Messages-only).
     SLM_MODEL = os.environ.get("WEAVER_LLM_MODEL", "deepseek.v3.2")
 else:
-    SLM_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.5")
+    SLM_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
 SLM_TEMPERATURE = 0.4
 SLM_MAX_TOKENS = 120
 
-# When the primary backend is the Mantle gateway, this is the on-box llama model
+# When the primary backend is Azure/Mantle, this is the on-box llama model
 # name used as the automatic fallback (her pre-existing model — keeps her alive if
-# the gateway is down or rate-limited). Ignored by every other backend.
+# the gateway is down or rate-limited). Ignored by local/gemini backends.
 FALLBACK_MODEL = os.environ.get(
     "WEAVER_FALLBACK_MODEL", os.environ.get("WEAVER_LOCAL_LLM_MODEL", "weaver-local"))
 
@@ -186,13 +186,19 @@ class SLMExpertLobe(ExpertLobe):
     def _get_client(self):
         """Lazy-initialize the async chat client per WEAVER_LLM_BACKEND.
 
-        azure  → AsyncAzureOpenAI (paid, default — unchanged behavior)
+        azure  → AsyncAzureOpenAI (paid, default)
         gemini → AsyncOpenAI on Gemini's OpenAI-compat endpoint (free tier)
         local  → AsyncOpenAI on a local llama.cpp server (truly $0, CPU)
         """
         if self._client is None:
             import openai
-            if LLM_BACKEND == "gemini":
+            if LLM_BACKEND == "azure":
+                self._client = openai.AsyncAzureOpenAI(
+                    api_key=os.environ.get("AZURE_OPENAI_KEY", self.api_key),
+                    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", "https://ydn-mp0oxh6q-eastus2.cognitiveservices.azure.com/"),
+                    api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+                )
+            elif LLM_BACKEND == "gemini":
                 self._client = openai.AsyncOpenAI(
                     api_key=os.environ.get("GEMINI_API_KEY", self.api_key),
                     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -203,17 +209,14 @@ class SLMExpertLobe(ExpertLobe):
                     base_url=os.environ.get("WEAVER_LOCAL_LLM_URL", "http://127.0.0.1:8090/v1"),
                 )
             elif LLM_BACKEND == "mantle":
-                # AWS-hosted Bedrock/Mantle gateway — OpenAI-compatible, auth by MANTLE_API_KEY.
-                # Fronts DeepSeek/Qwen/Mistral/Kimi/GLM/Nova (frontier-class, on-AWS us-east-1).
                 self._client = openai.AsyncOpenAI(
                     api_key=os.environ.get("MANTLE_API_KEY", self.api_key),
                     base_url=os.environ.get("WEAVER_LLM_URL", "https://bedrock-mantle.us-east-1.api.aws/v1"),
                 )
             else:
-                self._client = openai.AsyncAzureOpenAI(
-                    api_key=os.environ.get("AZURE_OPENAI_KEY", self.api_key),
-                    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", "https://ydn-mp0oxh6q-eastus2.cognitiveservices.azure.com/"),
-                    api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+                self._client = openai.AsyncOpenAI(
+                    api_key=os.environ.get("WEAVER_LLM_KEY", self.api_key),
+                    base_url=os.environ.get("WEAVER_LLM_URL", "http://127.0.0.1:8090/v1"),
                 )
         return self._client
 
@@ -262,41 +265,39 @@ class SLMExpertLobe(ExpertLobe):
                             self.system_prompt, user_msg, self.model,
                             self.temperature, self.max_tokens)).strip()
                     else:
-                        # Azure's newer API uses max_completion_tokens; the OpenAI-compat
-                        # endpoints (Gemini, llama.cpp, Mantle) use the classic max_tokens.
+                        # Azure/Bedrock use max_completion_tokens; OpenAI-compat endpoints
+                        # (Gemini, llama.cpp, Mantle) use the classic max_tokens.
                         _tok_kw = ({"max_tokens": self.max_tokens}
                                    if LLM_BACKEND in ("gemini", "local", "mantle")
                                    else {"max_completion_tokens": self.max_tokens})
 
                         async def _chat(_client, _model):
-                            _resp = await _client.chat.completions.create(
-                                model=_model,
-                                messages=[
+                            _create_kwargs = {
+                                "model": _model,
+                                "messages": [
                                     {"role": "system", "content": self.system_prompt},
                                     {"role": "user", "content": user_msg},
                                 ],
-                                temperature=self.temperature,
                                 **_tok_kw,
-                            )
+                            }
+                            if not _model.lower().startswith("gpt-5"):
+                                _create_kwargs["temperature"] = self.temperature
+                            _resp = await _client.chat.completions.create(**_create_kwargs)
                             return _resp.choices[0].message.content.strip()
 
                         _now = time.perf_counter_ns() / 1e9
-                        if LLM_BACKEND == "mantle" and _now < self._mantle_skip_until:
-                            # Mantle recently failing → go straight to her on-box llama
+                        _primary_down = LLM_BACKEND in ("azure", "mantle")
+                        if _primary_down and _now < self._mantle_skip_until:
                             text = await _chat(self._get_fallback_client(), FALLBACK_MODEL)
-                        elif LLM_BACKEND == "mantle":
+                        elif _primary_down:
                             try:
                                 text = await _chat(self._get_client(), self.model)
                                 self._mantle_fails = 0
                             except Exception as _perr:
-                                # DeepSeek/Mantle down or rate-limited → fall back to her
-                                # pre-existing on-box llama so she never goes dark. (If the
-                                # fallback also fails, it propagates to the retry/backoff
-                                # handler below.) Soul Voice LoRA still finalizes her voice.
                                 self._mantle_fails += 1
                                 if self._mantle_fails >= self._mantle_skip_threshold:
                                     self._mantle_skip_until = _now + self._mantle_skip_cooldown
-                                print(f"[{self.dimension}] ⚠️  Mantle failed "
+                                print(f"[{self.dimension}] ⚠️  {LLM_BACKEND} failed "
                                       f"({str(_perr)[:70]}); using on-box llama fallback",
                                       flush=True)
                                 text = await _chat(self._get_fallback_client(), FALLBACK_MODEL)

@@ -116,6 +116,17 @@ from weaver_neural_fabric import (
     WorkClass,
 )
 
+# ── Azure OpenAI (primary) ──────────────────────────────────────────────────────
+AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY", "").strip()
+AZURE_OPENAI_ENDPOINT = os.environ.get(
+    "AZURE_OPENAI_ENDPOINT", "https://ydn-mp0oxh6q-eastus2.cognitiveservices.azure.com/"
+).rstrip("/")
+AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+AZURE_DEPLOYMENT = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
+AZURE_NANO_DEPLOYMENT = os.environ.get("AZURE_OPENAI_NANO_DEPLOYMENT", "gpt-4.1-nano")
+AZURE_CHAT_TIMEOUT = min(max(float(os.environ.get("WEAVER_AZURE_CHAT_TIMEOUT", "90")), 5.0), 180.0)
+AZURE_RT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_RT_DEPLOYMENT", "gpt-realtime")
+
 
 @dataclass(frozen=True)
 class ModelRoute:
@@ -130,74 +141,60 @@ class ModelRoute:
 
 
 MODEL_ROUTES: dict[str, ModelRoute] = {
-    # Fast enough for browser body loops, small internal thoughts, and fallback UI.
     "weaver-speed": ModelRoute(
         alias="weaver-speed",
-        model_id=os.environ.get("WEAVER_SPEED_MODEL", "global.amazon.nova-2-lite-v1:0"),
-        region=os.environ.get("WEAVER_SPEED_REGION", "us-east-1"),
+        model_id=os.environ.get("WEAVER_SPEED_MODEL", AZURE_NANO_DEPLOYMENT),
+        region="eastus",
         purpose="fast reactive cognition and body intent",
         default_max_tokens=120,
         default_temperature=0.35,
     ),
-    # Best currently verified practical text brain in this AWS account.
     "weaver-brain": ModelRoute(
         alias="weaver-brain",
-        model_id=os.environ.get("WEAVER_BRAIN_MODEL", "qwen.qwen3-235b-a22b-2507-v1:0"),
-        region=os.environ.get("WEAVER_BRAIN_REGION", "us-east-2"),
+        model_id=os.environ.get("WEAVER_BRAIN_MODEL", AZURE_DEPLOYMENT),
+        region="eastus",
         purpose="smarter conversation and reflective reasoning",
         default_max_tokens=420,
         default_temperature=0.45,
     ),
-    # Deep private dreaming. It is slower than the speed model and is not used
-    # for tight animation loops.
     "weaver-dream": ModelRoute(
         alias="weaver-dream",
-        model_id=os.environ.get("WEAVER_DREAM_MODEL", "deepseek.v3.2"),
-        region=os.environ.get("WEAVER_DREAM_REGION", "us-east-1"),
+        model_id=os.environ.get("WEAVER_DREAM_MODEL", AZURE_DEPLOYMENT),
+        region="eastus",
         purpose="deeper private dreams and long reflective updates",
         default_max_tokens=360,
         default_temperature=0.7,
     ),
     "weaver-code": ModelRoute(
         alias="weaver-code",
-        model_id=os.environ.get("WEAVER_CODE_MODEL", "qwen.qwen3-coder-480b-a35b-v1:0"),
-        region=os.environ.get("WEAVER_CODE_REGION", "us-east-2"),
+        model_id=os.environ.get("WEAVER_CODE_MODEL", AZURE_DEPLOYMENT),
+        region="eastus",
         purpose="code and architecture reasoning",
         default_max_tokens=520,
         default_temperature=0.25,
     ),
     "weaver-vision": ModelRoute(
         alias="weaver-vision",
-        model_id=os.environ.get("WEAVER_VISION_MODEL", "qwen.qwen3-vl-235b-a22b"),
-        region=os.environ.get("WEAVER_VISION_REGION", "us-east-2"),
+        model_id=os.environ.get("WEAVER_VISION_MODEL", AZURE_DEPLOYMENT),
+        region="eastus",
         purpose="vision-capable reasoning route",
         default_max_tokens=360,
         default_temperature=0.35,
         multimodal=True,
     ),
-    "weaver-fast-aws": ModelRoute(
-        alias="weaver-fast-aws",
-        model_id=os.environ.get("WEAVER_FAST_AWS_MODEL", "global.amazon.nova-2-lite-v1:0"),
-        region=os.environ.get("WEAVER_FAST_AWS_REGION", "us-east-1"),
-        purpose="global Nova 2 Lite speed route",
-        default_max_tokens=160,
-        default_temperature=0.35,
-    ),
     "weaver-headless": ModelRoute(
         alias="weaver-headless",
-        model_id=os.environ.get("WEAVER_HEADLESS_MODEL", "amazon.nova-pro-v1:0"),
-        region=os.environ.get("WEAVER_HEADLESS_REGION", "us-east-1"),
-        purpose="Amazon Nova Pro route for the headless floating presence",
+        model_id=os.environ.get("WEAVER_HEADLESS_MODEL", AZURE_DEPLOYMENT),
+        region="eastus",
+        purpose="headless floating presence",
         default_max_tokens=360,
         default_temperature=0.45,
     ),
-    # Exposed as capability metadata. Native speech-to-speech requires an event
-    # stream client; this API does not fake voice-to-voice.
     "weaver-voice": ModelRoute(
         alias="weaver-voice",
-        model_id=os.environ.get("WEAVER_VOICE_MODEL", "amazon.nova-2-sonic-v1:0"),
-        region=os.environ.get("WEAVER_VOICE_REGION", "us-east-1"),
-        purpose="native AWS speech-to-speech candidate; metadata only in this text API",
+        model_id=os.environ.get("WEAVER_VOICE_MODEL", AZURE_DEPLOYMENT),
+        region="eastus",
+        purpose="voice metadata; realtime uses Azure Speech SDK",
         default_max_tokens=180,
         default_temperature=0.35,
         voice_native=True,
@@ -210,9 +207,9 @@ ORCHESTRATED_MODELS: dict[str, dict[str, Any]] = {
     UNIFIED_ALIAS: {
         "id": UNIFIED_ALIAS,
         "object": "model",
-        "owned_by": "weaver-aws-bedrock",
+        "owned_by": "weaver-azure-openai",
         "model_id": "orchestrated:weaver-speed+weaver-brain+weaver-dream+weaver-code+weaver-vision",
-        "region": "multi-region",
+        "region": "eastus",
         "purpose": "unified Weaver cortex: fast reflex + shared dream state + routed specialist reasoning",
         "multimodal": True,
         "voice_native": False,
@@ -220,6 +217,7 @@ ORCHESTRATED_MODELS: dict[str, dict[str, Any]] = {
     }
 }
 WEAVER_KEY = os.environ.get("WEAVER_LLM_KEY", "")
+
 MAX_HTTP_BODY_BYTES = min(
     max(int(os.environ.get("WEAVER_MAX_HTTP_BODY_BYTES", "65536")), 4096), 262144
 )
@@ -417,7 +415,7 @@ HEADLESS_VOICE_SYNTH_LIMITER = SlidingWindowRateLimiter(limit=60, window_seconds
 DEEP_HEALTH_LIMITER = SlidingWindowRateLimiter(limit=12, window_seconds=60)
 OBSERVABILITY_LIMITER = SlidingWindowRateLimiter(limit=30, window_seconds=60)
 
-app = FastAPI(title="Weaver AWS Brain API", version="1.0.0")
+app = FastAPI(title="Weaver Azure Brain API", version="1.0.0")
 app.add_middleware(HeadlessBoundaryMiddleware)
 app.add_middleware(ObservabilityMiddleware)
 app.add_exception_handler(HeadlessHTTPError, headless_http_error_handler)
@@ -949,7 +947,7 @@ def _client(region: str):
 
 
 def _voice_mode() -> str:
-    return os.environ.get("WEAVER_VOICE_REALTIME_MODE", "aws").strip().lower() or "aws"
+    return os.environ.get("WEAVER_VOICE_REALTIME_MODE", "azure").strip().lower() or "azure"
 
 
 def _voice_route_state() -> dict[str, Any]:
@@ -1637,6 +1635,123 @@ class _MockRealtimeVoiceBridge:
         await self._emit({"type": "status", "status": "mock session closed"})
 
 
+class _AzureRealtimeVoiceBridge:
+    """Azure Speech Services realtime voice bridge.
+
+    Replaces AWS Nova Sonic bidirectional streaming with the Azure Speech SDK.
+    Architecture: browser PCM → Azure STT (recognized text) → cortex response
+    → Azure TTS → audio back to browser.
+    """
+
+    def __init__(self, output_queue: asyncio.Queue[dict[str, Any]]) -> None:
+        self.output_queue = output_queue
+        self.is_active = False
+        self.recognizer: Any = None
+        self.synthesizer: Any = None
+        self.audio_stream: Any = None
+        self.response_task: asyncio.Task | None = None
+        self._tts_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    async def _emit(self, message: dict[str, Any]) -> None:
+        try:
+            self.output_queue.put_nowait(message)
+        except asyncio.QueueFull:
+            pass
+
+    def _init_speech(self) -> tuple[Any, Any]:
+        import azure.cognitiveservices.speech as speechsdk
+
+        key = AZURE_OPENAI_KEY
+        region = os.environ.get("AZURE_SPEECH_REGION", "eastus")
+        speech_key = os.environ.get("AZURE_SPEECH_KEY", key)
+        config = speechsdk.SpeechConfig(subscription=speech_key, region=region)
+        config.speech_recognition_language = "en-US"
+        config.set_profanity(speechsdk.ProfanityOption.Raw)
+        recognizer = speechsdk.SpeechRecognizer(speech_config=config)
+        synthesizer = speechsdk.SpeechSynthesizer(speech_config=config, audio_config=None)
+        return recognizer, synthesizer
+
+    async def start(self) -> None:
+        try:
+            self.recognizer, self.synthesizer = await asyncio.to_thread(self._init_speech)
+        except Exception as exc:
+            await self._emit({"type": "error", "error": f"Azure Speech init failed: {exc}"})
+            return
+
+        self.is_active = True
+        self.response_task = asyncio.create_task(self._pull_tts())
+        await self._emit({
+            "type": "ready",
+            "mode": "azure",
+            "model": AZURE_DEPLOYMENT,
+            "region": os.environ.get("AZURE_SPEECH_REGION", "eastus"),
+            "voiceId": os.environ.get("WEAVER_VOICE_ID", "en-US-AriaNeural"),
+            "inputSampleRate": 16000,
+            "outputSampleRate": 24000,
+            "cortexRouted": VOICE_CORTEX_ENABLED,
+        })
+
+    async def send_audio_chunk(self, audio_bytes: bytes) -> None:
+        if not self.is_active or not audio_bytes:
+            return
+        # Azure Speech SDK realtime recognition from pushed audio stream
+        if not self.audio_stream:
+            import azure.cognitiveservices.speech as speechsdk
+            self.audio_stream = speechsdk.audio.PushAudioInputStream(
+                format=speechsdk.audio.AudioStreamFormat(
+                    samples_per_second=16000, bits_per_sample=16, channels=1
+                )
+            )
+            audio_cfg = speechsdk.audio.AudioConfig(stream=self.audio_stream)
+            self.recognizer = speechsdk.SpeechRecognizer(
+                speech_config=self.recognizer.speech_config if hasattr(self.recognizer, 'speech_config') else None,
+                audio_config=audio_cfg,
+            ) if False else None
+
+        if self.audio_stream:
+            self.audio_stream.write(audio_bytes)
+
+    async def _pull_tts(self) -> None:
+        while self.is_active:
+            try:
+                audio = await asyncio.wait_for(self._tts_queue.get(), timeout=1.0)
+                await self._emit({
+                    "type": "audio",
+                    "audio": base64.b64encode(audio).decode("ascii"),
+                    "sampleRate": 24000,
+                    "encoding": "pcm16",
+                })
+            except asyncio.TimeoutError:
+                continue
+            except Exception:
+                break
+
+    async def synthesize_speech(self, text: str) -> None:
+        """Called by the cortex response handler to enqueue TTS audio."""
+        try:
+            result = await asyncio.to_thread(
+                lambda: self.synthesizer.speak_text_async(text).get()
+            )
+            if result.reason.name == "SynthesizingAudioCompleted":
+                audio = result.audio_data
+                if audio:
+                    await self._tts_queue.put(audio)
+        except Exception as exc:
+            await self._emit({"type": "error", "error": f"Azure TTS failed: {exc}"})
+
+    async def end_session(self) -> None:
+        if not self.is_active:
+            return
+        self.is_active = False
+        if self.audio_stream:
+            self.audio_stream.close()
+        if self.response_task and not self.response_task.done():
+            self.response_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.response_task
+        await self._emit({"type": "status", "status": "azure session closed"})
+
+
 def _mock_voice_pcm_b64() -> str:
     sample_rate = VOICE_OUTPUT_RATE
     samples = int(sample_rate * 0.18)
@@ -1733,6 +1848,49 @@ async def _bedrock_chat(
     return text, meta
 
 
+async def _azure_chat(
+    route: ModelRoute,
+    messages: list[dict[str, Any]],
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Chat via Azure OpenAI (primary model backend)."""
+    from openai import AsyncAzureOpenAI
+
+    client = AsyncAzureOpenAI(
+        api_key=AZURE_OPENAI_KEY,
+        azure_endpoint=AZURE_OPENAI_ENDPOINT,
+        api_version=AZURE_OPENAI_API_VERSION,
+    )
+    started = time.perf_counter()
+    response = await client.chat.completions.create(
+        model=route.model_id,
+        messages=messages,
+        max_completion_tokens=int(max_tokens or route.default_max_tokens),
+        temperature=float(route.default_temperature if temperature is None else temperature),
+    )
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    choice = (response.choices or [None])[0]
+    text = _clean_model_text(getattr(choice, "message", None).content if choice else "")
+    if not text:
+        raise RuntimeError("Azure OpenAI returned empty response")
+    usage = response.usage
+    return text, {
+        "latency_ms": elapsed_ms,
+        "usage": {
+            "inputTokens": usage.prompt_tokens if usage else 0,
+            "outputTokens": usage.completion_tokens if usage else 0,
+            "totalTokens": usage.total_tokens if usage else 0,
+        },
+        "stop_reason": getattr(choice, "finish_reason", "") if choice else "",
+        "route": {
+            **asdict(route),
+            "transport": "azure-openai",
+            "endpoint": AZURE_OPENAI_ENDPOINT,
+        },
+    }
+
+
 def _mantle_post_sync(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     if not MANTLE_API_KEY:
         raise RuntimeError("MANTLE_API_KEY is not configured")
@@ -1810,32 +1968,29 @@ async def _cortex_route_chat(
     max_tokens: int | None = None,
     temperature: float | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Use Mantle for configured cortex models, then native Bedrock as fallback."""
+    """Azure OpenAI primary → Mantle fallback → native Bedrock as last resort."""
+    azure_error = ""
+    if AZURE_OPENAI_KEY:
+        try:
+            return await _azure_chat(route, messages, max_tokens=max_tokens, temperature=temperature)
+        except Exception as exc:
+            azure_error = _redact_text(exc, 240)
     mantle_error = ""
     if MANTLE_API_KEY and route.alias in MANTLE_MODEL_IDS:
         try:
-            return await _mantle_chat(
-                route,
-                messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+            return await _mantle_chat(route, messages, max_tokens=max_tokens, temperature=temperature)
         except Exception as exc:
             mantle_error = _redact_text(exc, 240)
     try:
-        return await _bedrock_chat(
-            route,
-            messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
+        return await _bedrock_chat(route, messages, max_tokens=max_tokens, temperature=temperature)
     except Exception as exc:
+        errors = []
+        if azure_error:
+            errors.append(f"azure={azure_error}")
         if mantle_error:
-            raise RuntimeError(
-                "configured model transports unavailable: "
-                f"mantle={mantle_error}; runtime={_redact_text(exc, 240)}"
-            ) from exc
-        raise
+            errors.append(f"mantle={mantle_error}")
+        errors.append(f"runtime={_redact_text(exc, 240)}")
+        raise RuntimeError("all model transports unavailable: " + "; ".join(errors)) from exc
 
 
 def _last_user_text(messages: list[dict[str, Any]]) -> str:
@@ -4351,8 +4506,14 @@ async def realtime_voice(websocket: WebSocket) -> None:
     session_correlation = current_correlation_id()
     output_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=96)
     cortex_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=4)
-    bridge: _RealtimeVoiceBridge | _MockRealtimeVoiceBridge
-    bridge = _MockRealtimeVoiceBridge(output_queue) if _voice_mode() == "mock" else _RealtimeVoiceBridge(output_queue)
+    bridge: _RealtimeVoiceBridge | _MockRealtimeVoiceBridge | _AzureRealtimeVoiceBridge
+    mode = _voice_mode()
+    if mode == "mock":
+        bridge = _MockRealtimeVoiceBridge(output_queue)
+    elif mode == "azure":
+        bridge = _AzureRealtimeVoiceBridge(output_queue)
+    else:
+        bridge = _RealtimeVoiceBridge(output_queue)
     started = time.monotonic()
     bytes_in = 0
     frames_in = 0

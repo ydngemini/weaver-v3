@@ -42,3 +42,24 @@ __pycache__/
 .claude/
 CascadeProjects/.claude/
 CascadeProjects/windsurf-project/Quantum Computing Architecture_files/
+
+# --- Migration hardening (2026-08-27): never publish infra state to a PUBLIC repo ---
+# Terraform state holds plaintext credentials (Azure storage primary_access_key).
+# Real copies live in ~/.secrets/weaver-v3/ and in the GCS archive, never in git.
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+!terraform.tfvars.example
+.terraform/
+.terraform.lock.hcl
+
+# Manim render cache is regenerable from weaver_equations.py.
+# The final cut is kept; partial movie files and the text SVG cache are not.
+manim/media/texts/
+manim/media/videos/**/partial_movie_files/
+manim/media/videos/**/480p15/
+
+# deepface downloads its own weights on first use
+CascadeProjects/windsurf-project/.deepface/
