@@ -1,0 +1,22 @@
+# Experimental weights, optimizer snapshots, and local datasets
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.bin
+*.npz
+*.npy
+.env
+.env.*
+*.key
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+venv/
+U1/results/
+U2/results/
+U2/checkpoints/
+local_data/
+private/
