@@ -1,7 +1,46 @@
 # Weaver-SOMA
 
-Dedicated development area for the Weaver-SOMA unified embodied AI architecture within Weaver v3.
+**Unified embodied cognition research inside Weaver v3.** This folder contains the PyTorch U1 model and its 100.2-million-parameter U2 expansion. These are research prototypes, not a production robot controller or evidence of subjective consciousness.
 
-Scope: recovered SOMA U1 trained checkpoint, U2 ~100M-parameter CPU architecture, multimodal body-state modeling, memory, prediction, cognition, experiments, and integration adapters.
+## Versions
 
-Status: folder initialized. Project source files and model weights have not yet been committed here. Keep models advisory-only and retain Weaver v3's deterministic signing, execution guards, and hardware safety boundaries.
+| Version | Parameters | State |
+|---|---:|---|
+| [U1](./U1/) | 121,827 | Trained on synthetic episodes; recovered epoch-24 checkpoint is stored **outside this public repository** |
+| [U2](./U2/) | 100,204,067 | Trainable CPU architecture; the 91 original U1 tensors have a verified warm-start path; its added deep transformer blocks remain **untrained** |
+
+U1 learns shared body-state, short temporal history, risk, counterfactual forecasts, internal routing, and memory/attention proxies in a single PyTorch model. U2 adds a ten-block shared cognitive trunk while retaining U1's input/output interface.
+
+## Getting started
+
+Install Python, PyTorch, NumPy, scikit-learn and pytest, then:
+
+~~~bash
+cd Weaver-Soma/U1
+python -m pip install -r requirements.txt
+python train_unified.py --epochs 30 --train-n 8400 --val-n 2100
+python -m pytest -q test_unified.py
+python evaluate_policy.py
+~~~
+
+This trains U1 **again** on the original synthetic simulator, creating a local checkpoint in U1/results/. To use the **recovered original trained weights instead**, manually restore the trusted weaver_soma_unified.pt file from the private recovery archive to U1/results/weaver_soma_unified.pt. Reference SHA-256:
+3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f.
+
+U2 CPU structural test:
+
+~~~bash
+cd ../U2
+python test_u2.py
+python weaver_soma_u2.py --smoke-test
+~~~
+
+Use WeaverSOMA100M().load_u1_weights(path_to_trusted_u1_checkpoint) to copy the trained U1 layers into U2; it does **not** train U2's new deep core.
+
+## Security and experimental status
+
+- This repository is **public**. Do not commit model checkpoints, personal sensor streams, API keys, or credentials. See .gitignore.
+- No model output authorizes hardware movement. Original IntentCompiler, ReflexKernel, independently verified sensor health, and emergency-stop code retain control.
+- Results apply only to synthetic physics and are not real-world safety guarantees. Absolute violation rates in the changed and extreme simulations remain high.
+- This folder is a source-code development area; it is not wired into the running Weaver v3 service and has not replaced Weaver's original runtime.
+
+The exact recovered U1 checkpoint is retained separately for authorized local continuation.
