@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 630" width="1100" height="630">
+<rect width="1100" height="630" fill="#fff"/><text x="42" y="52" font-size="27" font-family="DejaVu Sans" fill="#16345f">SOMA-SENSE V2: one-finger sensor placement (concept only)</text>
+<text x="42" y="83" font-size="17" font-family="DejaVu Sans" fill="#536783">Not a dimensioned mechanical drawing; package fit and flex-cycle testing pending</text>
+<rect x="78" y="178" width="240" height="275" rx="35" fill="#e7eef6" stroke="#456384" stroke-width="5"/>
+<rect x="300" y="208" width="265" height="207" rx="65" fill="#e7eef6" stroke="#456384" stroke-width="5"/>
+<rect x="548" y="232" width="280" height="158" rx="70" fill="#d6e3f3" stroke="#456384" stroke-width="5"/>
+<circle cx="309" cy="312" r="28" fill="#9cb6ce" stroke="#3c5d7b" stroke-width="3"/>
+<circle cx="555" cy="312" r="24" fill="#9cb6ce" stroke="#3c5d7b" stroke-width="3"/>
+<rect x="114" y="220" width="150" height="140" rx="14" fill="#c8d9ef" stroke="#385677" stroke-width="3"/>
+<text x="129" y="246" font-family="DejaVu Sans" font-size="16" fill="#173855">Node board</text>
+<text x="128" y="271" font-family="DejaVu Sans" font-size="13" fill="#173855">STM32 · ADC</text>
+<text x="128" y="293" font-family="DejaVu Sans" font-size="13" fill="#173855">CAN-FD · 3V3</text>
+<text x="128" y="319" font-family="DejaVu Sans" font-size="13" fill="#173855">hand/base side</text>
+<circle cx="308" cy="312" r="13" fill="#f6d28c" stroke="#a36c20" stroke-width="2"/>
+<text x="263" y="165" font-family="DejaVu Sans" font-size="16" fill="#704d08">Encoder + witness</text>
+<path d="M330,178 L309,286" stroke="#be9e51" stroke-width="2" stroke-dasharray="4 5"/>
+<rect x="380" y="255" width="65" height="46" rx="12" fill="#4e8fba"/><text x="401" y="284" font-family="DejaVu Sans" font-size="16" fill="white">F3</text>
+<rect x="450" y="328" width="65" height="46" rx="12" fill="#4e8fba"/><text x="471" y="358" font-family="DejaVu Sans" font-size="16" fill="white">F4</text>
+<rect x="640" y="249" width="66" height="50" rx="12" fill="#4e8fba"/><text x="660" y="280" font-family="DejaVu Sans" font-size="17" fill="white">F1</text>
+<rect x="708" y="323" width="66" height="50" rx="12" fill="#4e8fba"/><text x="729" y="354" font-family="DejaVu Sans" font-size="17" fill="white">F2</text>
+<rect x="787" y="276" width="23" height="24" rx="4" fill="#e5b577" stroke="#a26a2a" stroke-width="2"/>
+<rect x="787" y="317" width="23" height="24" rx="4" fill="#e5b577" stroke="#a26a2a" stroke-width="2"/>
+<text x="850" y="285" font-family="DejaVu Sans" font-size="16" fill="#775023">T1: contact</text>
+<text x="850" y="333" font-family="DejaVu Sans" font-size="16" fill="#775023">T2: witness</text>
+<path d="M810 288 L843 281 M810 326 L843 327" stroke="#a26a2a" stroke-width="2"/>
+<path d="M277 377 Q445 472 634 397" fill="none" stroke="#c57957" stroke-width="4" stroke-dasharray="10 7"/>
+<text x="333" y="490" font-family="DejaVu Sans" font-size="16" fill="#914e37">Short flex + strain relief; cycle test required</text>
+<text x="82" y="550" font-family="DejaVu Sans" font-size="16" fill="#173855">F1–F4: four separate tactile force measurements (N), not pressure by default</text>
+<text x="82" y="582" font-family="DejaVu Sans" font-size="16" fill="#173855">T1/T2: physically close TMP117s; joint limits remain separately hardwired</text>
+</svg>
