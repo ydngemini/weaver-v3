@@ -44,3 +44,7 @@ Use WeaverSOMA100M().load_u1_weights(path_to_trusted_u1_checkpoint) to copy the 
 - This folder is a source-code development area; it is not wired into the running Weaver v3 service and has not replaced Weaver's original runtime.
 
 The exact recovered U1 checkpoint is retained separately for authorized local continuation.
+
+## Stage 4: Sensor integrity and physical sensing
+
+[Stage 4](./Stage4/) adds a host-side **independent integrity monitor**, packet freshness/CRC/sequence checks, calibrated sensor readings, bounded-time asynchronous sample fusion and missing-channel masks for existing U1/U2 model inputs. It does **not** connect live hardware or alter motor control. CPU checks: 14 Stage 4 tests and the existing 3 U2 health-gate tests passed locally. In a deliberately detectable synthetic fault benchmark, 3,600/3,600 injected cases were caught, but 0/600 plausible sensor biases without an independent witness were detected. This gap motivates redundant physical sensors and safety MCU validation. [Read the Stage 4 hardware design](./Stage4/SENSOR_DESIGN.md).
