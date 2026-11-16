@@ -1,10 +1,10 @@
-# WEAVER-SOMA U2: 100,204,067-parameter CPU architecture
+# WEAVER-SOMA U2: 100,206,197-parameter CPU architecture
 
 U2 **extends U1**, retaining its sensor encoders, recurrent body memory, five experts, shared-workspace representations, counterfactual forecasts and output signatures. A ten-block 1,024-dimensional attention/MLP cognitive trunk is added before the shared output heads. It is one trainable PyTorch module, not a separate AI service.
 
 ## Current state
 
-- Parameter count: 100,204,067. Architecture and CPU forward/backward tests have succeeded locally.
+- Parameter count: 100,206,197. Architecture and CPU forward/backward tests have succeeded locally.
 - The **trained U1 epoch-24 checkpoint has been recovered and verified** (91 matching base tensors).
 - The original U1 tensors can be loaded by WeaverSOMA100M.load_u1_weights(trusted_path).
 - The additional U2 deep-cognitive-core weights are **randomly initialized and untrained**. Compatibility is not proof of improved capabilities.
@@ -35,3 +35,7 @@ The restored original file is not kept in the public repository. Its SHA-256 is:
 Recommended next stage: freeze U1's existing trained layers; train the new shared U2 trunk on the same synthetic data while measuring validation loss; progressively unfreeze only after stability checks; compare action errors, sensor-failure robustness and calibration on held-out episodes. Do not claim the trained U1 metrics for the untrained U2 model.
 
 Never let model predictions sign intents, command motors, override an emergency stop or bypass Weaver's runtime safety guards.
+
+## Stage 2 evidence
+
+Zero-initialized deep and adapter residual gates guarantee exact U1 output equivalence after loading the recovered weights. The resulting U2 architecture contains **100,206,197 parameters**. The CPU experiment trained a 2,129-parameter adapter for 160 updates and an independent scalar deep gate for 12 updates. Development loss improved modestly, but the changed/extreme physics holdouts got worse, so U2 has **not** been promoted. See [STAGE2_RESULTS.md](./STAGE2_RESULTS.md) and [train_stage2.py](./train_stage2.py).
