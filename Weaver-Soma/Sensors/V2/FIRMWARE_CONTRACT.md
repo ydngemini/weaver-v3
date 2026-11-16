@@ -35,3 +35,7 @@ Flags: bit0 ADC fault, bit1 thermal fault, bit2 encoder fault, bit3 supply fault
 ## Zero-latency safety path forbidden
 
 The CAN-FD protocol is for sensing and research. **No ML-controlled motor actions, enable lines, braking decisions, overcurrent cutoffs, or e-stop operations ride solely on this telemetry path.** Safety decisions must use separately validated deterministic motor electronics and hardwired fail-safe limits.
+
+### Timestamp precision limitation
+
+The 32-byte version includes **one frame publication timestamp**, not a separate hardware acquisition timestamp for every sensor. `NEW_*` bits prevent cached readings from being re-advertised as newly sampled, but the exact conversion time within the preceding transmit interval is still uncertain (up to one 10 ms packet cycle, plus internal read/conversion scheduling). The gateway uses the publication time as a conservative *proxy* only for newly completed conversions. A future extended frame should include per-modality ages or a separate high-precision acquisition-time record if the robot needs sub-10-ms causal attribution. Do not promise millisecond temporal accuracy from this prototype.
