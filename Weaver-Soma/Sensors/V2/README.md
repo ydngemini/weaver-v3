@@ -26,7 +26,7 @@ python fault_campaign.py
 
 `bridge.py` expects the *existing* `Sensors/sensor_hub.py` in the GitHub repository. A local exported archive also supports `soma_sensor_v1/sensor_hub.py` in a sibling folder. It does not copy/change the old implementation.
 
-`integration_model.py` requires the original `WeaverSOMAUnified` source and **SHA256-verified** recovered U1 weights, which are intentionally not uploaded to the public GitHub repository. It contains a local path convenient for the development container; adjust these paths when deploying to your own machine. No unsigned or untrusted weight files are loaded.
+`integration_model.py` requires the original `WeaverSOMAUnified` source and **SHA256-verified** recovered U1 weights, which are intentionally not uploaded to the public GitHub repository. By default it expects `Weaver-Soma/U1/` and `Weaver-Soma/U1/results/weaver_soma_unified.pt`, or accepts the environment variables `SOMA_U1_SOURCE_DIR` and `SOMA_U1_CHECKPOINT`. No unsigned or untrusted weight files are loaded.
 
 ## Interpretation
 
