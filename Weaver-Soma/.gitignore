@@ -20,3 +20,6 @@ U2/results/
 U2/checkpoints/
 local_data/
 private/
+
+# Full-core CPU research outputs and 400MB private checkpoint
+results/
