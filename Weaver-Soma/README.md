@@ -7,9 +7,9 @@
 | Version | Parameters | State |
 |---|---:|---|
 | [U1](./U1/) | 121,827 | Trained on synthetic episodes; recovered epoch-24 checkpoint is stored **outside this public repository** |
-| [U2](./U2/) | 100,204,067 | Trainable CPU architecture; the 91 original U1 tensors have a verified warm-start path; its added deep transformer blocks remain **untrained** |
+| [U2](./U2/) | 100,206,197 | Trainable CPU architecture; the 91 original U1 tensors have a verified warm-start path; its added deep transformer blocks remain **untrained** |
 
-U1 learns shared body-state, short temporal history, risk, counterfactual forecasts, internal routing, and memory/attention proxies in a single PyTorch model. U2 adds a ten-block shared cognitive trunk while retaining U1's input/output interface.
+U1 learns shared body-state, short temporal history, risk, counterfactual forecasts, internal routing, and memory/attention proxies in a single PyTorch model. U2 adds a ten-block shared cognitive trunk while retaining U1's input/output interface. Stage 2 adds zero-initialized scalar residual gains and a compact adapter, proving exact U1 output equivalence before additional training. The experimental adapter improved development loss but did **not** improve changed/extreme physics generalization: see [stage 2 results](./U2/STAGE2_RESULTS.md).
 
 ## Getting started
 
