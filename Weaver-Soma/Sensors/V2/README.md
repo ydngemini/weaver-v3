@@ -11,7 +11,7 @@
 - [packet.py](packet.py): executable frame codec and CRC-16; not security/authentication.
 - [gateway.py](gateway.py): provenance provision requirements, clock/sequence freshness, supply/encoder/thermal checks, optional calibrated pressure proxy.
 - [bridge.py](bridge.py): V2 measurements -> original `Sensors/sensor_hub.py` -> SOMA 8×7 observation + 8×3 quality mask.
-- [test_sensor_v2.py](test_sensor_v2.py): 26 unit tests.
+- [test_sensor_v2.py](test_sensor_v2.py): 28 unit tests.
 - [fault_campaign.py](fault_campaign.py), [fault_results.json](fault_results.json): 1,500 scripted fault/noise trials and explicit undetectable cases.
 - [integration_model.py](integration_model.py): actual recovered 121,827-parameter U1 checkpoint smoke test using 190 synthetic CAN-FD frames. It is an inference-shape compatibility test, **not** an ability/safety evaluation.
 
