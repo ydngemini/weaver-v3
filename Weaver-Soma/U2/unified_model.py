@@ -84,7 +84,7 @@ class WeaverSOMAUnified(nn.Module):
         self.confidence=nn.Sequential(nn.Linear(latent,1),nn.Sigmoid())
         self.semantic_memory_key=nn.Linear(latent,32)
 
-    def refine_shared_state(self, common, z, internal_memory, broadcast, context, token_z):
+    def refine_shared_state(self, common, z, internal_memory, broadcast, context, token_z, quality=None):
         # Preserve existing U1 outputs while allowing a deeper shared trunk.
         return common
 
@@ -110,7 +110,7 @@ class WeaverSOMAUnified(nn.Module):
         if ablate=="workspace":broadcast=torch.zeros_like(broadcast)
         if ablate=="lexicon":token_z=torch.zeros_like(token_z)
         common=self.fusion(torch.cat([z,internal_memory,broadcast+self.lex_restore(token_z)],dim=-1))
-        common=self.refine_shared_state(common,z,internal_memory,broadcast,context,token_z)
+        common=self.refine_shared_state(common,z,internal_memory,broadcast,context,token_z,quality)
         B=obs.size(0)
         actions=torch.eye(3,device=obs.device,dtype=obs.dtype).unsqueeze(0).expand(B,-1,-1)
         states=common.unsqueeze(1).expand(-1,3,-1)
