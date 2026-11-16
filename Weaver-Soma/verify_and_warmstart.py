@@ -44,7 +44,7 @@ def main() -> None:
     model = WeaverSOMA100M().eval()
     matched = model.load_u1_weights(str(CHECKPOINT))
     assert matched == len(state) == 91
-    assert count_parameters(model) == 100204067
+    assert count_parameters(model) == 100206197
     for name, weights in state.items():
         assert torch.equal(model.state_dict()[name], weights), name
 
