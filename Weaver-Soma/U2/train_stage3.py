@@ -14,7 +14,7 @@ sys.path[:0]=[str(HERE),str(HERE.parent/'U1')]
 from weaver_soma_u2 import WeaverSOMA100M,count_parameters
 from unified_model import WeaverSOMAUnified,joint_objective
 from train_unified import make_data,concat_data,forward_model
-CP=HERE.parent/'U1'/'weaver_soma_unified.pt'
+CP=HERE.parent/'U1'/'results'/'weaver_soma_unified.pt'
 SHA='3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f'
 OUT=HERE.parent/'results'
 OUT.mkdir(exist_ok=True)
