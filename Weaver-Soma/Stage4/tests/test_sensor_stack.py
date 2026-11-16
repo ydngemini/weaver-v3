@@ -116,7 +116,7 @@ def test_bad_frame_order_rejected():
 
 def test_existing_torch_model_missing_channel_invariance():
     # Integration contract: masked U1/U2 cannot see a missing temp's values.
-    sys.path.insert(0,'/mnt/data/weaver_soma_stage3/U2')
+    sys.path.insert(0,str(ROOT.parent / 'U2'))
     from unified_model import WeaverSOMAUnified
     net=WeaverSOMAUnified().eval()
     a=SOMASensorWindow()
