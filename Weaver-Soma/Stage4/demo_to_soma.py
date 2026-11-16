@@ -14,7 +14,7 @@ def run(checkpoint_path: str):
     expected='3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f'
     if hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
         raise ValueError('unexpected U1 checkpoint digest')
-    sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'weaver_soma_stage3'/'U1'))
+    sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'U1'))
     from unified_model import WeaverSOMAUnified
     model=WeaverSOMAUnified().eval()
     obj=torch.load(path,map_location='cpu',weights_only=True)
