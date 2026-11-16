@@ -1,0 +1,53 @@
+name: soma-mujoco-biped-cpu
+
+on:
+  push:
+    branches:
+      - feature/weaver-soma-mujoco-biped-sim
+    paths:
+      - 'Weaver-Soma/Simulation/MuJoCo/**'
+      - '.github/workflows/soma-mujoco-biped.yml'
+  pull_request:
+    paths:
+      - 'Weaver-Soma/Simulation/MuJoCo/**'
+      - '.github/workflows/soma-mujoco-biped.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soma-mujoco-biped-cpu
+  cancel-in-progress: true
+
+jobs:
+  simulated-biped-senses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Weaver-Soma/Simulation/MuJoCo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU MuJoCo and test requirements
+        run: python -m pip install -r requirements.txt
+      - name: Validate MJCF biped and simulated sensors
+        run: python -m pytest -q test_biped.py
+      - name: Execute nominal assisted stepping and create walking GIF
+        run: python run_biped.py --mode nominal --duration 5.76 --seed 19 --out results --draw
+      - name: Execute unfamiliar ground friction
+        run: python run_biped.py --mode slippery --duration 5.76 --seed 20 --out results
+      - name: Execute actuator slowdown
+        run: python run_biped.py --mode slow_motors --duration 5.76 --seed 21 --out results
+      - name: Execute flagged sensor fault injection
+        run: python run_biped.py --mode faulty --duration 5.76 --seed 22 --out results
+      - name: Publish simulated observations, traces, and GIF
+        uses: actions/upload-artifact@v4
+        with:
+          name: weaver-soma-mujoco-biped-sim
+          path: Weaver-Soma/Simulation/MuJoCo/results/
+          if-no-files-found: error
+          retention-days: 14
