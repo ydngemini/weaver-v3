@@ -1,0 +1,74 @@
+<mujoco model="weaver_soma_planar_biped">
+  <!-- 2D constrained, externally supported gait study. NOT autonomous walking. -->
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" solver="Newton" iterations="50"/>
+  <default><joint damping="1.1" armature=".02"/><geom condim="3" friction="1.1 .015 .001"/></default>
+  <worldbody>
+    <light name="sun" pos="0 -2 5" dir=".1 .2 -1"/>
+    <geom name="floor" type="plane" size="12 3 .1" rgba=".24 .29 .34 1" friction="1.2 .01 .001"/>
+    <body name="pelvis" pos="0 0 .85">
+      <joint name="root_x" type="slide" axis="1 0 0"/>
+      <joint name="root_z" type="slide" axis="0 0 1"/>
+      <joint name="root_pitch" type="hinge" axis="0 1 0"/>
+      <geom name="pelvis_geom" type="box" size=".14 .16 .08" mass="3" rgba=".72 .76 .84 1" contype="0" conaffinity="0"/>
+      <geom name="torso_geom" type="capsule" fromto="0 0 .03 0 0 .48" size=".075" mass="2.2" rgba=".48 .65 .78 1" contype="0" conaffinity="0"/>
+      <site name="imu_site" pos="0 0 .22" size=".012"/>
+      
+      <body name="L_thigh" pos="0 .105 -.09">
+        <joint name="L_hip" type="hinge" axis="0 1 0" range="-1.2 1.2"/>
+        <geom name="L_thigh_geom" type="capsule" fromto="0 0 0 0 0 -.33" size=".042" mass="1.0" rgba=".25 .71 .92 1" contype="0" conaffinity="0"/>
+        <body name="L_shank" pos="0 0 -.33">
+          <joint name="L_knee" type="hinge" axis="0 1 0" range="-1.5 1.5"/>
+          <geom name="L_shank_geom" type="capsule" fromto="0 0 0 0 0 -.31" size=".034" mass=".75" rgba=".25 .71 .92 1" contype="0" conaffinity="0"/>
+          <body name="L_foot" pos="0 0 -.31">
+            <joint name="L_ankle" type="hinge" axis="0 1 0" range="-1.0 1.0"/>
+            <geom name="L_foot_geom" type="box" pos=".07 0 -.083" size=".13 .072 .028" mass=".45" rgba=".25 .71 .92 1"/>
+            <site name="L_toe_inner" type="box" pos=".15 -.038 -.083" size=".043 .034 .032" rgba="0 .8 .8 .16"/>
+<site name="L_toe_outer" type="box" pos=".15 .038 -.083" size=".043 .034 .032" rgba="0 .8 .8 .16"/>
+<site name="L_heel_inner" type="box" pos="-.02 -.038 -.083" size=".043 .034 .032" rgba="0 .8 .8 .16"/>
+<site name="L_heel_outer" type="box" pos="-.02 .038 -.083" size=".043 .034 .032" rgba="0 .8 .8 .16"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="R_thigh" pos="0 -.105 -.09">
+        <joint name="R_hip" type="hinge" axis="0 1 0" range="-1.2 1.2"/>
+        <geom name="R_thigh_geom" type="capsule" fromto="0 0 0 0 0 -.33" size=".042" mass="1.0" rgba=".94 .58 .28 1" contype="0" conaffinity="0"/>
+        <body name="R_shank" pos="0 0 -.33">
+          <joint name="R_knee" type="hinge" axis="0 1 0" range="-1.5 1.5"/>
+          <geom name="R_shank_geom" type="capsule" fromto="0 0 0 0 0 -.31" size=".034" mass=".75" rgba=".94 .58 .28 1" contype="0" conaffinity="0"/>
+          <body name="R_foot" pos="0 0 -.31">
+            <joint name="R_ankle" type="hinge" axis="0 1 0" range="-1.0 1.0"/>
+            <geom name="R_foot_geom" type="box" pos=".07 0 -.083" size=".13 .072 .028" mass=".45" rgba=".94 .58 .28 1"/>
+            <site name="R_toe_inner" type="box" pos=".15 -.038 -.083" size=".043 .034 .032" rgba="0 .8 .8 .16"/>
+<site name="R_toe_outer" type="box" pos=".15 .038 -.083" size=".043 .034 .032" rgba="0 .8 .8 .16"/>
+<site name="R_heel_inner" type="box" pos="-.02 -.038 -.083" size=".043 .034 .032" rgba="0 .8 .8 .16"/>
+<site name="R_heel_outer" type="box" pos="-.02 .038 -.083" size=".043 .034 .032" rgba="0 .8 .8 .16"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator><motor name="L_hip_motor" joint="L_hip" gear="1" ctrlrange="-38 38"/>
+<motor name="L_knee_motor" joint="L_knee" gear="1" ctrlrange="-32 32"/>
+<motor name="L_ankle_motor" joint="L_ankle" gear="1" ctrlrange="-19 19"/>
+<motor name="R_hip_motor" joint="R_hip" gear="1" ctrlrange="-38 38"/>
+<motor name="R_knee_motor" joint="R_knee" gear="1" ctrlrange="-32 32"/>
+<motor name="R_ankle_motor" joint="R_ankle" gear="1" ctrlrange="-19 19"/></actuator>
+  <sensor><gyro name="pelvis_gyro" site="imu_site"/>
+<accelerometer name="pelvis_accelerometer" site="imu_site"/>
+<jointpos name="L_hip_encoder" joint="L_hip"/>
+<jointpos name="L_knee_encoder" joint="L_knee"/>
+<jointpos name="L_ankle_encoder" joint="L_ankle"/>
+<touch name="L_toe_inner_force" site="L_toe_inner"/>
+<touch name="L_toe_outer_force" site="L_toe_outer"/>
+<touch name="L_heel_inner_force" site="L_heel_inner"/>
+<touch name="L_heel_outer_force" site="L_heel_outer"/>
+<jointpos name="R_hip_encoder" joint="R_hip"/>
+<jointpos name="R_knee_encoder" joint="R_knee"/>
+<jointpos name="R_ankle_encoder" joint="R_ankle"/>
+<touch name="R_toe_inner_force" site="R_toe_inner"/>
+<touch name="R_toe_outer_force" site="R_toe_outer"/>
+<touch name="R_heel_inner_force" site="R_heel_inner"/>
+<touch name="R_heel_outer_force" site="R_heel_outer"/></sensor>
+</mujoco>
