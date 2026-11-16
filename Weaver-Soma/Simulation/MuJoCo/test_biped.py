@@ -1,10 +1,10 @@
 """Headless MuJoCo physics tests. No robot control or learned gait claim."""
 import numpy as np
 import mujoco
-from run_biped import XML,simulate,to_u2
+from run_biped import HERE,simulate,to_u2
 
 def test_mujoco_model_build():
-    m=mujoco.MjModel.from_xml_path(str(XML))
+    m=mujoco.MjModel.from_xml_path(str(HERE / 'biped.xml'))
     d=mujoco.MjData(m);mujoco.mj_forward(m,d)
     assert m.nu==6
     assert m.nq==9
