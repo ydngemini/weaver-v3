@@ -55,7 +55,7 @@ def main():
     teacher.load_state_dict(original['weights'])
     student=WeaverSOMA100M()
     matching=student.load_u1_weights(str(CHECKPOINT))
-    assert matching==91 and count_parameters(student)==100204067
+    assert matching==91 and count_parameters(student)==100206197
     # Protect all 91 original tensors. Only new 100M shared core gets gradients.
     for name,param in student.named_parameters():
         param.requires_grad_(name.startswith('deep_cognitive_core.'))
