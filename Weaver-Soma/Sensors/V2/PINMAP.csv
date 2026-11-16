@@ -1,0 +1,21 @@
+STM32G0B1CBT6_GPIO,LQFP48_physical_pin,Peripheral_and_AF,Net,Interface_component,Notes
+PA11,33,FDCAN1_RX AF3,CAN_RXD,TCAN332G R,Verified ST DS13560 Rev6; no remote I/O across raw CAN RX
+PA12,34,FDCAN1_TX AF3,CAN_TXD,TCAN332G D,Verified ST DS13560 Rev6
+PB6,45,I2C1_SCL AF6,I2C_SCL,ADS1115 + TMP117 x2,Single 4.7k pull-up per bus 3.3V
+PB7,46,I2C1_SDA AF6,I2C_SDA,ADS1115 + TMP117 x2,Single 4.7k pull-up per bus 3.3V
+PA5,16,SPI1_SCK AF0,ENC_SCK,AS5048A primary,Short local SPI
+PA6,17,SPI1_MISO AF0,ENC_MISO,AS5048A primary,Short local SPI
+PA7,18,SPI1_MOSI AF0,ENC_MOSI,AS5048A primary,Short local SPI
+PA4,15,GPIO output,ENC_CS_N,AS5048A primary,Chip select idle high
+PA0,11,ADC input,JOINT_WITNESS_ADC,Independent joint potentiometer,Verify mechanical independence and 0..3.3V input
+PA1,12,ADC input,VIN5_SENSE_DIV,5V supply resistor divider,100k+100k example requires measurement under load
+PB0,19,GPIO input,JOINT_LIMIT_STATUS,NC limit switch logic monitor,NOT substitute for independent hardwired interlock
+PB3,42,Reserved GPIO,EXT_DIAGNOSTIC_SPARE,Unpopulated test pad,AS5048A status is read via SPI; no extra digital DIAG pin assumed
+PB4,43,GPIO input,TEMP_ALERT_N,TMP117 ALERT open drain,Optional; 4.7k pull-up if used
+PB5,44,GPIO input,ADC_ALERT_N,ADS1115 ALERT/RDY,Optional; 4.7k pull-up if used
+PC13,1,GPIO output,LED_STATUS,Board indicator,Series resistor; low-current mode
+PA13,35,SWDIO,SWDIO,ST-Link debugging,Reserve pin exclusively
+PA14,36,SWCLK,SWCLK,ST-Link debugging,Reserve pin exclusively
+PF2,10,NRST,NRST,ST-Link/reset,Follow ST reset network
+VDD VDDA VREF+,,Power,3V3,All 3.3V components,Physical rail pins to verify in EDA schematic
+VSS VSSA,,Ground,GND,Signal reference,Ground/analog ground placement reviewed before PCB
