@@ -52,3 +52,13 @@ A frozen-base, CPU-only **240-update** experiment trained only the ~2,129-parame
 - [Stage 3 measured results and limitations](./STAGE3_RESULTS.md)
 
 A local, untrusted or missing U1 checkpoint is rejected by SHA-256 validation. Restore the original recovered checkpoint to `../U1/results/weaver_soma_unified.pt`. Run `python train_stage3.py`, then `python evaluate_health_gate.py`. Their small experimental adapter checkpoint is not committed to this public repository. All models remain advisory-only.
+
+## Stage 4: trained full 100M core (CPU, synthetic)
+
+**New experimental checkpoint:** 240 AdamW CPU optimizer steps updated **100,082,241 parameters** across the U2 deep Transformer trunk. All 91 recovered U1 tensors remain frozen. The selected step-240 checkpoint improved held-out multitask loss in all 12 tested sensor/physics groups, but changed risk-ranking only marginally and did not establish physical safety. This is **no longer an adapter-only run**, though the training data and 240 updates are tiny for a 100M-parameter system.
+
+- [Exact full-core training code](./train_full_core.py)
+- [Independent weight and masking verifier](./verify_full_core.py)
+- [Measurements and scientific limitations](./STAGE4_RESULTS.md)
+
+Restore the trusted U1 weights to `Weaver-Soma/U1/weaver_soma_unified.pt`, then run from Weaver-Soma root: `python U2/train_full_core.py`. The 400MB experimental core weight file is intentionally **not in this public GitHub repository**.
