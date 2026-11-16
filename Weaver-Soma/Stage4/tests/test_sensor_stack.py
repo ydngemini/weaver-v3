@@ -133,3 +133,61 @@ def test_existing_torch_model_missing_channel_invariance():
         y=net(x,q,context)['risk_logits']
         z=net(altered,q,context)['risk_logits']
     assert torch.equal(y,z)
+
+
+def test_mixed_rate_sensor_sampling_and_dropout():
+    a=SOMASensorWindow()
+    outputs=[]
+    for i in range(12):
+        packets={c:packet(c,i,{"pressure":25.0+0.1*i,"joint":.4+.002*i}[c])
+                 for c in ("pressure","joint")}
+        if i % 2 == 0:
+            packets["temperature"]=packet("temperature",i,34.0+.02*i)
+        row=a.push(packets,BASE+i*DT)
+        outputs.append(row)
+    # After initial thermal reacquisition, a 5Hz sensor feeds a 10Hz body
+    # window using bounded fresh cache without fabricating thermal velocity.
+    assert outputs[0].stop_requested
+    assert outputs[2].quality[-1,1]==1
+    assert outputs[3].quality[-1,1]==1
+    assert outputs[3].obs[-1,4]==0
+    assert all(not x.stop_requested for x in outputs[2:])
+    dropout=a.push({c:packet(c,15,{'pressure':28.0,'joint':.5}[c])
+                    for c in ('pressure','joint')},BASE+15*DT)
+    assert dropout.quality[-1,1]==0
+    assert dropout.stop_requested
+
+def test_invalid_boundary_config_rejected_at_creation():
+    with pytest.raises(ValueError): SOMASensorWindow(safety_boundaries=(60.,43.))
+    with pytest.raises(ValueError): SOMASensorWindow(safety_boundaries=(60.,float('nan'),.8))
+
+
+def test_fault_mask_reaches_u2_health_gate():
+    # Check the WHOLE boundary: corrupt physical packet -> quality=0 -> U2
+    # runs its opt-in adapter. The unmodified recovered U1 path is unchanged.
+    sys.path.insert(0,str(ROOT.parent / 'U2'))
+    from unified_model import WeaverSOMAUnified
+    from weaver_soma_u2 import WeaverSOMA100M
+    torch.manual_seed(410)
+    u1=WeaverSOMAUnified().eval()
+    u2=WeaverSOMA100M(core_dim=64,depth=1,ff_dim=128).eval()
+    mismatches=u2.load_state_dict(u1.state_dict(),strict=False)
+    assert all(k.startswith('deep_cognitive_core.') for k in mismatches.missing_keys)
+    u2.deep_cognitive_core.train_mode='adapter'
+    with torch.no_grad():u2.deep_cognitive_core.adapter_gain.fill_(1.0)
+    a=SOMASensorWindow()
+    for i in range(8):
+        readings={c:packet(c,i,{'pressure':31.,'temperature':34.,'joint':.45}[c])
+                  for c in DEFAULT_SPECS}
+        if i==7:
+            readings['temperature']=dataclasses.replace(readings['temperature'],checksum=0)
+        latest=a.push(readings,BASE+i*DT)
+    assert latest.stop_requested and latest.quality[-1,1]==0
+    x=torch.from_numpy(latest.obs).unsqueeze(0)
+    q=torch.from_numpy(latest.quality).unsqueeze(0)
+    c=torch.zeros(1,8)
+    with torch.inference_mode():
+        base=u1(x,q,c); changed=u2(x,q,c)
+    assert not torch.equal(base['state'],changed['state'])
+    # The original health bit (verified by the gateway) is not modified by U2.
+    assert q[0,-1,1]==0
