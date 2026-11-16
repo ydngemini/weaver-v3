@@ -1,0 +1,81 @@
+{
+  "scenario": "synthetic deterministic injected faults with independent reference only where specified",
+  "seed": 301,
+  "channels": [
+    "pressure",
+    "temperature",
+    "joint"
+  ],
+  "per_channel_per_scenario": 200,
+  "known_detectable_injection_recall": 1.0,
+  "known_fault_events": 3600,
+  "known_faults_detected": 3600,
+  "clean_false_alarm_fraction": 0.0,
+  "blind_spot": "Plausible smooth sensor bias without independent witness is not reliably detectable.",
+  "results": {
+    "clean": {
+      "total": 600,
+      "rejected": 0,
+      "rejection_fraction": 0.0,
+      "reasons": {}
+    },
+    "checksum_corruption": {
+      "total": 600,
+      "rejected": 600,
+      "rejection_fraction": 1.0,
+      "reasons": {
+        "checksum": 600
+      }
+    },
+    "sequence_replay": {
+      "total": 600,
+      "rejected": 600,
+      "rejection_fraction": 1.0,
+      "reasons": {
+        "nonmonotonic_clock": 600,
+        "sequence_replay": 600
+      }
+    },
+    "stale_time": {
+      "total": 600,
+      "rejected": 600,
+      "rejection_fraction": 1.0,
+      "reasons": {
+        "nonmonotonic_clock": 600,
+        "stale_timestamp": 600
+      }
+    },
+    "out_of_range": {
+      "total": 600,
+      "rejected": 600,
+      "rejection_fraction": 1.0,
+      "reasons": {
+        "implausible_range": 600,
+        "implausible_slew": 600
+      }
+    },
+    "stuck_with_independent_witness": {
+      "total": 600,
+      "rejected": 600,
+      "rejection_fraction": 1.0,
+      "reasons": {
+        "stuck_with_witness": 600
+      }
+    },
+    "plausible_bias_with_redundancy": {
+      "total": 600,
+      "rejected": 600,
+      "rejection_fraction": 1.0,
+      "reasons": {
+        "redundancy_disagreement": 600
+      }
+    },
+    "plausible_bias_without_redundancy": {
+      "total": 600,
+      "rejected": 0,
+      "rejection_fraction": 0.0,
+      "reasons": {}
+    }
+  },
+  "warning": "Synthetic packets and trusted-channel assumptions; no evidence of real device reliability or physical robot safety."
+}
