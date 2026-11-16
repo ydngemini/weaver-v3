@@ -52,3 +52,9 @@ The original U1 checkpoint SHA-256 is 3eb0746806f3842ec2d8121a7bcf30f5351b1b26b7
 The separately saved **400,383,725-byte research checkpoint** contains deep-core weights only (not all original pretrained U1 weights) and is not committed to this public repository. To restore, first load the original U1 weights into WeaverSOMA100M, then load the new deep-core tensors using torch.load(..., weights_only=True) and model.deep_cognitive_core.load_state_dict(...).
 
 **Decision:** retain the trained U2 as a research checkpoint, not production or hardware control. Require larger independent real/simulated datasets, replicated seeds, model ablations, risk/utility evaluation and independent actuator cutoffs before promotion.
+
+## Single-file trained model checkpoint
+
+In addition to the core-only intermediate weights, a combined trained checkpoint is available separately as WEAVER_SOMA_U2_100M_Stage4_FULL_MODEL.pt (400,912,211 bytes, SHA-256: 14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149). It includes **all original U1 tensors and the trained full U2 core in one state_dict**. A fresh model reloaded this checkpoint with strict tensor matching and produced **bit-identical values across all 15 outputs** on a test batch. See [load_stage4.py](./load_stage4.py) for the trusted research-only loader.
+
+The unified checkpoint is available as a ChatGPT artifact, **not committed to this public repo**. It is still preliminary synthetic-only training and has no motor authority.
