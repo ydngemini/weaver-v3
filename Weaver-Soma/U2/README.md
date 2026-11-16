@@ -39,3 +39,16 @@ Never let model predictions sign intents, command motors, override an emergency 
 ## Stage 2 evidence
 
 Zero-initialized deep and adapter residual gates guarantee exact U1 output equivalence after loading the recovered weights. The resulting U2 architecture contains **100,206,197 parameters**. The CPU experiment trained a 2,129-parameter adapter for 160 updates and an independent scalar deep gate for 12 updates. Development loss improved modestly, but the changed/extreme physics holdouts got worse, so U2 has **not** been promoted. See [STAGE2_RESULTS.md](./STAGE2_RESULTS.md) and [train_stage2.py](./train_stage2.py).
+
+## Stage 3: masked-sensor robustness (executed)
+
+The existing U2 architecture now passes sensor quality through the unified latent pathway and applies a zero-preserving **fault-conditional adapter**. When every independently verified sensor flag is healthy, the entire output dictionary is bit-exact to the restored U1. Local behavioral tests: **3 passed**.
+
+A frozen-base, CPU-only **240-update** experiment trained only the ~2,129-parameter adapter using six augmented synthetic groups with 1,024 distinct underlying physical episodes. The *100-million-parameter deep core remains untrained*. A separate locked holdout included 5,400 new episodes with clean, noisy, detected-fault and silent-fault variants. Flagged-fault prediction loss improved substantially, but some nominal and noisy cases regressed; unreported faults remain dangerous. **No U2 checkpoint was promoted**.
+
+- [Stage 3 exact executed training source](./train_stage3.py)
+- [Second heldout sensor-gate evaluation](./evaluate_health_gate.py)
+- [Behavioral tests](./test_health_gate.py)
+- [Stage 3 measured results and limitations](./STAGE3_RESULTS.md)
+
+A local, untrusted or missing U1 checkpoint is rejected by SHA-256 validation. Restore the original recovered checkpoint to `../U1/results/weaver_soma_unified.pt`. Run `python train_stage3.py`, then `python evaluate_health_gate.py`. Their small experimental adapter checkpoint is not committed to this public repository. All models remain advisory-only.
