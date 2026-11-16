@@ -1,0 +1,30 @@
+digraph SOMA_V2 {
+  graph [rankdir=LR,bgcolor="white",splines=ortho,nodesep=0.40,ranksep=0.66,pad=0.35,fontname="DejaVu Sans"];
+  node [fontname="DejaVu Sans",shape=box,style="rounded,filled",color="#31507C",penwidth=1.2,fillcolor="#EEF3FD",fontsize=11,margin="0.14,0.12"];
+  edge [fontname="DejaVu Sans",color="#567296",fontsize=9,arrowsize=0.7];
+  subgraph cluster_physical {
+   label="Articulated finger + hand"; color="#C3D3E8";style=rounded;
+   pads [label="4 tactile force pads\n100 Hz / taxel"];
+   thermal [label="2× co-located TMP117\n~8 Hz, real fresh flags"];
+   encoder [label="AS5048A angle\n+ separate pot witness"];
+   hard [label="NC physical joint limit\n+ independent motor cutout",fillcolor="#FFE9E9",color="#C66A67"];
+  }
+  subgraph cluster_node {
+   label="SOMA Sensor Node (3.3V logic)";color="#C3D3E8";style=rounded;
+   adc [label="ADS1115, 4:1 mux\n4×100 = 400 SPS"];
+   mcu [label="STM32G0B1\nSPI / I²C / ADC / FDCAN"];
+   transceiver [label="TCAN332G\n3.3V CAN-FD"];
+  }
+  gateway [label="Trusted gateway\nseq + CRC + time + calibration\nwitness + fault handling",fillcolor="#E4F2E8",color="#4B8660"];
+  soma [label="Weaver-SOMA U1/U2\nobs 8×7 · quality 8×3\nADVISORY ONLY",fillcolor="#E4F2E8",color="#4B8660"];
+  guard [label="Separate motor controller\nindependent hard safety",fillcolor="#FFE9E9",color="#C66A67"];
+  pads -> adc [label="analog, conditioned"];
+  thermal -> mcu [label="I²C, short flex"];
+  encoder -> mcu [label="SPI + ADC"];
+  adc -> mcu [label="I²C"];
+  mcu -> transceiver;
+  transceiver -> gateway [label="CAN-FD 32B @100Hz"];
+  gateway -> soma [label="validated masks"];
+  hard -> guard [color="#B65454",label="hardwired"];
+  soma -> guard [style=dashed,label="no direct motion path",color="#B65454",arrowhead=tee];
+}
