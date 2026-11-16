@@ -31,10 +31,15 @@ class SOMASensorWindow:
             raise ValueError("current SOMA U1/U2 require exactly 8 history frames")
         self.monitor = monitor or HealthMonitor()
         self.history = history
+        if safety_boundaries is not None:
+            bounds = np.asarray(safety_boundaries, dtype=np.float32)
+            if bounds.shape != (3,) or not np.isfinite(bounds).all():
+                raise ValueError("invalid research safety boundaries")
         self.safety_boundaries = safety_boundaries
         self._frames: deque[tuple[np.ndarray, np.ndarray, int]] = deque(maxlen=history)
         self._last_good_value: dict[str, tuple[int, float]] = {}
         self._cache: dict[str, tuple[int, float]] = {}
+        self._reacquire: dict[str, int] = {}
 
     def push(self, packets: dict[str, SensorPacket], frame_ns: int, *,
              independently_verified_contact: bool | None = None,
@@ -58,8 +63,15 @@ class SOMASensorWindow:
                     independent_reference=independent_references.get(channel))
                 if report.trusted and report.value is not None:
                     self._cache[channel] = (packets[channel].captured_ns, report.value)
+                    self._reacquire.pop(channel, None)
+                elif report.reasons == ("reacquiring",):
+                    # Valid first sample, but not enough independent samples
+                    # to grant trust; don't reset on an expected 5-Hz gap.
+                    self._cache.pop(channel, None)
+                    self._reacquire[channel] = packets[channel].captured_ns
                 else:
                     self._cache.pop(channel, None)
+                    self._reacquire.pop(channel, None)
             else:
                 cached = self._cache.get(channel)
                 ttl = self.monitor.specs[channel].max_age_ns
@@ -67,9 +79,14 @@ class SOMASensorWindow:
                     # Different physical sensors have different acquisition rates.
                     # Reuse the LAST independently checked reading only within TTL.
                     report = HealthReport(channel, True, cached[1], ("fresh_cache",), 0)
+                elif (channel in self._reacquire and
+                      0 <= frame_ns - self._reacquire[channel] <= ttl):
+                    report = HealthReport(channel, False, None,
+                                          ("awaiting_next_sample",), 0)
                 else:
                     report = self.monitor.mark_missing(channel)
                     self._cache.pop(channel, None)
+                    self._reacquire.pop(channel, None)
             reasons[channel] = report.reasons
             if report.trusted and report.value is not None:
                 flags[j] = 1
