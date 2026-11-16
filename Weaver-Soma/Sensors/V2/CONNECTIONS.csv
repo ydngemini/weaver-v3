@@ -1,0 +1,24 @@
+Net,Source,Destinations,Nominal_voltage,Proposed_condition,Status
+VIN5,4-pin system connector J1 pin1,Input ESD/reverse/OV protection -> TLV75533 IN + supply monitor divider,5.0V,fused regulated bench supply ONLY; regulator 5.5V maximum,Provisional
+GND,J1 pin2,Common sensor logic grounds + shield policy,0V,star return away from motor high currents,Provisional
+3V3,TLV75533 OUT,STM32 VDD/VDDA/VREF + TCAN332G + ADS1115 + TMP117 x2 + AS5048A,3.3V,decoupling per each device datasheet and thermal separation,Provisional
+CANH,J1 pin3,TCAN332G CANH through EMC/ESD network,CAN bus,120 ohm end termination footprint only at physical bus ends,Provisional
+CANL,J1 pin4,TCAN332G CANL through EMC/ESD network,CAN bus,keep differential pair together and avoid motor wiring,Provisional
+CAN_RXD,TCAN332G R,STM32 PA11,3.3V logic,FDCAN1_RX AF3,Verified function
+CAN_TXD,STM32 PA12,TCAN332G D,3.3V logic,FDCAN1_TX AF3,Verified function
+I2C_SCL,STM32 PB6,ADS1115 SCL + TMP117 contact SCL + TMP117 witness SCL,3.3V logic,I2C1_SCL AF6; 4.7k pullup; no duplicate board pullups,Provisional
+I2C_SDA,STM32 PB7,ADS1115 SDA + TMP117 contact SDA + TMP117 witness SDA,3.3V logic,I2C1_SDA AF6; 4.7k pullup,Provisional
+ADDR_ADC,ADS1115 ADDR,I2C_SDA,3.3V,ADS1115 address 0x4A via SDA,Datasheet address choice
+ADDR_TEMP0,TMP117 contact ADD0,GND,0V,0x48 only if correct variant/wiring confirmed,Datasheet address choice
+ADDR_TEMP1,TMP117 witness ADD0,3V3,3.3V,0x49 only if correct variant/wiring confirmed,Datasheet address choice
+FSR0_DIV,3.3V -> tactile sensor 0 -> 10k pulldown,ADS1115 AIN0 via RC limiting,0..3.3V,Exploratory nonlinear voltage-divider bench readout; calibrate against known force,Provisional
+FSR1_DIV,3.3V -> tactile sensor 1 -> 10k pulldown,ADS1115 AIN1 via RC limiting,0..3.3V,Same as FSR0,Provisional
+FSR2_DIV,3.3V -> tactile sensor 2 -> 10k pulldown,ADS1115 AIN2 via RC limiting,0..3.3V,Same as FSR0,Provisional
+FSR3_DIV,3.3V -> tactile sensor 3 -> 10k pulldown,ADS1115 AIN3 via RC limiting,0..3.3V,Same as FSR0,Provisional
+ENC_SCK,STM32 PA5,AS5048A CLK,3.3V SPI,SPI1_SCK AF0,Verified function
+ENC_MISO,AS5048A MISO,STM32 PA6,3.3V SPI,SPI1_MISO AF0,Verified function
+ENC_MOSI,STM32 PA7,AS5048A MOSI,3.3V SPI,SPI1_MOSI AF0,Verified function
+ENC_CS_N,STM32 PA4,AS5048A CS_N,3.3V logic,GPIO chip select and proper 3.3V mode decoupling,Provisional
+JOINT_WITNESS_ADC,Independent 0-3.3V pot wiper,STM32 PA0 via RC and protection,0..3.3V,Calibrate to mechanical stops; separate sensor power/fault path if possible,Provisional
+VIN5_SENSE_DIV,100k top 100k bottom,GND and STM32 PA1 ADC,2.5V at VIN5=5V,verify rail noise ADC reference and input limits,Provisional
+JOINT_LIMIT_STATUS,NC limit switch contact,MCU PB0 input,3.3V logic status,hardwired contact must ALSO reach independent motor disable; MCU only observes,Provisional
