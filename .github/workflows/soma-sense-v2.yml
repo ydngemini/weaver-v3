@@ -1,0 +1,32 @@
+name: SOMA-SENSE V2 CPU Tests
+on:
+  pull_request:
+    paths:
+      - 'Weaver-Soma/Sensors/V2/**'
+      - 'Weaver-Soma/Sensors/sensor_hub.py'
+      - '.github/workflows/soma-sense-v2.yml'
+  push:
+    branches: ['feature/soma-sense-v2-node']
+    paths:
+      - 'Weaver-Soma/Sensors/V2/**'
+      - 'Weaver-Soma/Sensors/sensor_hub.py'
+      - '.github/workflows/soma-sense-v2.yml'
+permissions:
+  contents: read
+jobs:
+  sensor-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dependencies
+        run: python -m pip install --disable-pip-version-check numpy pytest
+      - name: Packet/gateway/V1 bridge unit tests
+        working-directory: Weaver-Soma/Sensors/V2
+        run: python -m pytest -q test_sensor_v2.py
+      - name: Scripted fault campaign
+        working-directory: Weaver-Soma/Sensors/V2
+        run: python fault_campaign.py
