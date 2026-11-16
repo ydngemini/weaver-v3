@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="470" viewBox="0 0 1440 470">
+<rect width="1440" height="470" fill="#ffffff"/>
+<text x="35" y="44" font-family="DejaVu Sans" font-size="25" fill="#123b64">SOMA-SENSE V2: independent sensor network (concept)</text>
+<text x="35" y="73" font-family="DejaVu Sans" font-size="15" fill="#4f6d86">Provisional hardware design; no physical PCB fabricated or certified</text>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4c739a"/></marker></defs>
+<g font-family="DejaVu Sans" font-size="16" fill="#103c63" text-anchor="middle">
+ <rect x="30" y="122" width="222" height="172" rx="16" fill="#eaf0fa" stroke="#416a94" stroke-width="2"/>
+ <text x="141" y="152">Physical finger</text>
+ <text x="141" y="182" font-size="14">4 tactile pads</text>
+ <text x="141" y="207" font-size="14">2× TMP117</text>
+ <text x="141" y="232" font-size="14">Magnet angle + pot</text>
+ <text x="141" y="257" font-size="14">NC hard limit</text>
+ <rect x="288" y="122" width="235" height="172" rx="16" fill="#eaf0fa" stroke="#416a94" stroke-width="2"/>
+ <text x="405" y="152">Sensor node PCB</text>
+ <text x="405" y="182" font-size="14">ADS1115 ADC</text>
+ <text x="405" y="207" font-size="14">STM32G0B1</text>
+ <text x="405" y="232" font-size="14">TCAN332G CAN-FD</text>
+ <text x="405" y="257" font-size="14">3.3V regulated</text>
+ <rect x="562" y="122" width="245" height="172" rx="16" fill="#ebf5ed" stroke="#4d855b" stroke-width="2"/>
+ <text x="685" y="152">Trusted gateway</text>
+ <text x="685" y="181" font-size="14">CRC, sequence, time</text>
+ <text x="685" y="205" font-size="14">calibration + freshness</text>
+ <text x="685" y="229" font-size="14">cross-sensor faults</text>
+ <text x="685" y="254" font-size="14">binary quality masks</text>
+ <rect x="847" y="122" width="260" height="172" rx="16" fill="#ebf5ed" stroke="#4d855b" stroke-width="2"/>
+ <text x="977" y="152">One Weaver-SOMA core</text>
+ <text x="977" y="184" font-size="14">obs: 8 × 7</text>
+ <text x="977" y="208" font-size="14">quality: 8 × 3</text>
+ <text x="977" y="239" font-size="14">advisory only</text>
+ <rect x="1148" y="122" width="260" height="172" rx="16" fill="#fff0ef" stroke="#b9635c" stroke-width="2"/>
+ <text x="1278" y="152">Independent guard</text>
+ <text x="1278" y="185" font-size="14">motor overcurrent</text>
+ <text x="1278" y="210" font-size="14">e-stop and joint limits</text>
+ <text x="1278" y="236" font-size="14">no ML bypass</text>
+</g>
+<g stroke="#4c739a" stroke-width="3" marker-end="url(#arrow)" fill="none">
+<path d="M252 200H285"/><path d="M523 200H559"/><path d="M807 200H844"/>
+</g>
+<path d="M141 294V396H1278V297" fill="none" stroke="#c75d59" stroke-width="3"/>
+<text x="720" y="384" font-family="DejaVu Sans" font-size="17" fill="#a64745" text-anchor="middle">Hardwired limit and emergency stop bypass the neural model</text>
+<path d="M1107 200H1145" fill="none" stroke="#d59a95" stroke-width="3" stroke-dasharray="6 6"/>
+<text x="1130" y="113" font-family="DejaVu Sans" font-size="13" fill="#9b4e49" text-anchor="middle">No direct control</text>
+</svg>
