@@ -62,3 +62,9 @@ A local, untrusted or missing U1 checkpoint is rejected by SHA-256 validation. R
 - [Measurements and scientific limitations](./STAGE4_RESULTS.md)
 
 Restore the trusted U1 weights to `Weaver-Soma/U1/weaver_soma_unified.pt`, then run from Weaver-Soma root: `python U2/train_full_core.py`. The 400MB experimental core weight file is intentionally **not in this public GitHub repository**.
+
+## Stage 5: longer sensor histories and 100M continuation
+
+The [Stage 5 design and results](../Stage5/README.md) now have **complete executable source on this feature branch**, including [long-world simulation](./long_world.py), [temporal memory](./temporal_model.py), [SOMA-SENSE hardware packet ingestion](./sensor_stream.py), [CPU training](./train_stage5.py), [independent verification](./verify_stage5.py) and [seven Stage 5 tests](./test_stage5.py). The V2 [packet/gateway code](../Sensors/V2/) and pin map are also checked in. [Reproducibility instructions](../Stage5/RUN_TESTS.md).
+
+Research checkpoint reported from the original experiment: 100,258,619 parameters, with 80 continued full-core CPU updates. These results use synthetic 32-sample sequences and are **not real-world physical pretraining**. The Stage 4 / Stage 5 trained weights are not in this public repository; they are required to rerun the full training/verification. No actuator authority is given to the neural model.
