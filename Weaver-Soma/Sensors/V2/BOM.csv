@@ -1,0 +1,20 @@
+Designator,Part_or_class,Qty,Subsystem,Status,Source_or_note
+U1,STM32G0B1CBT6 LQFP48,1,Microcontroller,Candidate verified,https://www.st.com/en/microcontrollers-microprocessors/stm32g0b1cb.html
+U2,ADS1115 16-bit mux ADC,1,Four tactile analog inputs,Candidate verified,https://www.ti.com/product/ADS1115
+U3 U4,TMP117 digital temperature sensors,2,Contact plus nearby thermal witness,Candidate verified,https://www.ti.com/lit/ds/symlink/tmp117.pdf
+U5,AS5048A 14-bit SPI absolute encoder,1,Joint position,Candidate verified,https://www.infineon.com/part/AS5048A
+U6,TCAN332G 3.3-V CAN-FD transceiver,1,CAN-FD interface,Candidate verified,https://www.ti.com/product/TCAN332G
+U7,TLV75533PDBVR 3.3-V 500mA LDO,1,Logic power,Candidate verified,https://www.ti.com/document-viewer/lit/html/TIDUEY1B/GUID-E70B587B-2F75-460E-93B0-4E9F3CE84D29
+S1 S2 S3 S4,FlexiForce A201 force-sensitive element or equivalent,4,One-finger tactile layout,Candidate - performance is conditioning dependent,https://www.tekscan.com/products-solutions/force-sensors/flexiforce-a201-sensor
+RV1,Independent rotary potentiometer,1,Joint witness,Specification pending,Calibrated for 0-3.3V and mechanically independent alignment
+SW1,Normally-closed mechanical limit switch,1,Independent motion interlock + MCU status,Specification pending,Select for actual motor and environment; no safety rating assumed
+R01-R04,10k 1% tactile divider pulldown,4,Force sensor bench analog AFE,Exploratory,Nonlinear; do not use datasheet op-amp performance claims
+R05-R06,4.7k I2C pullups,2,One 3.3V I2C bus,Provisional,Check total bus capacitance incl. flex before stuffing
+R07-R08,100k 1% supply divider,2,5V analog monitor,Provisional,Add RC and protective circuitry on PA1 input
+CAP,Local 0.1uF bypass and regulator inlet/outlet caps,12,Decoupling,Not yet detailed,Follow each component manufacturer's PCB example and minimum ESR specifications
+TVS,Power + CAN surge/ESD protection,2-3,External connector,Protection to be selected,Size against expected environment; no claim of IEC certification
+TERM,120 ohm CAN bus end resistor footprint,1,CAN backbone,Do not always populate,Only fitted at actual bus endpoints
+J1,4-pin keyed 5V/GND/CANH/CANL,1,Backbone connection,Mechanical part to be selected,Strain relief locking and polarity key essential
+J2,Flexible finger-pad board/short flex connector,1,Force + thermal assembly,Mechanical part to be selected,Maximum flex length provisional 100mm subject to I2C EMC test
+J3,SWD 4/5-pin programming pad,1,Debug,Mechanical part to be selected,No unprotected exposed signals in use
+J4,Encoder/pot/NC limit pigtail,1,Joint assembly,Mechanical part to be selected,Shielding and twisted pair as applicable

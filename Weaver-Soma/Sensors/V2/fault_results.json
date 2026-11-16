@@ -1,0 +1,117 @@
+{
+  "label": "SYNTHETIC FAULT INJECTION: 1,500 targeted trials, not population sensitivity",
+  "cases": [
+    {
+      "scenario": "clean",
+      "trials": 100,
+      "flagged": 0,
+      "flagged_rate": 0,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "noisy_nominal",
+      "trials": 100,
+      "flagged": 0,
+      "flagged_rate": 0,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "crc_corruption",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "replay",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "stale",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "can_id_swap",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "brownout",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "encoder_witness_disagreement",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "thermal_witness_disagreement",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "adc_reported_fault",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "temp_reported_fault",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "temperature_freeze_visible_to_witness",
+      "trials": 100,
+      "flagged": 100,
+      "flagged_rate": 1,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "temperature_freeze_below_detection",
+      "trials": 100,
+      "flagged": 0,
+      "flagged_rate": 0,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "both_thermal_sensors_frozen",
+      "trials": 100,
+      "flagged": 0,
+      "flagged_rate": 0,
+      "note": "scripted detection only; not hardware validation"
+    },
+    {
+      "scenario": "forge_valid_crc_and_identity",
+      "trials": 100,
+      "flagged": 0,
+      "flagged_rate": 0,
+      "note": "scripted detection only; not hardware validation"
+    }
+  ],
+  "limitations": [
+    "clean/noise example set not a field false-positive rate",
+    "correlated frozen twins remain undetectable without external stimuli",
+    "small temperature changes can evade drift monitor",
+    "CRC/CAN arbitration ID do not authenticate node identity",
+    "multiple isolated scenarios chosen to exercise implemented rules, not real failure distribution"
+  ]
+}
