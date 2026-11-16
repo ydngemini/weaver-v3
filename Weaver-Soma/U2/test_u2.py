@@ -9,7 +9,7 @@ def main():
     torch.set_num_threads(4)
     old=WeaverSOMAUnified().eval()
     new=WeaverSOMA100M().eval()
-    assert count_parameters(new)==100204067, count_parameters(new)
+    assert count_parameters(new)==100206197, count_parameters(new)
     x=torch.randn(1,8,7); q=torch.ones(1,8,3); c=torch.randn(1,8)
     a=torch.tensor([[0.,1.,0.]])
     with torch.no_grad():
@@ -26,6 +26,9 @@ def main():
         s1=new(x,q,c,a)['risk_logits']
         s2=new(corrupted,q,c,a)['risk_logits']
     assert torch.allclose(s1,s2,atol=1e-6), 'sensor leakage'
+    # With both neural residual gates initialized to zero, the newly grown
+    # network produces exactly U1's existing outputs when original U1 weights
+    # are restored. This is tested after the state_dict copy below.
 
     # Verify newly grown core can consume matching older state dict.
     # This uses UNTRAINED U1 weights only to test schema, not to suggest
@@ -33,6 +36,13 @@ def main():
     result=new.load_state_dict(old.state_dict(),strict=False)
     assert not result.unexpected_keys
     assert all(k.startswith('deep_cognitive_core.') for k in result.missing_keys)
+    old.eval(); new.eval()
+    with torch.inference_mode():
+        y0=old(x,q,c,a); y1=new(x,q,c,a)
+    for key in y0:
+        assert torch.equal(y0[key],y1[key]), key
+    assert new.deep_cognitive_core.residual_gain.item()==0
+    assert new.deep_cognitive_core.adapter_gain.item()==0
     print('PASS: output contract; finite outputs; missing-sensor isolation; U1 state_dict schema')
 
 
