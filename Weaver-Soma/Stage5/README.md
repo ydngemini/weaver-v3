@@ -30,3 +30,7 @@ The original 400 MB checkpoint is not embedded in this source package. Source ch
 ## Interpretation
 
 Even if a held-out synthetic dataset improves, this does not qualify as full-scale pretraining on the real world. Real sensor sessions, image/audio/text tokenization, unsupervised environment prediction and independent physical safety trials are still missing. The memory module offers a bounded 32-frame horizon, not indefinite autobiographical memory. The lab should use the [physical data collection and calibration plan](./PHYSICAL_DATA_COLLECTION.md) before collecting training data from hardware.
+
+## Verified V2-to-U2 software smoke test
+
+`python U2/smoke_sensor_to_u2.py` generates 460 explicitly synthetic 32-byte CAN-FD frames, validates them with the existing SOMA-SENSE gateway, assembles 32 sequential sensor samples and runs the actual Stage 5 checkpoint. It deliberately **does not** generate physical pressure when contact force/area calibration is unavailable. See `results/v2_sensor_to_stage5_smoke.json`.
