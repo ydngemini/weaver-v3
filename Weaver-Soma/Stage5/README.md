@@ -34,3 +34,9 @@ Even if a held-out synthetic dataset improves, this does not qualify as full-sca
 ## Verified V2-to-U2 software smoke test
 
 `python U2/smoke_sensor_to_u2.py` generates 460 explicitly synthetic 32-byte CAN-FD frames, validates them with the existing SOMA-SENSE gateway, assembles 32 sequential sensor samples and runs the actual Stage 5 checkpoint. It deliberately **does not** generate physical pressure when contact force/area calibration is unavailable. See `results/v2_sensor_to_stage5_smoke.json`.
+
+## GitHub source sync (retry)
+
+The complete executable Stage 5 code is now committed under [U2](../U2/), with V2 CAN-FD [packet parser, gateway and bridge](../Sensors/V2/) and the [hardware quality monitor](../Sensors/sensor_hub.py). The earlier documentation-only PR was missing these. Local re-run of **7 Stage 5 tests + 28 sensor V2 tests = 35 passing** with the archived sources and pin map. See [RUN_TESTS.md](./RUN_TESTS.md).
+
+**No trained model checkpoints are published**, and GitHub CI has not yet been run. No physical dataset was recorded or authenticated.
