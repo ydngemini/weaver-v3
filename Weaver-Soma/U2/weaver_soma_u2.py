@@ -38,16 +38,21 @@ class DeepCognitiveCore(nn.Module):
         self.adapter_gain = nn.Parameter(torch.zeros(()))
         self.train_mode = "deep"
 
-    def forward(self, common, z, mem, broadcast, context):
+    def forward(self, common, z, mem, broadcast, context, quality=None):
+        # Only independently verified sensor faults activate the learned
+        # correction. This is an advisory model, not a hardware safety check.
+        health_gate = 1.0 if quality is None else (
+            1.0 - quality.min(dim=-1).values.min(dim=-1).values
+        ).unsqueeze(-1)
         if self.train_mode == "adapter":
-            # Skip expensive 100M forward for CPU adapter-only training.
-            return common + self.adapter_gain * self.adapter(common)
+            # Skip the frozen 100M trunk for CPU-friendly adapter evaluation.
+            return common + health_gate * self.adapter_gain * self.adapter(common)
         x = torch.stack([layer(t) for layer, t in zip(self.in_proj, (z, mem, broadcast, common))], dim=1)
         x = x + self.pos.unsqueeze(0) + self.context_proj(context).unsqueeze(1)
         for block in self.blocks:
             x = block(x)
         refined = self.out_proj(self.final_norm(x[:, -1]))
-        return common + self.residual_gain * refined + self.adapter_gain * self.adapter(common)
+        return common + self.residual_gain * refined + health_gate * self.adapter_gain * self.adapter(common)
 
 
 class WeaverSOMA100M(WeaverSOMAUnified):
@@ -56,8 +61,8 @@ class WeaverSOMA100M(WeaverSOMAUnified):
         super().__init__(width=width, latent=latent)
         self.deep_cognitive_core = DeepCognitiveCore(latent, 8, core_dim, depth, ff_dim)
 
-    def refine_shared_state(self, common, z, internal_memory, broadcast, context, token_z):
-        return self.deep_cognitive_core(common, z, internal_memory, broadcast, context)
+    def refine_shared_state(self, common, z, internal_memory, broadcast, context, token_z, quality=None):
+        return self.deep_cognitive_core(common, z, internal_memory, broadcast, context, quality)
 
     def load_u1_weights(self, checkpoint_path):
         """Load exactly matching trained U1 tensors from a TRUSTED checkpoint.
