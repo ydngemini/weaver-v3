@@ -44,3 +44,7 @@ Use WeaverSOMA100M().load_u1_weights(path_to_trusted_u1_checkpoint) to copy the 
 - This folder is a source-code development area; it is not wired into the running Weaver v3 service and has not replaced Weaver's original runtime.
 
 The exact recovered U1 checkpoint is retained separately for authorized local continuation.
+
+## Sensors: SOMA-SENSE V1
+
+We now have a modular bench-scale tactile/thermal/joint hardware reference design plus a CPU-tested fault monitor. [Open the sensor architecture and validation code](./Sensors/). The host adapter transforms timestamped calibrated readings into U1/U2 `obs[8,7]` and independently checked `quality[8,3]`, masks suspect data, and never commands motors. Local tests: **12 passed**; 1,200 **synthetic** fault-injection trials exposed slow thermal freeze and common-mode frozen-sensor blind spots. No hardware has been built or validated. The independently protected motor controller remains mandatory.
