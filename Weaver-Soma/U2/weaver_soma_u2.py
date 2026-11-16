@@ -32,15 +32,22 @@ class DeepCognitiveCore(nn.Module):
         self.blocks = nn.ModuleList([CognitiveBlock(dim, ff_dim) for _ in range(depth)])
         self.final_norm = nn.LayerNorm(dim)
         self.out_proj = nn.Linear(dim, latent_dim)
-        self.residual_scale = 0.01
+        # Exact U1 at step zero; learned gates control experimental additions.
+        self.residual_gain = nn.Parameter(torch.zeros(()))
+        self.adapter = nn.Sequential(nn.Linear(latent_dim, 16), nn.SiLU(), nn.Linear(16, latent_dim))
+        self.adapter_gain = nn.Parameter(torch.zeros(()))
+        self.train_mode = "deep"
 
     def forward(self, common, z, mem, broadcast, context):
+        if self.train_mode == "adapter":
+            # Skip expensive 100M forward for CPU adapter-only training.
+            return common + self.adapter_gain * self.adapter(common)
         x = torch.stack([layer(t) for layer, t in zip(self.in_proj, (z, mem, broadcast, common))], dim=1)
         x = x + self.pos.unsqueeze(0) + self.context_proj(context).unsqueeze(1)
         for block in self.blocks:
             x = block(x)
         refined = self.out_proj(self.final_norm(x[:, -1]))
-        return common + self.residual_scale * refined
+        return common + self.residual_gain * refined + self.adapter_gain * self.adapter(common)
 
 
 class WeaverSOMA100M(WeaverSOMAUnified):
