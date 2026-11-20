@@ -103,3 +103,24 @@ python U3/train_smoke.py /path/to/weaver_soma_unified_RECOVERED.pt
 ```
 
 Next **scientific** training requires appropriately licensed real audio and calibrated chemical-sensor datasets, stricter held-out devices/times, actual U3 saved weights, and compute-matched baselines.
+
+## N13 research module added: neuron growth and learned proposals (2026-11-20)
+
+The U3 branch now includes `evolution.py` and `test_evolution.py`.
+
+- `widen_feedforward(ff, sources)` creates a **separate candidate copy** of a `Linear -> elementwise activation -> Linear` feed-forward block. It duplicates chosen hidden units and divides outgoing weights among copies, preserving the block's mathematical function (modulo floating-point roundoff). It never mutates the original block and does not migrate optimizer state; the candidate needs a recreated optimizer and independent evaluation.
+- `EvolutionProposalHead` is **5,254 additional learnable parameters** registered under `WeaverSOMAU3.evolution_head`, not a third-party agent. It processes eight finite diagnostics and emits untrained logits for four actions (no change / widen FFN / sparse rewiring trial / learning-rate trial) plus bounded growth fraction and learning-rate multiplier suggestions.
+- `WeaverSOMAU3.forward(..., evolution_diagnostics=...)` optionally adds `evolution_proposals` to the output. Calling it without diagnostics keeps the existing legacy-only interface and output semantics. The neural proposal head is not trained, and none of its proposals are automatically applied.
+- Standalone PyTorch CPU tests on a separate ephemeral environment **passed** function-preserving widening on 15 combinations, input guard cases, and the differentiability of the proposal network. A *new integrated U3 test* has been committed but **not yet executed on the full U3 source at this revision**. Existing recorded CPU model tests apply to the previous scaffold.
+- The previously documented U3 parameter count of 100,610,471 was measured **before** the extra 5,254-parameter proposal head. The predicted updated count is 100,615,725; remeasure when running an actual U3 test before treating that as verified.
+- The evolving head does not have permission to edit model code, execute deployment commands, change safety rules, or apply structural changes. Candidate selection, mutation and independent test gates are future stages, not current capabilities.
+
+**Blocking conditions for full integration/training:** historical trained Stage 4 U2 checkpoint not yet restored; connected Linux box had only about 142 MB free in a read-only check on November 20 and its system Python did not have PyTorch. Do not install gigabyte-scale packages or download full audio datasets on the nearly full root drive. Use an approved roomier GPU/CPU research environment for next tests; do not alter active Weaver or Neoh services.
+
+**Next exact validation:**
+```bash
+cd Weaver-Soma
+python U3/test_u3.py
+python U3/test_evolution.py
+```
+These are research checks, not AGI or deployed autonomous neural evolution.
