@@ -88,3 +88,18 @@ The new heads return random/untrained predictions until properly trained on trus
 5. Treat the quantum simulator as an ablation to compare against an equally resourced classical MLP. Later optional IBM and quantum-sensor work require separate access and hardware.
 
 For the longer research scope, read [ARCHITECTURE.md](./ARCHITECTURE.md), [ROADMAP_00_TO_17.md](./ROADMAP_00_TO_17.md), and [NATIVE_QUANTUM_COSMIC_RESEARCH.md](./NATIVE_QUANTUM_COSMIC_RESEARCH.md).
+
+
+## First supervised training smoke test (synthetic only)
+
+`train_smoke.py` freezes all inherited U1/U2 tensors and trains only U3's new sensory components with 80 AdamW steps on deliberately simple, procedurally generated binary tasks. This was executed on CPU with the verified U1 file and **a small research core configuration** (`core_dim=64`, `depth=2`, `ff_dim=128`, `fusion_dim=64`, three simulated qubits); it is not a 100M-parameter training run.
+
+On a separate synthetic evaluation draw (256 examples), olfactory-pattern accuracy moved from **70.3125% to 100%**, and synthetic sine-wave audio-pattern accuracy from **52.734375% to 100%**. The two tasks are easy by construction and use the same synthetic generator family for training and evaluation; neither number represents actual odor identification, cough/siren recognition, generalization to new sensors or quantum advantage. No trained checkpoint was saved.
+
+```bash
+python U3/train_smoke.py
+# Or with recovered original U1:
+python U3/train_smoke.py /path/to/weaver_soma_unified_RECOVERED.pt
+```
+
+Next **scientific** training requires appropriately licensed real audio and calibrated chemical-sensor datasets, stricter held-out devices/times, actual U3 saved weights, and compute-matched baselines.
