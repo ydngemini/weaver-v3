@@ -53,7 +53,27 @@ def test_proposal():
     print("PASS: neural proposal head differentiable; numeric and shape contracts")
 
 
+def test_unified_model_integration():
+    from model import WeaverSOMAU3, LEGACY_OUTPUTS
+    torch.manual_seed(14)
+    model = WeaverSOMAU3(core_dim=64, depth=1, ff_dim=128,
+                         fusion_dim=64, quantum_qubits=2).eval()
+    obs = torch.zeros(2, 8, 7)
+    quality = torch.ones(2, 8, 3)
+    context = torch.zeros(2, 8)
+    with torch.no_grad():
+        legacy = model(obs, quality, context)
+        proposed = model(obs, quality, context, evolution_diagnostics=torch.zeros(2, 8))
+    assert set(legacy) == LEGACY_OUTPUTS
+    assert set(proposed) == LEGACY_OUTPUTS | {"evolution_proposals"}
+    assert proposed["evolution_proposals"]["action_logits"].shape == (2, 4)
+    for key in LEGACY_OUTPUTS:
+        assert torch.equal(legacy[key], proposed[key]), ("inherited output changed", key)
+    print("PASS: proposal head lives inside one U3 model and preserves 15 legacy outputs")
+
+
 if __name__ == "__main__":
     test_growth()
     test_invalid()
     test_proposal()
+    test_unified_model_integration()
