@@ -1,6 +1,6 @@
 # SOMA U3 unified multimodal neural architecture
 
-**Status:** Design specification, not yet implemented or trained. The protected starting point is Weaver-SOMA U2, a 100,206,197-parameter PyTorch model with research-only synthetic sensor/physics training documented in its own branch. No existing neural weights are replaced by this document.
+**Status (2026-11-20):** The **first U3 research implementation now exists** in [model.py](./model.py), [quantum_native.py](./quantum_native.py), [test_u3.py](./test_u3.py) and [train_smoke.py](./train_smoke.py). U3 supports seven native sensory tensor pathways, a gated cross-modal workspace and a small *classically simulated* trainable quantum circuit. Tests show 15/15 exact inherited outputs at zero fusion and a small synthetic training smoke run; it is **not a trained multimodal foundation model**, real quantum sensor or physical QPU. The original 401 MB trained U2 checkpoint is still missing, so the verified U1 epoch-24 weights are the available baseline. U2 retains its 100,206,197-parameter PyTorch architecture and historical synthetic-only training evidence.
 
 ## One native jointly trainable model
 
