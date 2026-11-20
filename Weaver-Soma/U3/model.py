@@ -20,6 +20,7 @@ if str(HERE.parent / "U2") not in sys.path:
 from weaver_soma_u2 import WeaverSOMA100M, count_parameters  # noqa: E402
 from unified_model import HORIZON, STATE_CENTER, STATE_SCALE  # noqa: E402
 from quantum_native import VariationalQuantumFeatures  # noqa: E402
+from evolution import EvolutionProposalHead  # noqa: E402
 
 U1_SHA256 = "3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f"
 U2_STAGE4_SHA256 = "14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149"
@@ -98,6 +99,8 @@ class WeaverSOMAU3(WeaverSOMA100M):
         self.quantum_gain = nn.Parameter(torch.zeros(()))
         self.label_heads = nn.ModuleDict({name: nn.Linear(fusion_dim, n)
                                           for name, n in self.LABELS.items()})
+        # Trainable proposal head is part of THIS neural model; mutation execution is not.
+        self.evolution_head = EvolutionProposalHead(signal_count=8, width=64)
 
     @staticmethod
     def _file_hash(path: str | Path) -> str:
@@ -257,10 +260,15 @@ class WeaverSOMAU3(WeaverSOMA100M):
         })
 
     def forward(self, obs, quality, context, executed_action=None, ablate=None, *,
-                modalities: Mapping[str, Mapping[str, torch.Tensor]] | None = None):
+                modalities: Mapping[str, Mapping[str, torch.Tensor]] | None = None,
+                evolution_diagnostics: torch.Tensor | None = None):
         out = super().forward(obs, quality, context, executed_action, ablate)
+        if evolution_diagnostics is not None:
+            if evolution_diagnostics.shape[0] != obs.shape[0]:
+                raise ValueError("evolution diagnostics batch size mismatch")
+            out["evolution_proposals"] = self.evolution_head(evolution_diagnostics)
         if modalities is None or len(modalities) == 0:
-            return out  # EXACT 15-key legacy contract, no new paths activated.
+            return out  # EXACT 15-key legacy contract when diagnostics are absent.
         tokens, masks, auxiliary = [], [], {}
         for name, sample in modalities.items():
             if name not in self.LABELS:
