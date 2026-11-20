@@ -130,3 +130,10 @@ The neural *model* is independent of physical implementation; initially run on s
 Core multimodal and world representation: [Lu23, Gir23, Jae21, Zho24, Liu23, Ma22]. Sensory data: [Fon20, Yan22e, Car12]. Growth and learned training: [Che15, Evc19, Yoo17, Met20]. Active sensing and discovered representation: [Sha23, Pin24, Amo18].
 
 **One-line finish criterion:** SOMA U3 demonstrates one checked, jointly trainable model that learns multiple physical and digital modalities, including nonhuman instrument readings, and autonomously proposes meaningful architecture/learning modifications that survive independent evaluation. AGI and consciousness remain open questions.
+
+
+## Quantum-native cosmic research addendum (Stage Q0–Q5, parallel to Stages 09–15)
+
+A **native trainable quantum circuit and physical quantum-sensor pathway** are now proposed as a separate, evidence-gated research track that feeds the one-model SOMA U3 latent workspace. Q0 formalizes observables and evidence boundaries, Q1 develops the native trainable quantum layer, Q2 tests actual hardware-based quantum computational sensing, Q3 evaluates measurable cosmic and beyond-standard-model hypotheses, Q4 explores simulated inner-universe/multiverse scenarios as **speculation**, and Q5 studies bounded evolutionary improvements to quantum sensing/learning. All real QPU and sensor connections require actual physical equipment or accredited third-party instruments; a circuit simulator does not access quantum physical states. Claims of direct access to parallel universes or additional physical dimensions are **not currently supported by science**.
+
+Full architecture, evaluation, and reference details: [Native Quantum and Cosmic Sensing](./NATIVE_QUANTUM_COSMIC_RESEARCH.md). The [earlier hybrid quantum addendum](./QUANTUM_COMPUTING_ADDENDUM.md) remains a useful introductory pathway. Research for quantum-native capabilities is a **parallel optional track**, not a prerequisite for completion of the independently testable SOMA U3 multimodal foundation.
