@@ -141,6 +141,25 @@ linear baseline. The trainer saves the linear weights and verifies the exact
 input and command-reversal decompositions. It requires no hardware. The residual is a prediction
 mismatch and does not identify what caused the mismatch.
 
+## Offline audio intervention audit
+
+Replay real ESC-50 audio through the paired correctness monitor and test the
+effect of an isolated change on the audio classifier or the fusion path.
+
+```bash
+python U3/audit_audio_interventions.py --data-dir ./esc50 \
+  --monitor-checkpoint ./runs/audio-self-monitor/soma_u3_audio_self_monitor.pt \
+  --run-dir ./runs/audio-intervention-audit
+```
+
+The audit records the checkpoint and audio hashes, the original and changed
+outputs, sham and restoration controls, matched waveform interventions, and the
+weights of the diagnostic probes. It fits probes on folds 1–3 and assesses them
+on fold 5, which was used in earlier audio experiments. The fusion comparison
+uses an isolated copy for the explicitly opened gate. The primary model is
+created for replay and its weights are kept fixed. These tests measure the
+effects of controlled edits under the recorded configuration.
+
 ## Checkpoint handling
 
 - `load_verified_u1(path)`: hashes against known trusted U1 artifact, validates all 91 original base tensor keys/shapes. U2's deep core and U3's new weights remain **random**.
