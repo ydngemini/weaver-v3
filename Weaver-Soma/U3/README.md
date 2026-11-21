@@ -217,6 +217,50 @@ checks a combined rule that uses the lower of the two scaled margins. Compare
 both fixed and equal-coverage results before using a temporal candidate.
 The reference run favored the original prototype on both cohorts of novel categories at matched familiar coverage. Use the temporal checkpoint for research.
 
+## Local realtime voice and environmental audio
+
+The audio window buffer accepts mono 16 kHz PCM16 or floating-point samples
+with absolute sample offsets. Seal an offset when the receiver's reorder
+deadline has elapsed. Each returned window distinguishes received samples,
+usable observations and gaps. Use `window.modalities()` with U3's forward
+method for classification and the advisory audio monitors.
+
+The voice session reuses the buffer with 20 ms frames. It emits
+`speech_started`, `speech_frame` and `speech_stopped` so an attached
+recognizer can process audio before turn end. The reference RMS detector
+uses three voiced frames for onset and fifteen quiet frames for endpoint.
+Missing frames retain their own status and can stop a turn with no response
+eligibility. Use a separate session per caller and serialize mutations.
+
+Responses carry their own IDs. Keep delivering microphone packets during
+playback. When `playback_clear` arrives, clear queued output for that
+response and discard any stale chunks. Report acknowledgments as
+cumulative played samples for each response. The heard transcript includes
+fully acknowledged, explicitly aligned speech segments. The interruption
+event uses the last acknowledgment received when the turn switches.
+
+The bundled demo uses PocketSphinx with a two-intent grammar and FFmpeg
+with the Flite filter. Its inputs and replies are synthetic local audio.
+It exercises partial transcripts and an interruption without a physical
+microphone.
+
+```bash
+python -m pip install pocketsphinx==5.0.4
+python U3/demo_realtime_voice.py --run-dir ./runs/realtime-demo
+python U3/test_realtime_voice.py
+python U3/benchmark_audio_packets.py --data-dir ./esc50 \
+  --monitor-checkpoint ./runs/audio-self-monitor/soma_u3_audio_self_monitor.pt \
+  --scope-checkpoint ./runs/audio-scope/soma_u3_audio_scope.pt \
+  --output ./runs/packet_replay.json
+```
+
+The interaction reference is [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1)
+and [GPT-Live-1.1](https://developers.openai.com/api/docs/models/gpt-live-1.1).
+The prototype currently exercises turn detection, cancellation, a
+replaceable audio output path and acknowledgment-based history. Native
+open-ended speech reasoning, hands-free echo cancellation, and physical
+device latency measurements are future validation work.
+
 ## Checkpoint handling
 
 - `load_verified_u1(path)`: hashes against known trusted U1 artifact, validates all 91 original base tensor keys/shapes. U2's deep core and U3's new weights remain **random**.
