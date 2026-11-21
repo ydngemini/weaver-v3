@@ -567,3 +567,53 @@ echo-cancel pair still require laptop verification.
 [Full-Duplex-Bench](https://doi.org/10.1109/ASRU65441.2025.11433838) ·
 [Full-Duplex-Bench-v2](https://doi.org/10.18653/v1/2026.acl-short.4) ·
 [OpenAI Realtime evaluation guide](https://developers.openai.com/cookbook/examples/realtime_eval_guide)
+
+## Native text decoder pilot
+
+`native_text_decoder.py` implements a small causal Transformer with tied
+embedding/output weights and an append-only KV cache. It loads its own
+from-scratch checkpoints. The realtime voice pilot still uses its existing
+two-intent backend. This decoder experiment evaluates text continuation.
+
+The CPU trainer compares UTF-8 bytes with a 512-token byte-level BPE
+tokenizer fitted on the training subset. It uses 1,536 distinct train
+stories and 128 validation stories from two published TinyStories V2 files.
+Exact duplicate stories across the selected splits are excluded. Both
+models see the same training-token budget, with a shared 96-token context
+and three logged budgets. Token counts cover different amounts of text
+between tokenizers. Validation reports bits per original UTF-8 byte to
+compare loss across the vocabularies.
+
+Download the two bounded prefixes from the pinned dataset revision
+`f54c09fd23315a6f9c86f9dc80f725de7d8f9c64`. Range lengths match the
+measurement. The trainer discards a partial last record in each prefix and
+the leading fragment in the validation file.
+
+```sh
+python -m pip install tokenizers==0.23.3
+revision=f54c09fd23315a6f9c86f9dc80f725de7d8f9c64
+data_url=https://huggingface.co/datasets/roneneldan/TinyStories/resolve/$revision
+curl -fL --range 0-2599999 "$data_url/TinyStoriesV2-GPT4-train.txt" -o train.prefix.txt
+curl -fL --range 0-349999 "$data_url/TinyStoriesV2-GPT4-valid.txt" -o valid.prefix.txt
+python U3/train_native_text.py --train train.prefix.txt --validation valid.prefix.txt --source-revision "$revision" --run-dir runs/native-text
+```
+
+```python
+from train_native_text import load_native
+from native_text_decoder import complete
+
+model, codec = load_native("runs/native-text/soma_native_bpe.pt")
+prompt = [codec.bos, *codec.encode("Once upon a time")]
+print(codec.decode(complete(model, prompt, max_new=32, stop=codec.eos)))
+```
+
+The report includes checkpoint hashes, held-out loss, a unigram baseline,
+one-thread warm KV-cache timings with prefill, and numerical parity with
+full-prefix replay. The corpus consists of simplified synthetic English
+stories. Open-ended dialogue, evidence grounding, and live integration
+require separate training and evaluation.
+
+[TinyStories dataset](https://huggingface.co/datasets/roneneldan/TinyStories) ·
+[TinyStories paper](https://arxiv.org/abs/2305.07759) ·
+[ByT5](https://doi.org/10.1162/tacl_a_00461) ·
+[PyTorch SDPA](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
