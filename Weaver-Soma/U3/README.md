@@ -696,3 +696,29 @@ integration are outside this pilot.
 [Source copying research](https://aclanthology.org/P17-1099/) ·
 [Unanswerable QA](https://aclanthology.org/P18-2124/) ·
 [CLINC150](https://github.com/clinc/oos-eval)
+
+## Selective intent distillation
+
+The distillation experiment uses the existing SOMA text intent architecture
+and parent checkpoint. It freezes the byte encoder and trains copies of the
+same linear intent head. The local teacher uses word and character TF-IDF
+with a linear SVM. The trainer compares label-only updates with a blend of
+labels and temperature-scaled teacher class scores. Both student candidates
+use the same head shape, optimizer budget, and minibatch order.
+
+```sh
+python U3/distill_intent_head.py --parent runs/text/adaptive_text_intent.pt --dataset /path/to/oos-eval/data/data_full.json --run-dir runs/intent-distillation
+```
+
+The runner fits the teacher on the training split, selects student
+checkpoints on one validation partition, and calibrates margins and
+confidence thresholds on the other. It replays the existing clean,
+character-swap, and out-of-scope test slices. Candidate checkpoints
+strictly preserve the parent's parameter keys, shapes, dtypes, and
+all tensors outside `intent.weight` and `intent.bias`. The source file
+is checked byte for byte after the run. Candidates load with the existing
+intent checkpoint path. This experiment does not alter the live system.
+
+[Knowledge distillation paper](https://arxiv.org/abs/1503.02531) ·
+[PyTorch knowledge distillation tutorial](https://docs.pytorch.org/tutorials/beginner/knowledge_distillation_tutorial.html) ·
+[CLINC150 dataset](https://github.com/clinc/oos-eval)
