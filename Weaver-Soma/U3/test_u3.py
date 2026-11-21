@@ -163,7 +163,7 @@ def test_audio_monitor(tmp_dir):
 
     cfg = dict(core_dim=64, depth=1, ff_dim=128, fusion_dim=64, quantum_qubits=2)
     model = WeaverSOMAU3(audio_encoder="logmel", **cfg).eval()
-    waveform = torch.stack((torch.randn(1600), torch.full((1600,), float("nan"))))
+    waveform = torch.stack((torch.randn(4800), torch.full((4800,), float("nan"))))
     obs, quality, context = torch.zeros(2, 8, 7), torch.ones(2, 8, 3), torch.zeros(2, 8)
     audio = {"audio": {"values": waveform}}
     with torch.inference_mode():
@@ -206,11 +206,13 @@ def test_audio_monitor(tmp_dir):
 
     assert "audio_scope_monitor" not in after
     scope_path = tmp_dir / "scope.pt"
-    for method in ("prototype", "exposure"):
-        candidate = AudioScopeMonitor(method)
+    references = ("a.wav", "b.wav", "c.wav")
+    for method in ("prototype", "exposure", "temporal_prototype", "temporal_neighbors"):
+        files = references if method == "temporal_neighbors" else ()
+        candidate = AudioScopeMonitor(method, files)
         scope_payload = {
             "architecture": ARCHITECTURE, "method": method, "weights": candidate.state_dict(),
-            "monitor_sha256": model._file_hash(checkpoint),
+            "monitor_sha256": model._file_hash(checkpoint), "reference_files": files,
         }
         torch.save(scope_payload, scope_path)
         model.load_audio_scope_monitor(scope_path)
@@ -219,6 +221,18 @@ def test_audio_monitor(tmp_dir):
         scope = result["audio_scope_monitor"]
         assert scope["decision_reason"][1] == ScopeReason.UNAVAILABLE
         assert scope["recommend_abstain"][1]
+        assert scope["score_available"][0]
+        if candidate.uses_temporal_features:
+            with torch.inference_mode():
+                short_audio = model(obs, quality, context, modalities={"audio": {
+                    "values": torch.ones(2, 800),
+                }})
+            assert short_audio["audio_self_monitor"]["score_available"].all()
+            assert not short_audio["audio_scope_monitor"]["score_available"].any()
+        if method == "temporal_neighbors":
+            assert scope["audit"]["reference_files"] == references
+            assert scope["audit"]["nearest_reference_indices"][0].tolist() == [0, 1, 2]
+            assert (scope["audit"]["nearest_reference_indices"][1] == -1).all()
         torch.testing.assert_close(
             scope["audit"]["contributions"].sum(1) + scope["audit"]["intercept"], scope["score"],
         )

@@ -25,7 +25,8 @@ from quantum_native import VariationalQuantumFeatures  # noqa: E402
 from evolution import EvolutionProposalHead  # noqa: E402
 from audio_spectral import SpectralAudioStem  # noqa: E402
 from audio_self_monitor import AUDIO_CLASSES, AudioSelfMonitor, spectral_input  # noqa: E402
-from audio_scope import ARCHITECTURE as AUDIO_SCOPE_ARCHITECTURE, AudioScopeMonitor  # noqa: E402
+from audio_scope import ARCHITECTURE as AUDIO_SCOPE_ARCHITECTURE  # noqa: E402
+from audio_scope import AudioScopeMonitor, temporal_scope_features  # noqa: E402
 
 U1_SHA256 = "3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f"
 U2_STAGE4_SHA256 = "14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149"
@@ -190,7 +191,9 @@ class WeaverSOMAU3(WeaverSOMA100M):
                 or obj.get("monitor_sha256") != self.audio_self_monitor.loaded_checkpoint_sha256
                 or self.audio_self_monitor.loaded_checkpoint_sha256 is None):
             raise ValueError("scope and audio self-monitor checkpoints do not match")
-        scope = AudioScopeMonitor(obj["method"]).to(self.audio_self_monitor.center)
+        scope = AudioScopeMonitor(obj["method"], obj.get("reference_files", ())).to(
+            self.audio_self_monitor.center,
+        )
         scope.load_state_dict(obj["weights"], strict=True)
         if (not all(torch.isfinite(tensor).all() for tensor in scope.state_dict().values())
                 or (scope.scale <= 0).any()):
@@ -356,7 +359,9 @@ class WeaverSOMAU3(WeaverSOMA100M):
                     )
                     out["audio_self_monitor"] = correctness
                     if self.audio_scope_monitor is not None:
-                        out["audio_scope_monitor"] = self.audio_scope_monitor(correctness)
+                        scope = self.audio_scope_monitor
+                        temporal = temporal_scope_features(encoded, valid) if scope.uses_temporal_features else None
+                        out["audio_scope_monitor"] = scope(correctness, temporal)
             elif valid.any():
                 pooled = encoded.sum(dim=1) / valid.sum(dim=1).clamp(min=1).unsqueeze(-1)
                 auxiliary[name] = self.label_heads[name](pooled)

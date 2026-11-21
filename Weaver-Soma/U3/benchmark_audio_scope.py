@@ -13,7 +13,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 import torch
 
-from audio_scope import ARCHITECTURE, SCOPE_COLUMNS, AudioScopeMonitor
+from audio_scope import ARCHITECTURE, SCOPE_COLUMNS, AudioScopeMonitor, temporal_scope_features
 from benchmark_esc50_audio import BATCH_SIZE, read_waveforms
 from model import WeaverSOMAU3
 from train_audio_self_monitor import TEST_CONDITIONS, UNKNOWN_CLASSES, distort
@@ -45,9 +45,10 @@ def extra_recordings(root, entries):
 
 
 @torch.inference_mode()
-def observe(model, sounds, condition="clean"):
+def observe(model, sounds, condition="clean", *, include_temporal=False):
     waves, valid = distort(sounds, condition, noise_seed=1201)
     features, maximum, correctness, labels = [], [], [], []
+    temporal_values, temporal_valid = [], []
     for wav, mask in zip(waves.split(BATCH_SIZE), valid.split(BATCH_SIZE)):
         tokens, token_valid = model.spectral_audio(wav, mask)
         logits = model.spectral_audio.classify(tokens, token_valid)[:, :len(CLASSES)]
@@ -58,8 +59,15 @@ def observe(model, sounds, condition="clean"):
         maximum.append(logits.softmax(1).amax(1))
         correctness.append(readout["p_correct"])
         labels.append(logits.argmax(1))
-    return {"features": torch.cat(features), "softmax": torch.cat(maximum),
-            "correctness": torch.cat(correctness), "labels": torch.cat(labels)}
+        if include_temporal:
+            changes, available = temporal_scope_features(tokens, token_valid)
+            temporal_values.append(changes)
+            temporal_valid.append(available)
+    result = {"features": torch.cat(features), "softmax": torch.cat(maximum),
+              "correctness": torch.cat(correctness), "labels": torch.cat(labels)}
+    if include_temporal:
+        result["temporal"] = (torch.cat(temporal_values), torch.cat(temporal_valid))
+    return result
 
 
 @torch.no_grad()
@@ -90,7 +98,7 @@ def fit_detectors(known, labels, exposure):
 def scope_readout(recording, probe):
     features = recording["features"]
     return probe({"audit": {"features": features},
-                  "score_available": torch.ones(len(features), dtype=torch.bool)})
+                  "score_available": torch.ones(len(features), dtype=torch.bool)}, recording.get("temporal"))
 
 
 def scores(recording, probes):

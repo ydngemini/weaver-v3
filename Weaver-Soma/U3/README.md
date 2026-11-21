@@ -195,6 +195,28 @@ reports test acceptance at equal familiar-sound coverage as a retrospective
 comparison. The fixed thresholds can behave differently under noise, clipping,
 packet loss and echo, and generalization to live captures remains unverified.
 
+## Temporal look-alike benchmark
+
+The experimental temporal scopes add mean spectral change across short and
+long token intervals. The nearest-neighbor variant records its three fitted
+reference clips and the exact contribution of each feature to its distance
+score. A clip with too little contiguous token evidence returns an unavailable
+temporal score.
+
+```bash
+python U3/benchmark_temporal_scope.py --data-dir ./esc50 \
+  --monitor-checkpoint ./runs/audio-self-monitor/soma_u3_audio_self_monitor.pt \
+  --incumbent-checkpoint ./runs/audio-scope/soma_u3_audio_scope.pt \
+  --run-dir ./runs/audio-temporal-scope
+```
+
+The run stores an optional research checkpoint and a per-clip audit. Two
+sets of look-alike classes are kept separate from the original fit and
+calibration categories. The first checks the temporal candidates. The second
+checks a combined rule that uses the lower of the two scaled margins. Compare
+both fixed and equal-coverage results before using a temporal candidate.
+The reference run favored the original prototype on both cohorts of novel categories at matched familiar coverage. Use the temporal checkpoint for research.
+
 ## Checkpoint handling
 
 - `load_verified_u1(path)`: hashes against known trusted U1 artifact, validates all 91 original base tensor keys/shapes. U2's deep core and U3's new weights remain **random**.
