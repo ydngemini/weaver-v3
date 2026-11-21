@@ -35,7 +35,7 @@ def new_stem(seed):
     return SpectralAudioStem(DIM, WeaverSOMAU3.LABELS["audio"])
 
 
-def read_audio(folder, rows):
+def read_waveforms(folder, rows):
     clips = []
     for row in rows:
         with wave.open(str(folder / "audio" / row["filename"]), "rb") as source:
@@ -45,7 +45,11 @@ def read_audio(folder, rows):
         if samples.shape != (5 * SAMPLE_RATE,):
             raise ValueError(f"expected a five-second clip: {row['filename']}")
         clips.append(samples)
-    waveform = torch.from_numpy(np.stack(clips))
+    return torch.from_numpy(np.stack(clips))
+
+
+def read_audio(folder, rows):
+    waveform = read_waveforms(folder, rows)
     labels = torch.tensor([CLASSES.index(row["category"]) for row in rows])
     folds = torch.tensor([int(row["fold"]) for row in rows])
     return waveform, labels, folds

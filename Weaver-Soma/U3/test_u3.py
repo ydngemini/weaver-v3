@@ -6,6 +6,7 @@ python U3/test_u3.py /path/to/weaver_soma_unified_RECOVERED.pt
 import hashlib
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import torch
 
 HERE = Path(__file__).resolve().parent
@@ -157,6 +158,54 @@ def test_spectral_audio():
     print("PASS: spectral audio integration, masked values, short inputs, and other modality parity")
 
 
+def test_audio_monitor(tmp_dir):
+    from audio_self_monitor import AUDIO_CLASSES, AudioSelfMonitor
+
+    cfg = dict(core_dim=64, depth=1, ff_dim=128, fusion_dim=64, quantum_qubits=2)
+    model = WeaverSOMAU3(audio_encoder="logmel", **cfg).eval()
+    waveform = torch.stack((torch.randn(1600), torch.full((1600,), float("nan"))))
+    obs, quality, context = torch.zeros(2, 8, 7), torch.ones(2, 8, 3), torch.zeros(2, 8)
+    audio = {"audio": {"values": waveform}}
+    with torch.inference_mode():
+        before = model(obs, quality, context, modalities=audio)
+    monitor = AudioSelfMonitor()
+    checkpoint = tmp_dir / "monitor.pt"
+    payload = {"architecture": "SOMA-U3-audio-self-monitor-v1",
+               "classes": AUDIO_CLASSES, "sample_rate": 16000, "fusion_dim": 64,
+               "audio_weights": model.spectral_audio.state_dict(),
+               "monitor_weights": monitor.state_dict()}
+    torch.save(payload, checkpoint)
+    model.load_audio_self_monitor(checkpoint)
+    with torch.inference_mode():
+        after = model(obs, quality, context, modalities=audio)
+        assert all(torch.equal(before[k], after[k]) for k in LEGACY_OUTPUTS)
+        assert torch.equal(before["modality_logits"]["audio"], after["modality_logits"]["audio"])
+        readout = after["audio_self_monitor"]
+        assert readout["score_available"].tolist() == [True, False]
+        assert readout["recommend_abstain"][1] and readout["p_correct"][1] == 0
+        assert "audio_self_monitor" not in model(obs, quality, context)
+        empty = model(obs, quality, context, modalities={"audio": {
+            "values": torch.zeros_like(waveform), "valid": torch.zeros_like(waveform, dtype=torch.bool)
+        }})
+        assert not empty["audio_self_monitor"]["score_available"].any()
+        assert empty["audio_self_monitor"]["recommend_abstain"].all()
+        assert "audio" not in empty["modality_logits"]
+        silent = model(obs, quality, context, modalities={"audio": {
+            "values": torch.zeros_like(waveform)
+        }})["audio_self_monitor"]
+        assert silent["samples_observed"].all() and not silent["score_available"].any()
+    active_monitor = model.audio_self_monitor
+    payload["monitor_weights"]["threshold"] = torch.tensor(float("nan"))
+    torch.save(payload, checkpoint)
+    try:
+        model.load_audio_self_monitor(checkpoint)
+    except ValueError:
+        assert model.audio_self_monitor is active_monitor
+    else:
+        raise AssertionError("nonfinite monitor checkpoint should be rejected")
+    print("PASS: monitor reload, unchanged logits, missing evidence, and invalid checkpoint rejection")
+
+
 def main():
     if len(sys.argv) > 2:
         raise SystemExit("usage: python U3/test_u3.py [trusted_U1_checkpoint.pt]")
@@ -165,6 +214,8 @@ def main():
     test_trainability(model, inputs)
     test_invalid_input(model, inputs)
     test_spectral_audio()
+    with TemporaryDirectory() as work:
+        test_audio_monitor(Path(work))
     print("SOMA U3 engineering smoke tests: PASS; NO recognition or training claim")
 
 

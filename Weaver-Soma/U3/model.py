@@ -4,6 +4,7 @@ All new neural weights are untrained. U1/U2 legacy pathways remain unchanged
 on base-only calls. No real QPU, olfactory hardware, or actuator access.
 """
 from __future__ import annotations
+from copy import deepcopy
 import hashlib
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ from unified_model import HORIZON, STATE_CENTER, STATE_SCALE  # noqa: E402
 from quantum_native import VariationalQuantumFeatures  # noqa: E402
 from evolution import EvolutionProposalHead  # noqa: E402
 from audio_spectral import SpectralAudioStem  # noqa: E402
+from audio_self_monitor import AUDIO_CLASSES, AudioSelfMonitor, spectral_input  # noqa: E402
 
 U1_SHA256 = "3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f"
 U2_STAGE4_SHA256 = "14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149"
@@ -106,6 +108,7 @@ class WeaverSOMAU3(WeaverSOMA100M):
         self.evolution_head = EvolutionProposalHead(signal_count=8, width=64)
         self.spectral_audio = (SpectralAudioStem(fusion_dim, self.LABELS["audio"])
                                if audio_encoder == "logmel" else None)
+        self.audio_self_monitor: AudioSelfMonitor | None = None
 
     @staticmethod
     def _file_hash(path: str | Path) -> str:
@@ -148,6 +151,28 @@ class WeaverSOMAU3(WeaverSOMA100M):
             raise ValueError("not the verified unified Stage 4 research checkpoint")
         return self._load_base_weights(obj["weights"], self._u2_keys)
 
+    def load_audio_self_monitor(self, path: str | Path):
+        """Install a paired five-class audio stem and read-only correctness monitor."""
+        if self.spectral_audio is None:
+            raise ValueError("the audio self-monitor requires audio_encoder='logmel'")
+        obj = torch.load(str(path), map_location="cpu", weights_only=True)
+        if (not isinstance(obj, dict) or obj.get("architecture") != "SOMA-U3-audio-self-monitor-v1"
+                or obj.get("classes") != AUDIO_CLASSES or obj.get("sample_rate") != 16000
+                or obj.get("fusion_dim") != self.fusion_dim):
+            raise ValueError("incompatible SOMA audio self-monitor checkpoint")
+        stem = deepcopy(self.spectral_audio)
+        monitor = AudioSelfMonitor().to(self.spectral_audio.local[0].weight)
+        stem.load_state_dict(obj["audio_weights"], strict=True)
+        monitor.load_state_dict(obj["monitor_weights"], strict=True)
+        for module in (stem, monitor):
+            if not all(torch.isfinite(tensor).all() for tensor in module.state_dict().values()):
+                raise ValueError("audio self-monitor checkpoint contains nonfinite values")
+        if (monitor.scale <= 0).any() or not 0 < monitor.threshold < 1:
+            raise ValueError("invalid audio self-monitor calibration")
+        self.spectral_audio.load_state_dict(stem.state_dict(), strict=True)
+        self.audio_self_monitor = monitor.train(self.training)
+        return monitor
+
     def _encode(self, name: str, sample: Mapping[str, torch.Tensor]):
         if "values" not in sample:
             raise ValueError(f"{name} is missing values")
@@ -182,17 +207,15 @@ class WeaverSOMAU3(WeaverSOMA100M):
             quality = sample.get("quality")
             if quality is not None and quality.shape != values.shape:
                 raise ValueError("audio quality shape mismatch")
-            audio = torch.where(valid_samples.bool(), values, torch.zeros_like(values))
-            if quality is not None:
-                audio = torch.where(quality > 0, audio * quality.clamp(0, 1), torch.zeros_like(audio))
             if self.spectral_audio is None:
+                audio = torch.where(valid_samples.bool(), values, torch.zeros_like(values))
+                if quality is not None:
+                    audio = torch.where(quality > 0, audio * quality.clamp(0, 1), torch.zeros_like(audio))
                 tokens = self.audio_conv(audio.unsqueeze(1)).transpose(1, 2)
                 default_mask = F.adaptive_max_pool1d(valid_samples.float().unsqueeze(1),
                                                       tokens.shape[1]).squeeze(1) > 0
             else:
-                effective_valid = valid_samples.bool()
-                if quality is not None:
-                    effective_valid = effective_valid & (quality > 0)
+                audio, effective_valid = spectral_input(values, valid_samples, quality)
                 tokens, default_mask = self.spectral_audio(audio, effective_valid)
         else:
             if name not in self.CHANNELS:
@@ -292,12 +315,22 @@ class WeaverSOMAU3(WeaverSOMA100M):
                 raise ValueError("modality batch size must match body input")
             tokens.append(encoded)
             masks.append(valid)
-            if valid.any():
-                if name == "audio" and self.spectral_audio is not None:
-                    auxiliary[name] = self.spectral_audio.classify(encoded, valid)
-                else:
-                    pooled = encoded.sum(dim=1) / valid.sum(dim=1).clamp(min=1).unsqueeze(-1)
-                    auxiliary[name] = self.label_heads[name](pooled)
+            if name == "audio" and self.spectral_audio is not None:
+                audio_logits = self.spectral_audio.classify(encoded, valid)
+                if valid.any():
+                    auxiliary[name] = audio_logits
+                if self.audio_self_monitor is not None:
+                    values = sample["values"]
+                    audio, observed = spectral_input(
+                        values, sample.get("valid", torch.ones_like(values, dtype=torch.bool)),
+                        sample.get("quality"),
+                    )
+                    out["audio_self_monitor"] = self.audio_self_monitor(
+                        audio_logits[:, :len(AUDIO_CLASSES)], audio, observed, encoded, valid,
+                    )
+            elif valid.any():
+                pooled = encoded.sum(dim=1) / valid.sum(dim=1).clamp(min=1).unsqueeze(-1)
+                auxiliary[name] = self.label_heads[name](pooled)
                 if name == "text":
                     auxiliary["text_token_logits"] = self.label_heads["text"](encoded)
         merged = torch.cat(tokens, dim=1)

@@ -96,6 +96,43 @@ with torch.inference_mode():
 
 Pass normalized 16 kHz mono PCM as `waveform_16khz`, shaped `[batch, samples]`. For variable lengths, pass a boolean `valid` mask alongside it. Use the checkpoint class order and restrict classification to its five trained outputs. The default waveform encoder loads earlier U3 checkpoints through its existing interface.
 
+## Functional self-monitoring experiments
+
+Train the opt-in audio correctness monitor using the saved seed 2501 audio
+checkpoint, or train the simulated body forward model independently.
+
+```bash
+python U3/train_audio_self_monitor.py --data-dir ./esc50 \
+  --audio-checkpoint ./runs/audio-logmel/soma_u3_audio5_logmel.pt \
+  --run-dir ./runs/audio-self-monitor
+python U3/train_body_self_model.py --run-dir ./runs/body-self-model
+```
+
+The audio monitor estimates whether the paired five-class classifier's output
+is correct. It is trained on out-of-fold predictions and calibrated on fold 4.
+The saved bundle includes the frozen audio weights and the monitor. Inference
+returns the original predictions and an optional advisory readout.
+
+```python
+model = WeaverSOMAU3(audio_encoder="logmel").eval()
+model.load_audio_self_monitor("runs/audio-self-monitor/soma_u3_audio_self_monitor.pt")
+with torch.inference_mode():
+    output = model(obs, quality, context, modalities={"audio": {"values": waveform_16khz}})
+report = output["audio_self_monitor"]
+```
+
+Use `samples_observed` to distinguish missing data from recorded silence.
+Read `p_correct` only where `score_available` is true. An abstention is
+advisory. The monitor accepts too many sounds outside its five classes and has
+no validated novelty detector. Recalibrate when changing the encoder, signal
+pipeline, or operating environment.
+
+The simulated body model predicts motion with a copy of the proposed command
+and five recent command/response pairs. Its trainer compares paired command
+reversals against a no-command ablation, a state-and-command model, and a
+linear baseline. It requires no hardware. The residual is a prediction
+mismatch and does not identify what caused the mismatch.
+
 ## Checkpoint handling
 
 - `load_verified_u1(path)`: hashes against known trusted U1 artifact, validates all 91 original base tensor keys/shapes. U2's deep core and U3's new weights remain **random**.
