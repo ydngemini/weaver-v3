@@ -8,6 +8,7 @@ import torch
 
 from audio_stream import AudioWindowBuffer, PacketReceipt
 from realtime_voice import RealtimeVoiceSession
+from voice_endpoint import TranscriptEndpointModel
 
 
 class AudioWindowTests(unittest.TestCase):
@@ -115,6 +116,42 @@ class VoiceSessionTests(unittest.TestCase):
         newest_turn = self.utterance()[-1].data["turn_id"]
         self.assertIsNone(self.session.start_response(old_turn))
         self.assertIsNotNone(self.session.start_response(newest_turn))
+
+    def test_transcript_policy_waits_for_a_mid_turn_pause(self):
+        endpoint = TranscriptEndpointModel(0., {"tail=and": -1., "tail=tomorrow": 1.}, .5)
+        self.session = RealtimeVoiceSession(endpoint_model=endpoint)
+        events = self.feed(LOUD, 6)
+        turn = events[0].data["turn_id"]
+        self.assertTrue(self.session.report_transcript(turn, "pick today and", self.offset))
+        self.assertNotIn("speech_stopped", [e.type for e in self.feed(SILENT, 18)])
+        self.feed(LOUD, 6)
+        self.assertTrue(self.session.report_transcript(turn, "pick today and tomorrow", self.offset))
+        stop = self.feed(SILENT, 15)[-1]
+        self.assertEqual(stop.type, "speech_stopped")
+        self.assertEqual(stop.data["endpoint"]["rule"], "transcript_complete")
+        self.assertEqual(stop.data["endpoint"]["contributions"]["tail=tomorrow"], 1.)
+        self.assertFalse(self.session.report_transcript(turn, "stale turn", self.offset))
+
+    def test_transcript_policy_falls_back_when_audio_outpaces_asr(self):
+        endpoint = TranscriptEndpointModel(0., {"tail=done": 1.}, .5)
+        self.session = RealtimeVoiceSession(endpoint_model=endpoint)
+        turn = self.feed(LOUD, 6)[0].data["turn_id"]
+        self.assertTrue(self.session.report_transcript(turn, "done", self.offset))
+        self.assertFalse(self.session.report_transcript(turn, "old", self.offset - FRAME))
+        self.assertFalse(self.session.report_transcript(turn, "future", self.offset + FRAME))
+        self.feed(LOUD, 6)
+        self.assertNotIn("speech_stopped", [e.type for e in self.feed(SILENT, 29)])
+        stop = self.feed(SILENT)[-1]
+        self.assertEqual(stop.data["endpoint"]["rule"], "silence_cap")
+        self.assertIsNone(stop.data["endpoint"]["transcript_logit"])
+
+    def test_transcript_policy_does_not_turn_an_input_gap_into_a_reply(self):
+        self.session = RealtimeVoiceSession(endpoint_model=TranscriptEndpointModel(1., {}, 0.))
+        turn = self.feed(LOUD, 6)[0].data["turn_id"]
+        self.assertTrue(self.session.report_transcript(turn, "done", self.offset))
+        stop = self.feed(None, 15)[-1]
+        self.assertEqual(stop.data["reason"], "input_gap")
+        self.assertIsNone(self.session.start_response(turn))
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from math import isfinite
 
 from audio_stream import AudioWindow, AudioWindowBuffer, PacketReceipt, _sample_index
 from audio_spectral import SAMPLE_RATE
+from voice_endpoint import TranscriptEndpointModel
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,8 @@ class RealtimeVoiceSession:
     consumes input events and publishes PCM chunks against a response ID.
     """
 
-    def __init__(self, config: VoiceConfig | None = None, *, start_sample: int = 0):
+    def __init__(self, config: VoiceConfig | None = None, *, start_sample: int = 0,
+                 endpoint_model: TranscriptEndpointModel | None = None):
         self.config = VoiceConfig() if config is None else config
         frame = self.config.frame_ms * SAMPLE_RATE // 1000
         self.input = AudioWindowBuffer(start_sample=start_sample, window_samples=frame,
@@ -71,9 +73,24 @@ class RealtimeVoiceSession:
         self._response_counter = 0
         self._response: _Response | None = None
         self._now = start_sample
+        self._endpoint_model = endpoint_model
+        self._last_voiced_until = start_sample
+        self._transcript_until = -1
+        self._transcript_evidence: tuple[float, dict[str, float]] | None = None
 
     def push_pcm16le(self, start_sample: int, pcm: bytes) -> PacketReceipt:
         return self.input.push_pcm16le(start_sample, pcm)
+
+    def report_transcript(self, turn_id: int, text: str, through_sample: int) -> bool:
+        """Submit a whole-turn ASR partial and the latest input sample it covers."""
+        if self._endpoint_model is None or not self._speaking or turn_id != self._turn_id:
+            return False
+        through = _sample_index(through_sample)
+        if not self._transcript_until <= through <= self._now:
+            return False
+        self._transcript_until = through
+        self._transcript_evidence = self._endpoint_model.evidence(text)
+        return True
 
     def _event(self, name: str, **data) -> VoiceEvent:
         return VoiceEvent(name, self._now, data)
@@ -103,6 +120,9 @@ class RealtimeVoiceSession:
             self._speaking = True
             self._ready_turn = None
             self._quiet = self._missing = self._voiced = 0
+            self._last_voiced_until = frame.end_sample
+            self._transcript_until = -1
+            self._transcript_evidence = None
             self._turn_frames = len(self._prefix)
             started = self._event(
                 "speech_started", turn_id=self._turn_id,
@@ -118,15 +138,18 @@ class RealtimeVoiceSession:
             return events
 
         self._turn_frames += 1
+        if voiced:
+            self._last_voiced_until = frame.end_sample
         self._quiet = self._quiet + 1 if usable and not voiced else 0
         self._missing = self._missing + 1 if not usable else 0
         events = [self._event("speech_frame", turn_id=self._turn_id, frame=frame)]
         reason = None
+        endpoint = None
         if self._missing >= self.config.end_frames:
             reason = "input_gap"
         elif self._quiet >= self.config.end_frames:
-            reason = "silence"
-        elif self._turn_frames >= self.config.max_turn_frames:
+            reason, endpoint = self._silence_endpoint()
+        if reason is None and self._turn_frames >= self.config.max_turn_frames:
             reason = "turn_limit"
         if reason is not None:
             self._speaking = False
@@ -134,8 +157,26 @@ class RealtimeVoiceSession:
             events.append(self._event(
                 "speech_stopped", turn_id=self._turn_id, reason=reason,
                 response_eligible=self._ready_turn is not None,
+                **({"endpoint": endpoint} if endpoint is not None else {}),
             ))
         return events
+
+    def _silence_endpoint(self) -> tuple[str | None, dict | None]:
+        if self._endpoint_model is None:
+            return "silence", None
+        evidence = self._transcript_evidence if self._transcript_until >= self._last_voiced_until else None
+        if evidence is not None and evidence[0] >= self._endpoint_model.threshold:
+            rule = "transcript_complete"
+        elif self._quiet >= 2 * self.config.end_frames:
+            rule = "silence_cap"
+        else:
+            return None, None
+        return "silence", {
+            "rule": rule, "quiet_ms": self._quiet * self.config.frame_ms,
+            "threshold": self._endpoint_model.threshold,
+            "transcript_logit": evidence[0] if evidence is not None else None,
+            "contributions": evidence[1] if evidence is not None else {},
+        }
 
     def start_response(self, turn_id: int) -> VoiceEvent | None:
         """Start replying to the eligible turn. Results for superseded turns are ignored."""

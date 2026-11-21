@@ -261,6 +261,47 @@ replaceable audio output path and acknowledgment-based history. Native
 open-ended speech reasoning, hands-free echo cancellation, and physical
 device latency measurements are future validation work.
 
+### Learned transcript endpoint experiment
+
+Train this optional SOMA speech endpoint using the text questions from OpenAI's
+[GSM8K](https://github.com/openai/grade-school-math) and
+[WebGPT Comparisons](https://huggingface.co/datasets/openai/webgpt_comparisons).
+The trainer labels full questions and truncated versions of the same question.
+It selects the decision threshold on a separate validation split before it
+scores the GSM8K test questions and plays the held-out
+[OpenAI Cookbook Realtime fixtures](https://developers.openai.com/cookbook/examples/realtime_eval_guide).
+The fixtures are public evaluation examples. Use the reference transcripts to
+isolate endpoint decisions and the optional PocketSphinx pass to measure the
+effect of streaming ASR partials.
+
+```sh
+python -m pip install pyarrow==23.0.1 pocketsphinx==5.0.4
+python train_voice_endpoint.py \
+  --gsm-dir /path/to/grade-school-math/grade_school_math/data \
+  --webgpt /path/to/webgpt-comparisons-train.parquet \
+  --cookbook-walk /path/to/openai-cookbook/examples/evals/realtime_evals/walk_harness/data \
+  --compare-asr --out /path/to/new-endpoint-run
+```
+
+The run requires FFmpeg with the Flite filter and writes a JSON model and
+per-clip replay report. Fetch the WebGPT Parquet from the dataset's public Hub
+export. For reproducibility, the first run used source commits
+`3101c7d5072418e28b9008a6636bde82a006892c` (GSM8K) and
+`dfd760b4de0bd175b51ad05b9b5260c36dfea09c` (Cookbook). The report includes
+the SHA-256 of the data files.
+
+Load the candidate with `TranscriptEndpointModel.load(path)` and pass it as
+`endpoint_model` to `RealtimeVoiceSession`. While a turn is active, push the
+latest whole-turn ASR partial with
+`session.report_transcript(turn_id, text, through_sample)`.
+The watermark is the latest input sample covered by that partial. At the
+normal 300 ms silence boundary, a fresh transcript can qualify for an
+immediate endpoint. Otherwise the session waits for up to 600 ms of silence.
+The `speech_stopped` event includes the actual rule, score, threshold, and
+each active feature's contribution. Missing packets still have a separate
+response-ineligible path. The default session uses the existing fixed
+silence policy. The learned model is available for replay experiments.
+
 ## Checkpoint handling
 
 - `load_verified_u1(path)`: hashes against known trusted U1 artifact, validates all 91 original base tensor keys/shapes. U2's deep core and U3's new weights remain **random**.
