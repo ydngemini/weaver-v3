@@ -398,3 +398,40 @@ python U3/benchmark_motion_inputs.py --mnist-dir /path/to/mnist \
 
 [MNIST image files](https://github.com/cvdfoundation/mnist) ·
 [UCI Human Activity Recognition Using Smartphones](https://archive.ics.uci.edu/dataset/240/human+activity+recognition+using+smartphones)
+
+## Paired skeleton and wearable action recognition
+
+This optional readout combines Kinect v1 skeleton joints and wearable
+inertial data from [UTD-MHAD](https://personal.utdallas.edu/~kehtar/UTD-MHAD.html).
+It uses whole segmented trials. It matches recordings by action, participant,
+and trial ID and summarizes each stream into eight relative phases. These
+phases provide trial-level alignment. Frame-level sync and streaming action
+segmentation are outside this experiment.
+
+```python
+model = WeaverSOMAU3(enable_paired_actions=True).eval()
+ckpt = torch.load("runs/paired/paired_action_head.pt", map_location="cpu", weights_only=True)
+model.paired_action_head.load_state_dict(ckpt["weights"], strict=True)
+out = model(obs, quality, context, paired_action_inputs={
+    "skeleton": joints,  # float [B,T,20,3] in Kinect v1 joint order and units
+    "wearable": inertial,  # float [B,S,6] in original UTD-MHAD order and units
+})["paired_actions"]
+```
+
+Either sensor may be omitted. Optional boolean `skeleton_valid` has shape
+[B,T,20] and `wearable_valid` has shape [B,S,6]. Non-finite readings are
+excluded. The readout reports class-score contributions, observed coverage,
+normalized stream weights, and whether the two sensor predictions disagree.
+Its weights are proportional to squared coverage for streams with at least
+half the observations. Use `score_available` before interpreting scores.
+Disagreement can occur on correctly paired trials.
+
+Install SciPy and use the official Skeleton and Inertial ZIP files directly.
+
+```sh
+python U3/benchmark_paired_actions.py --skeleton Skeleton.zip --inertial Inertial.zip --run-dir runs/paired
+```
+
+Each sensor encoder is fitted with its own classification loss and a shared
+fused loss. The PairedActionHead is an auxiliary readout in the normal U3
+forward pass. The general-purpose U3 latent fusion is outside this training.

@@ -29,6 +29,8 @@ from audio_scope import ARCHITECTURE as AUDIO_SCOPE_ARCHITECTURE  # noqa: E402
 from audio_scope import AudioScopeMonitor, temporal_scope_features  # noqa: E402
 from motion_inputs import InertialActivityStem, MotionVisionStem, retain_observed_tokens  # noqa: E402
 
+from paired_actions import PairedActionHead  # noqa: E402
+
 U1_SHA256 = "3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f"
 U2_STAGE4_SHA256 = "14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149"
 LEGACY_OUTPUTS = frozenset({
@@ -77,7 +79,7 @@ class WeaverSOMAU3(WeaverSOMA100M):
 
     def __init__(self, *, fusion_dim=128, max_modality_tokens=128, quantum_qubits=4,
                  quantum_layers=2, audio_encoder="waveform", vision_encoder="patch",
-                 enable_imu=False, **u2_kwargs):
+                 enable_imu=False, enable_paired_actions=False, **u2_kwargs):
         super().__init__(**u2_kwargs)
         if fusion_dim % 4 or fusion_dim < 32 or max_modality_tokens < 1:
             raise ValueError("fusion_dim must be >=32, divisible by 4; token limit >=1")
@@ -119,6 +121,7 @@ class WeaverSOMAU3(WeaverSOMA100M):
         self.audio_scope_monitor: AudioScopeMonitor | None = None
         self.motion_vision = MotionVisionStem(fusion_dim) if vision_encoder == "motion" else None
         self.inertial = InertialActivityStem(fusion_dim) if enable_imu else None
+        self.paired_action_head = PairedActionHead() if enable_paired_actions else None
 
     @staticmethod
     def _file_hash(path: str | Path) -> str:
@@ -333,12 +336,20 @@ class WeaverSOMAU3(WeaverSOMA100M):
 
     def forward(self, obs, quality, context, executed_action=None, ablate=None, *,
                 modalities: Mapping[str, Mapping[str, torch.Tensor]] | None = None,
-                evolution_diagnostics: torch.Tensor | None = None):
+                evolution_diagnostics: torch.Tensor | None = None,
+                paired_action_inputs: Mapping[str, torch.Tensor] | None = None):
         out = super().forward(obs, quality, context, executed_action, ablate)
         if evolution_diagnostics is not None:
             if evolution_diagnostics.shape[0] != obs.shape[0]:
                 raise ValueError("evolution diagnostics batch size mismatch")
             out["evolution_proposals"] = self.evolution_head(evolution_diagnostics)
+        if paired_action_inputs is not None:
+            if self.paired_action_head is None:
+                raise ValueError("paired action inputs require enable_paired_actions=True")
+            paired = self.paired_action_head(**paired_action_inputs)
+            if len(paired["score_available"]) != len(obs):
+                raise ValueError("paired action batch size must match the body")
+            out["paired_actions"] = paired
         if modalities is None or len(modalities) == 0:
             return out  # EXACT 15-key legacy contract when diagnostics are absent.
         tokens, masks, auxiliary = [], [], {}
