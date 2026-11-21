@@ -568,6 +568,11 @@ echo-cancel pair still require laptop verification.
 [Full-Duplex-Bench-v2](https://doi.org/10.18653/v1/2026.acl-short.4) ·
 [OpenAI Realtime evaluation guide](https://developers.openai.com/cookbook/examples/realtime_eval_guide)
 
+The [recorded-speech acoustic endpoint pilot](ACOUSTIC_ENDPOINT_PILOT.md)
+compares a CPU-trained acoustic head against the two fixed silence timeouts
+on held-out AMI speakers. At its calibrated cutoff, the head matched the
+600 ms control and stays outside the live voice path.
+
 ## Native text decoder pilot
 
 `native_text_decoder.py` implements a small causal Transformer with tied
