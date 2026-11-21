@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from contextlib import ExitStack
 from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
 from time import monotonic, sleep
+import wave
 
 import numpy as np
 
@@ -85,11 +87,12 @@ class DuplexTransport:
 class VoiceWorker:
     """Owns recognition, session state, playback accounting, and the JSONL timeline."""
 
-    def __init__(self, transport, log, endpoint_ms):
+    def __init__(self, transport, log, endpoint_ms, capture=None):
         from pocketsphinx import Decoder
 
         self.transport = transport
         self.log = log
+        self.capture = capture
         self.session = RealtimeVoiceSession(VoiceConfig(end_frames=endpoint_ms // 20))
         self.asr = Decoder(samprate=SAMPLE_RATE)
         self.asr.add_jsgf_string(
@@ -120,6 +123,8 @@ class VoiceWorker:
             self.pending.popleft()
 
     def consume(self, block):
+        if self.capture is not None:
+            self.capture(SILENCE if block.pcm is None else block.pcm)
         if block.count and block.response_id == self.active_id:
             self.pending.append(block)
         self.acknowledge(block.now)
@@ -250,6 +255,7 @@ def write_loopback(output, endpoint_ms, interrupt, echo_gain=0., fixture_cancel=
     placed_adc_s, onset_adc_s, resume = loopback(transport, worker, interrupt=interrupt, echo_gain=echo_gain,
                                                  fixture_cancel=fixture_cancel, pause_ms=pause_ms)
     events.insert(0, {"type": "run", "mode": "synthetic_loopback", "endpoint_ms": endpoint_ms,
+                      "sample_rate_hz": SAMPLE_RATE, "frame_samples": FRAME,
                       "injected_user_second_start_adc_s": placed_adc_s,
                       "reference_energy_onset_adc_s": onset_adc_s,
                       "pause_ms": pause_ms, "resume_sample": resume,
@@ -267,8 +273,12 @@ def main():
     parser.add_argument("--input-device")
     parser.add_argument("--output-device")
     parser.add_argument("--trace", type=Path)
+    parser.add_argument("--capture-input", type=Path, metavar="WAV",
+                        help="save live microphone samples as a mono WAV for consented annotation")
     parser.add_argument("--endpoint-ms", type=int, choices=(300, 600), default=300)
     args = parser.parse_args()
+    if args.capture_input and (not args.live or not args.trace):
+        parser.error("--capture-input requires --live and --trace")
     if args.loopback:
         if args.trace is None:
             parser.error("--trace is required for loopback")
@@ -283,15 +293,24 @@ def main():
             print(sd.query_devices())
             return
         transport = DuplexTransport()
-        with (args.trace.open("x", encoding="utf-8") if args.trace else open("/dev/null", "w")) as trace:
+        with ExitStack() as stack:
+            trace = stack.enter_context(
+                args.trace.open("x", encoding="utf-8") if args.trace else open("/dev/null", "w"))
+            capture = None
+            if args.capture_input:
+                file = stack.enter_context(args.capture_input.open("xb"))
+                wav = stack.enter_context(wave.open(file, "wb"))
+                wav.setparams((1, 2, SAMPLE_RATE, 0, "NONE", "not compressed"))
+                capture = wav.writeframesraw
             worker = VoiceWorker(transport, lambda fields: trace.write(json.dumps(fields) + "\n"),
-                                 args.endpoint_ms)
+                                 args.endpoint_ms, capture)
             devices = tuple(int(name) if name and name.isdecimal() else name
                             for name in (args.input_device, args.output_device))
             with sd.RawStream(samplerate=SAMPLE_RATE, blocksize=FRAME, dtype="int16", channels=1,
                               device=devices, latency="low", callback=transport.callback):
                 print("Say 'what is the status' or 'please help me'. Ctrl+C ends the session.", flush=True)
-                worker.record("run", mode="device", endpoint_ms=args.endpoint_ms, devices=devices)
+                worker.record("run", mode="device", endpoint_ms=args.endpoint_ms, devices=devices,
+                              sample_rate_hz=SAMPLE_RATE, frame_samples=FRAME)
                 while True:
                     worker.drain()
                     sleep(.002)

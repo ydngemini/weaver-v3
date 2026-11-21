@@ -568,6 +568,10 @@ echo-cancel pair still require laptop verification.
 [Full-Duplex-Bench-v2](https://doi.org/10.18653/v1/2026.acl-short.4) ·
 [OpenAI Realtime evaluation guide](https://developers.openai.com/cookbook/examples/realtime_eval_guide)
 
+The [physical device pilot](VOICE_DEVICE_PILOT.md) pairs the two endpoint
+controls and scores an independently recorded audible cutoff. Its optional
+runner WAV aligns pause marks with the input sample indexes in the trace.
+
 The [recorded-speech acoustic endpoint pilot](ACOUSTIC_ENDPOINT_PILOT.md)
 compares a CPU-trained acoustic head against the two fixed silence timeouts
 on held-out AMI speakers. At its calibrated cutoff, the head matched the

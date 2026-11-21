@@ -7,6 +7,24 @@ from live_voice import BLOCK_BYTES, FRAME, SILENCE, DuplexTransport, Playback, V
 
 
 class DeviceTransportTests(unittest.TestCase):
+    def test_optional_capture_preserves_sample_offsets_during_input_loss(self):
+        transport = DuplexTransport()
+        pcm = b"\x10\x00" * FRAME
+        transport.exchange(pcm, .98, 1.02, 1.)
+        transport.exchange(None, 1., 1.04, 1.02)
+        captured = []
+        worker = VoiceWorker.__new__(VoiceWorker)
+        worker.capture = captured.append
+        worker.log = lambda row: None
+        worker.pending = deque()
+        worker.cancelled = None
+        worker.active_id = None
+        worker.session = SimpleNamespace(push_pcm16le=lambda offset, samples: None,
+                                         seal_input=lambda end: [])
+        for block in transport.blocks:
+            worker.consume(block)
+        self.assertEqual(captured, [pcm, SILENCE])
+
     def test_callback_mutes_on_next_block_and_never_reuses_old_audio(self):
         transport = DuplexTransport()
         stamp = SimpleNamespace(inputBufferAdcTime=.980, outputBufferDacTime=1.020, currentTime=1.)
