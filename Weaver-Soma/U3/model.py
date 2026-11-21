@@ -31,6 +31,9 @@ from motion_inputs import InertialActivityStem, MotionVisionStem, retain_observe
 
 from paired_actions import PairedActionHead  # noqa: E402
 
+from adaptive_inputs import AdaptiveSensoryBank, SIGNAL_CHANNELS, masked_mean  # noqa: E402
+from gas_summary import GasSummaryHead  # noqa: E402
+
 U1_SHA256 = "3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f"
 U2_STAGE4_SHA256 = "14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149"
 LEGACY_OUTPUTS = frozenset({
@@ -79,7 +82,7 @@ class WeaverSOMAU3(WeaverSOMA100M):
 
     def __init__(self, *, fusion_dim=128, max_modality_tokens=128, quantum_qubits=4,
                  quantum_layers=2, audio_encoder="waveform", vision_encoder="patch",
-                 enable_imu=False, enable_paired_actions=False, **u2_kwargs):
+                 enable_imu=False, enable_paired_actions=False, enable_adaptive_inputs=False, **u2_kwargs):
         super().__init__(**u2_kwargs)
         if fusion_dim % 4 or fusion_dim < 32 or max_modality_tokens < 1:
             raise ValueError("fusion_dim must be >=32, divisible by 4; token limit >=1")
@@ -122,6 +125,8 @@ class WeaverSOMAU3(WeaverSOMA100M):
         self.motion_vision = MotionVisionStem(fusion_dim) if vision_encoder == "motion" else None
         self.inertial = InertialActivityStem(fusion_dim) if enable_imu else None
         self.paired_action_head = PairedActionHead() if enable_paired_actions else None
+        self.adaptive_bank = AdaptiveSensoryBank(fusion_dim) if enable_adaptive_inputs else None
+        self.gas_summary_head = GasSummaryHead() if enable_adaptive_inputs else None
 
     @staticmethod
     def _file_hash(path: str | Path) -> str:
@@ -354,6 +359,31 @@ class WeaverSOMAU3(WeaverSOMA100M):
             return out  # EXACT 15-key legacy contract when diagnostics are absent.
         tokens, masks, auxiliary = [], [], {}
         for name, sample in modalities.items():
+            if self.adaptive_bank is not None and name == "gas_summary":
+                report = self.gas_summary_head(sample["values"], sample.get("valid"))
+                if len(report["logits"]) != len(obs):
+                    raise ValueError("gas summary batch size must match the body")
+                out["gas_summary"] = report
+                continue
+            if self.adaptive_bank is not None and (
+                    name in SIGNAL_CHANNELS or name in ("text", "touch_grid", "spatial_points")):
+                encoded = self.adaptive_bank(name, sample, self.max_modality_tokens)
+                if len(encoded.tokens) != len(obs):
+                    raise ValueError("adaptive input batch size must match the body")
+                tokens.append(encoded.tokens)
+                masks.append(encoded.valid)
+                out.setdefault("adaptive_evidence", {})[name] = encoded.evidence
+                if encoded.intent_logits is not None and encoded.valid.any():
+                    intent = self.adaptive_bank.text.intent
+                    available = encoded.valid.any(-1)
+                    terms = F.linear(encoded.tokens, intent.weight) / encoded.valid.sum(1).clamp_min(1)[:, None, None]
+                    out["text_intent"] = {
+                        "logits": encoded.intent_logits, "score_available": available,
+                        "token_contributions": terms, "bias": intent.bias * available[:, None],
+                    }
+                if name in self.LABELS and encoded.valid.any():
+                    auxiliary[name] = self.label_heads[name](masked_mean(encoded.tokens, encoded.valid))
+                continue
             motion = self._motion_input(name, sample, obs.shape[0])
             if motion is not None:
                 retained, observed = retain_observed_tokens(motion.tokens, motion.valid, self.max_modality_tokens)
@@ -393,6 +423,8 @@ class WeaverSOMAU3(WeaverSOMA100M):
                 auxiliary[name] = self.label_heads[name](pooled)
                 if name == "text":
                     auxiliary["text_token_logits"] = self.label_heads["text"](encoded)
+        if not tokens:
+            return out
         merged = torch.cat(tokens, dim=1)
         validity = torch.cat(masks, dim=1)
         safe = validity.clone()

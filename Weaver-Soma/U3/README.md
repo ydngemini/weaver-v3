@@ -435,3 +435,63 @@ python U3/benchmark_paired_actions.py --skeleton Skeleton.zip --inertial Inertia
 Each sensor encoder is fitted with its own classification loss and a shared
 fused loss. The PairedActionHead is an auxiliary readout in the normal U3
 forward pass. The general-purpose U3 latent fusion is outside this training.
+
+## Adaptive text, touch, chemical, RF, and spatial inputs
+
+Set `enable_adaptive_inputs=True` to use the contextual byte encoder and the
+adaptive numeric stems. Keep batches on one device and use float32 for sensor
+values. Existing model options continue to select the audio, video, and IMU
+paths independently. Use task checkpoints before interpreting class scores.
+
+| Input key | Profile | Evidence returned |
+| --- | --- | --- |
+| `text` | UTF-8 bytes [B,T], optional [B,T] validity | Selected byte offsets, separate 150-class intent logits, exact per-token class-score contributions |
+| `touch` | Six normalized force/contact channels [B,T,6] | Per-channel observations, usable changes, selected slots |
+| `touch_grid` | Calibrated pressure [B,T,H,W] in [0,1], optional validity per frame or per taxel | Mean pressure, contact fraction, center of pressure, peak, spread, and observed taxels |
+| `olfaction` | Eight normalized chemical signal channels [B,T,8] | Per-channel observations, usable changes, selected slots |
+| `gas_summary` | UCI archive format [B,16 physical sensors,8 descriptors] | Six-class research probe, per-sensor score contributions, deviation from training |
+| `rf` | Eight precomputed, normalized RF feature channels [B,T,8] | Per-channel observations, usable changes, selected slots |
+| `spatial` | Six normalized spatial features [B,T,6] | Per-channel observations, usable changes, selected slots |
+| `spatial_points` | Metric XYZ [B,T,P,3], optional [B,T,P] point validity | Point count, centroid, and axis spread in meters |
+
+Numeric streams exclude invalid values before constructing differences.
+Supply per-channel `quality` for the four numeric streams and `timestamps`
+when available. Timestamps exclude non-increasing pairs. Keep gaps represented
+as masked slots. Short and longer causal filters both run, and observed
+change controls their mixture. The router reserves temporal anchors, ranks
+other valid tokens by observed signal change, and enforces the configured per
+stream cap. Text favors digits and UTF-8 lead bytes for the unreserved slots.
+The selected indices are available in `out["adaptive_evidence"]`. This is a
+fusion token budget. The front end still examines every input slot.
+
+```python
+model = WeaverSOMAU3(fusion_dim=48, max_modality_tokens=48, enable_adaptive_inputs=True).eval()
+text = torch.load("runs/text/adaptive_text_intent.pt", map_location="cpu", weights_only=True)
+gas = torch.load("runs/gas/gas_clean_training.pt", map_location="cpu", weights_only=True)
+model.adaptive_bank.text.load_state_dict(text["weights"], strict=True)
+model.gas_summary_head.load_state_dict(gas["weights"], strict=True)
+out = model(obs, quality, context, modalities={
+    "text": {"values": utf8_bytes, "valid": text_valid},
+    "gas_summary": {"values": gas_measurement},
+})
+```
+
+The contextual byte model learns an intent classification task. The saved
+validation threshold is experimental. Gas results are for archived sensor
+descriptors, not raw chemical streams or field measurements. The raw touch,
+chemical time series, RF and generic geometry stems have synthetic wiring and
+fault tests. Their parameters require task training. RF data is supplied after
+measurement and calibration. The point-cloud stem is a global geometry summary.
+
+```sh
+python U3/benchmark_adaptive_text.py --dataset /path/to/oos-eval/data/data_full.json --run-dir runs/text
+python U3/benchmark_adaptive_text.py --dataset /path/to/oos-eval/data/data_full.json --run-dir runs/text-reference --reference-only
+python U3/benchmark_gas_drift.py --dataset /path/to/gas-sensor-array-drift-dataset.zip --run-dir runs/gas
+python -m unittest discover -s U3 -p test_adaptive_inputs.py
+```
+
+The optional text reference requires scikit-learn. The archived gas data
+source describes a research-only use case.
+
+[CLINC150 repository](https://github.com/clinc/oos-eval) ·
+[UCI Gas Sensor Array Drift](https://archive.ics.uci.edu/dataset/224/gas+sensor+array+drift+dataset)
