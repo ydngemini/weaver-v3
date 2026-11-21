@@ -25,6 +25,7 @@ from quantum_native import VariationalQuantumFeatures  # noqa: E402
 from evolution import EvolutionProposalHead  # noqa: E402
 from audio_spectral import SpectralAudioStem  # noqa: E402
 from audio_self_monitor import AUDIO_CLASSES, AudioSelfMonitor, spectral_input  # noqa: E402
+from audio_scope import ARCHITECTURE as AUDIO_SCOPE_ARCHITECTURE, AudioScopeMonitor  # noqa: E402
 
 U1_SHA256 = "3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f"
 U2_STAGE4_SHA256 = "14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149"
@@ -110,6 +111,7 @@ class WeaverSOMAU3(WeaverSOMA100M):
         self.spectral_audio = (SpectralAudioStem(fusion_dim, self.LABELS["audio"])
                                if audio_encoder == "logmel" else None)
         self.audio_self_monitor: AudioSelfMonitor | None = None
+        self.audio_scope_monitor: AudioScopeMonitor | None = None
 
     @staticmethod
     def _file_hash(path: str | Path) -> str:
@@ -175,7 +177,27 @@ class WeaverSOMAU3(WeaverSOMA100M):
         self.spectral_audio.load_state_dict(stem.state_dict(), strict=True)
         monitor.loaded_checkpoint_sha256 = hashlib.sha256(checkpoint).hexdigest()
         self.audio_self_monitor = monitor.train(self.training)
+        self.audio_scope_monitor = None
         return monitor
+
+    def load_audio_scope_monitor(self, path: str | Path):
+        """Attach a scope monitor calibrated against the currently loaded audio checkpoint."""
+        if self.audio_self_monitor is None:
+            raise ValueError("load the paired audio self-monitor first")
+        data = Path(path).read_bytes()
+        obj = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
+        if (not isinstance(obj, dict) or obj.get("architecture") != AUDIO_SCOPE_ARCHITECTURE
+                or obj.get("monitor_sha256") != self.audio_self_monitor.loaded_checkpoint_sha256
+                or self.audio_self_monitor.loaded_checkpoint_sha256 is None):
+            raise ValueError("scope and audio self-monitor checkpoints do not match")
+        scope = AudioScopeMonitor(obj["method"]).to(self.audio_self_monitor.center)
+        scope.load_state_dict(obj["weights"], strict=True)
+        if (not all(torch.isfinite(tensor).all() for tensor in scope.state_dict().values())
+                or (scope.scale <= 0).any()):
+            raise ValueError("invalid audio scope checkpoint")
+        scope.loaded_checkpoint_sha256 = hashlib.sha256(data).hexdigest()
+        self.audio_scope_monitor = scope.train(self.training)
+        return scope
 
     def _encode(self, name: str, sample: Mapping[str, torch.Tensor]):
         if "values" not in sample:
@@ -329,9 +351,12 @@ class WeaverSOMAU3(WeaverSOMA100M):
                         values, sample.get("valid", torch.ones_like(values, dtype=torch.bool)),
                         sample.get("quality"),
                     )
-                    out["audio_self_monitor"] = self.audio_self_monitor(
+                    correctness = self.audio_self_monitor(
                         audio_logits[:, :len(AUDIO_CLASSES)], audio, observed, encoded, valid,
                     )
+                    out["audio_self_monitor"] = correctness
+                    if self.audio_scope_monitor is not None:
+                        out["audio_scope_monitor"] = self.audio_scope_monitor(correctness)
             elif valid.any():
                 pooled = encoded.sum(dim=1) / valid.sum(dim=1).clamp(min=1).unsqueeze(-1)
                 auxiliary[name] = self.label_heads[name](pooled)

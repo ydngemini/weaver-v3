@@ -160,6 +160,41 @@ uses an isolated copy for the explicitly opened gate. The primary model is
 created for replay and its weights are kept fixed. These tests measure the
 effects of controlled edits under the recorded configuration.
 
+## Audio scope research monitor
+
+The scope monitor measures similarity to the five trained sound categories.
+It can be loaded beside the correctness monitor to expose a separate advisory
+decision. A low scope score can reflect an unfamiliar sound or an impaired
+recording. Use both readouts to inspect the uncertainty, and measure coverage
+on the target dataset.
+
+```bash
+python U3/benchmark_audio_scope.py --data-dir ./esc50 \
+  --monitor-checkpoint ./runs/audio-self-monitor/soma_u3_audio_self_monitor.pt \
+  --run-dir ./runs/audio-scope
+```
+
+```python
+model = WeaverSOMAU3(audio_encoder="logmel").eval()
+model.load_audio_self_monitor("runs/audio-self-monitor/soma_u3_audio_self_monitor.pt")
+model.load_audio_scope_monitor("runs/audio-scope/soma_u3_audio_scope.pt")
+with torch.inference_mode():
+    output = model(obs, quality, context, modalities={"audio": {"values": waveform_16khz}})
+scope = output["audio_scope_monitor"]
+```
+
+The checkpoint binds to the audio self-monitor's SHA-256 digest. Read the
+score only when `score_available` is true. The audit contains the score's
+exact contributions and the threshold. For the prototype method it also
+reports the nearest prototype. That class describes the scope comparison,
+while the original classifier predicts the sound label independently.
+
+The benchmark selects the candidate and thresholds on calibration clips,
+then reports a held-out test with different ESC-50 sound categories. It also
+reports test acceptance at equal familiar-sound coverage as a retrospective
+comparison. The fixed thresholds can behave differently under noise, clipping,
+packet loss and echo, and generalization to live captures remains unverified.
+
 ## Checkpoint handling
 
 - `load_verified_u1(path)`: hashes against known trusted U1 artifact, validates all 91 original base tensor keys/shapes. U2's deep core and U3's new weights remain **random**.

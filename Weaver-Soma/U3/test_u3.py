@@ -202,6 +202,41 @@ def test_audio_monitor(tmp_dir):
         }})["audio_self_monitor"]
         assert silent["samples_observed"].all() and not silent["score_available"].any()
         assert (silent["decision_reason"] == AudioDecisionReason.ZERO_SIGNAL).all()
+    from audio_scope import ARCHITECTURE, AudioScopeMonitor, ScopeReason
+
+    assert "audio_scope_monitor" not in after
+    scope_path = tmp_dir / "scope.pt"
+    for method in ("prototype", "exposure"):
+        candidate = AudioScopeMonitor(method)
+        scope_payload = {
+            "architecture": ARCHITECTURE, "method": method, "weights": candidate.state_dict(),
+            "monitor_sha256": model._file_hash(checkpoint),
+        }
+        torch.save(scope_payload, scope_path)
+        model.load_audio_scope_monitor(scope_path)
+        with torch.inference_mode():
+            result = model(obs, quality, context, modalities=audio)
+        scope = result["audio_scope_monitor"]
+        assert scope["decision_reason"][1] == ScopeReason.UNAVAILABLE
+        assert scope["recommend_abstain"][1]
+        torch.testing.assert_close(
+            scope["audit"]["contributions"].sum(1) + scope["audit"]["intercept"], scope["score"],
+        )
+        assert scope["audit"]["checkpoint_sha256"] == model._file_hash(scope_path)
+        assert torch.equal(result["modality_logits"]["audio"], after["modality_logits"]["audio"])
+        assert torch.equal(result["audio_self_monitor"]["p_correct"], readout["p_correct"])
+    active_scope = model.audio_scope_monitor
+    scope_payload["monitor_sha256"] = "unmatched"
+    torch.save(scope_payload, scope_path)
+    try:
+        model.load_audio_scope_monitor(scope_path)
+    except ValueError:
+        assert model.audio_scope_monitor is active_scope
+    else:
+        raise AssertionError("mismatched scope checkpoint should be rejected")
+    model.load_audio_self_monitor(checkpoint)
+    assert model.audio_scope_monitor is None
+    print("PASS: scope contributions, unavailable input, and checkpoint pairing")
     active_monitor = model.audio_self_monitor
     payload["monitor_weights"]["threshold"] = torch.tensor(float("nan"))
     torch.save(payload, checkpoint)
