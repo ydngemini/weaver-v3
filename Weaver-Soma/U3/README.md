@@ -495,3 +495,29 @@ source describes a research-only use case.
 
 [CLINC150 repository](https://github.com/clinc/oos-eval) ·
 [UCI Gas Sensor Array Drift](https://archive.ics.uci.edu/dataset/224/gas+sensor+array+drift+dataset)
+
+## CPU inference speed
+
+Long adaptive streams on CPU use a bounded selection pass. It keeps the same
+anchors and resolves equal-priority samples in chronological order. Short
+streams keep the existing stable sort. In eager CPU evaluation with gradients
+disabled, a zero fusion gain lets SOMA reuse the original body heads and skip
+cross-attention. Training still executes the fusion path, including at zero
+gain.
+
+All existing diagnostics are returned by default. In callers that do not use
+the simulator readout, pass `include_quantum_diagnostics=False` to the
+existing forward call. SOMA still runs the simulator whenever it contributes
+to the result.
+
+```bash
+python U3/benchmark_cpu_speed.py --out /tmp/soma-speed-current.json --optional-diagnostics-off
+python U3/benchmark_cpu_speed.py --source-dir /path/to/comparison-checkout/Weaver-Soma/U3 --out /tmp/soma-speed-before.json
+```
+
+The harness reports warm one-thread CPU inference latency on repeatable
+synthetic workloads. The JSON includes a digest for each output tensor to
+verify predictions, masks, routing traces, and simulator parity across
+checkouts. Timing starts with tensors in memory and excludes capture,
+transcription, voice synthesis, and any lookahead needed to fill an input
+window.

@@ -32,24 +32,47 @@ def masked_mean(tokens, valid):
     return (tokens * valid[..., None]).sum(1) / valid.sum(1, keepdim=True).clamp_min(1)
 
 
+def _stable_cpu_selection(priority, limit):
+    """Select by priority, resolving boundary ties in input order."""
+    boundary = priority.topk(limit, dim=-1, sorted=False).values.amin(-1, keepdim=True)
+    above = priority > boundary
+    tied = priority == boundary
+    slots = limit - above.sum(-1, keepdim=True)
+    chosen = above | (tied & (tied.cumsum(-1, dtype=torch.int32) <= slots))
+    width = priority.shape[-1]
+    ordered = torch.where(chosen, torch.arange(width, device=priority.device), width)
+    return ordered.topk(limit, dim=-1, largest=False).values
+
+
 def select_tokens(tokens, valid, salience, limit):
     """Spend half the budget on time coverage and use the rest on observed changes."""
     width = valid.shape[1]
     if width <= limit:
         indices = torch.arange(width, device=valid.device).expand(len(valid), -1)
     else:
-        count = valid.sum(dim=-1, keepdim=True)
-        chronological = (~valid).long().argsort(dim=-1, stable=True)
+        fast_cpu = valid.device.type == "cpu" and width >= max(2048, 4 * limit)
+        if fast_cpu:
+            running = valid.cumsum(dim=-1, dtype=torch.int32)
+            count = running[:, -1:]
+        else:
+            count = valid.sum(dim=-1, keepdim=True)
         anchor_count = max(1, limit // 2)
         rank = torch.arange(anchor_count, device=valid.device).unsqueeze(0)
         # With one anchor, use the latest sample. Multiple anchors include both ends.
         positions = (count - 1).clamp_min(0)
         spread = positions if anchor_count == 1 else rank * positions // (anchor_count - 1)
-        anchor = chronological.gather(-1, spread)
+        if fast_cpu:
+            anchor = torch.searchsorted(running, (spread + 1).int().contiguous()).clamp_max(width - 1)
+        else:
+            chronological = (~valid).long().argsort(dim=-1, stable=True)
+            anchor = chronological.gather(-1, spread)
         priority = salience.clamp(0, 1).masked_fill(~valid, -1)
         anchor_valid = valid.gather(-1, anchor)
         priority.scatter_(-1, anchor, torch.where(anchor_valid, 2., -1.).to(priority.dtype))
-        indices = priority.argsort(dim=-1, descending=True, stable=True)[:, :limit].sort(dim=-1).values
+        if fast_cpu:
+            indices = _stable_cpu_selection(priority, limit)
+        else:
+            indices = priority.argsort(dim=-1, descending=True, stable=True)[:, :limit].sort(dim=-1).values
     kept = valid.gather(-1, indices)
     gathered = tokens.gather(1, indices[..., None].expand(-1, -1, tokens.shape[-1]))
     return AdaptiveEncoding(gathered * kept[..., None], kept, {

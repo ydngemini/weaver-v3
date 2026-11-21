@@ -23,6 +23,28 @@ class AdaptiveInputsTests(unittest.TestCase):
         self.assertEqual(ids[1, routed.valid[1]].tolist(), [7, 31])
         self.assertEqual(routed.evidence["retained_tokens"].tolist(), [8, 2])
 
+    def test_long_router_matches_stable_reference_with_ties_and_gaps(self):
+        generator = torch.Generator().manual_seed(737)
+        tokens = torch.randn(4, 4096, 5, generator=generator)
+        valid = torch.rand(4, 4096, generator=generator) > .25
+        valid[0].zero_()
+        valid[1, 3:] = False
+        salience = torch.randint(0, 4, (4, 4096), generator=generator).float() / 4
+        for limit in (1, 3, 48):
+            got = select_tokens(tokens, valid, salience, limit)
+            expected = []
+            for row, mask in enumerate(valid):
+                observed = mask.nonzero().flatten().tolist()
+                anchors = max(1, limit // 2)
+                ranks = [len(observed) - 1] if anchors == 1 else [
+                    k * (len(observed) - 1) // (anchors - 1) for k in range(anchors)]
+                protected = {observed[k] for k in ranks} if observed else set()
+                selection = sorted(sorted(range(len(mask)), key=lambda i: (
+                    -2 if i in protected else (-float(salience[row, i]) if mask[i] else 1), i,
+                ))[:limit])
+                expected.append([i if mask[i] else -1 for i in selection])
+            self.assertEqual(got.evidence["selected_input_indices"].tolist(), expected)
+
     def test_filtered_sensor_tokens_are_causal_and_mask_gaps(self):
         torch.manual_seed(179)
         encoder = AdaptiveSignalEncoder(6, 32)
@@ -82,3 +104,32 @@ class AdaptiveInputsTests(unittest.TestCase):
             self.assertTrue(all(torch.equal(before[k], missing[k]) for k in LEGACY_OUTPUTS))
             self.assertFalse(missing["sensory_token_mask"].any())
             self.assertFalse(missing["gas_summary"]["score_available"].any())
+
+    def test_inference_skips_only_inactive_fusion_work(self):
+        model = WeaverSOMAU3(core_dim=64, ff_dim=128, depth=2, fusion_dim=32).eval()
+        obs = torch.zeros(1, 8, 7)
+        args = obs, torch.ones(1, 8, 3), torch.zeros(1, 8)
+        modalities = {"text": {"values": torch.tensor([[1, 2, 3]])}}
+        calls = []
+        with torch.inference_mode():
+            attention = model.cross_attention.register_forward_hook(lambda *_: calls.append("attention"))
+            quantum = model.quantum.register_forward_hook(lambda *_: calls.append("quantum"))
+            full = model(*args, modalities=modalities)
+            self.assertEqual(calls, ["quantum"])
+            calls.clear()
+            fast = model(*args, modalities=modalities, include_quantum_diagnostics=False)
+            self.assertEqual(calls, [])
+            self.assertEqual(full.keys() - fast.keys(), {"quantum_expectations"})
+            self.assertTrue(all(torch.equal(full[k], fast[k]) for k in LEGACY_OUTPUTS))
+            model.multimodal_gain.fill_(.5)
+            model.quantum_gain.fill_(.1)
+            active = model(*args, modalities=modalities, include_quantum_diagnostics=False)
+            self.assertEqual(calls, ["quantum", "attention"])
+            self.assertNotIn("quantum_expectations", active)
+            attention.remove()
+            quantum.remove()
+            model.multimodal_gain.zero_()
+        model.train()
+        out = model(*args, modalities=modalities, include_quantum_diagnostics=False)
+        out["state"].square().sum().backward()
+        self.assertTrue(model.multimodal_gain.grad.abs().item() > 0)

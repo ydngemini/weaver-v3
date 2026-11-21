@@ -342,7 +342,8 @@ class WeaverSOMAU3(WeaverSOMA100M):
     def forward(self, obs, quality, context, executed_action=None, ablate=None, *,
                 modalities: Mapping[str, Mapping[str, torch.Tensor]] | None = None,
                 evolution_diagnostics: torch.Tensor | None = None,
-                paired_action_inputs: Mapping[str, torch.Tensor] | None = None):
+                paired_action_inputs: Mapping[str, torch.Tensor] | None = None,
+                include_quantum_diagnostics: bool = True):
         out = super().forward(obs, quality, context, executed_action, ablate)
         if evolution_diagnostics is not None:
             if evolution_diagnostics.shape[0] != obs.shape[0]:
@@ -427,23 +428,31 @@ class WeaverSOMAU3(WeaverSOMA100M):
             return out
         merged = torch.cat(tokens, dim=1)
         validity = torch.cat(masks, dim=1)
-        safe = validity.clone()
-        empty = ~safe.any(dim=1)
-        if empty.any():
-            safe[empty, 0] = True
-        query = self.state_to_query(out["state"]).unsqueeze(1)
-        attended, _ = self.cross_attention(query, merged, merged,
-                                           key_padding_mask=~safe, need_weights=False)
-        attended = attended.squeeze(1)
-        attended = torch.where(empty.unsqueeze(-1), torch.zeros_like(attended), attended)
-        pooled = merged.sum(dim=1) / validity.sum(dim=1).clamp(min=1).unsqueeze(-1)
-        qfeatures = self.quantum(pooled)
-        attended = attended + self.quantum_gain * self.quantum_projection(qfeatures)
-        fused = out["state"] + self.multimodal_gain * self.fusion_to_state(self.fusion_norm(attended))
-        fused = torch.where(empty.unsqueeze(-1), out["state"], fused)
-        self._refresh_legacy_heads(out, fused, obs)
+        frozen_cpu = (not self.training and not torch.is_grad_enabled()
+                      and merged.device.type == "cpu" and not torch.compiler.is_compiling())
+        fuse = not (frozen_cpu and self.multimodal_gain.item() == 0)
+        use_quantum_residual = fuse and not (frozen_cpu and self.quantum_gain.item() == 0)
+        qfeatures = None
+        if include_quantum_diagnostics or use_quantum_residual:
+            pooled = merged.sum(dim=1) / validity.sum(dim=1).clamp(min=1).unsqueeze(-1)
+            qfeatures = self.quantum(pooled)
+        if fuse:
+            safe = validity.clone()
+            empty = ~safe.any(dim=1)
+            if empty.any():
+                safe[empty, 0] = True
+            query = self.state_to_query(out["state"]).unsqueeze(1)
+            attended, _ = self.cross_attention(query, merged, merged,
+                                               key_padding_mask=~safe, need_weights=False)
+            attended = torch.where(empty.unsqueeze(-1), 0, attended.squeeze(1))
+            if use_quantum_residual:
+                attended = attended + self.quantum_gain * self.quantum_projection(qfeatures)
+            fused = out["state"] + self.multimodal_gain * self.fusion_to_state(self.fusion_norm(attended))
+            fused = torch.where(empty.unsqueeze(-1), out["state"], fused)
+            self._refresh_legacy_heads(out, fused, obs)
         out["modality_logits"] = auxiliary
-        out["quantum_expectations"] = qfeatures
+        if include_quantum_diagnostics:
+            out["quantum_expectations"] = qfeatures
         out["sensory_token_mask"] = validity
         return out
 
