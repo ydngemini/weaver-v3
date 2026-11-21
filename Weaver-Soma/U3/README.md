@@ -617,3 +617,42 @@ require separate training and evaluation.
 [TinyStories paper](https://arxiv.org/abs/2305.07759) ·
 [ByT5](https://doi.org/10.1162/tacl_a_00461) ·
 [PyTorch SDPA](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
+
+## Full and LoRA fine-tuning for grounded replies
+
+This experiment starts both methods from the exact native BPE story checkpoint.
+Given short records labeled A–D, it trains the decoder to return a short
+value with its record label, or `unknown` when the requested field is absent.
+The benchmark synthesizes distinct record/question combinations before
+training and scores unrestricted greedy text. The objective covers response
+tokens and EOS. Prompt and padding positions have zero loss.
+
+Full fine-tuning updates every weight. The native rank-eight LoRA comparison
+freezes the base and trains the four linear projections in each decoder
+block. Both methods use the same minibatch draws and token budget. Learning
+rates are fixed independently and documented in the report. The release
+contains adapter-only weights tied to the base hash and a merged checkpoint
+that loads with the normal native decoder loader.
+
+```sh
+python U3/train_grounded_text.py --checkpoint runs/native-text/soma_native_bpe.pt --story-validation valid.prefix.txt --run-dir runs/grounded-text
+```
+
+Add `--story-replay-train train.prefix.txt` to test full fine-tuning with an
+extra next-token loss on the original training stories, weighted 0.35. This
+arm uses the same supervised draws plus two story windows per update. Its
+extra story tokens and runtime are reported separately. This comparison was
+added after observing retention loss and uses the same held-out benchmark.
+
+The held-out slices cover new record combinations, an unseen question
+template, and values withheld from supervised training. Paired interventions
+change one relevant value or remove its record while preserving other
+records. The report also measures story continuation loss after adaptation
+and includes every synthetic test prediction. Both methods train in native
+PyTorch on CPU. This experiment does not measure Unsloth, live voice, or
+open-domain evidence grounding.
+
+[LoRA paper](https://arxiv.org/abs/2106.09685) ·
+[PEFT LoRA guide](https://huggingface.co/docs/peft/main/conceptual_guides/lora) ·
+[TRL supervised fine-tuning guide](https://huggingface.co/docs/trl/sft_trainer) ·
+[Replay and forgetting in language-model training](https://aclanthology.org/2025.acl-long.105/)
