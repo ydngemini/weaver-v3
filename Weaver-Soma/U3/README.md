@@ -9,7 +9,7 @@
 
 - **Text/bytes:** 256-symbol byte embedding (not yet an autoregressive language model).
 - **Vision/video frames:** trainable patch convolution and projection.
-- **Environmental audio:** learnable waveform convolutions; sound-event head remains untrained.
+- **Environmental audio:** legacy waveform convolutions and an optional 16 kHz log-mel encoder. The log-mel checkpoint has five trained research labels.
 - **Touch/motion:** mask-aware temporal stem.
 - **Olfaction:** eight-channel learnable chemical-sensor stem, quality masks and timestamps. A real chemical sensor has not been attached.
 - **RF and spatial arrays:** separate temporal encoders for **measured** signal features (no RF hardware connected).
@@ -70,7 +70,31 @@ with torch.inference_mode():
 print(result["risk_logits"].shape, result["quantum_expectations"].shape)
 ```
 
-The new heads return random/untrained predictions until properly trained on trusted datasets. Training is an explicit next task, not something silently accomplished by inference.
+The model initializes its sensory heads randomly. Load a task-specific checkpoint before interpreting its predictions.
+
+## Five-class audio benchmark
+
+Run from `Weaver-Soma` with CPU PyTorch, NumPy, SciPy and scikit-learn.
+
+```bash
+python U3/benchmark_esc50_audio.py --data-dir ./esc50 --run-dir ./runs/audio-logmel
+```
+
+The benchmark uses 200 files from the original ESC-50 research subset and compares the native log-mel model to a pooled MFCC/RBF classifier. It selects training settings on source-grouped folds 1–4, fits the final models on folds 1–3, and scores fold 5 once per preset seed. The original waveform benchmark remains available in `train_esc50.py`.
+
+In the CPU run, the waveform result was 8/40 and the log-mel result was 33/40 for each of three seeds. MFCC/RBF reached 34/40. All results cover the same five-class fold 5 subset. This evaluation fold had already been used by the waveform benchmark. The U2 body and multimodal fusion were outside audio training.
+
+```python
+checkpoint = torch.load("runs/audio-logmel/soma_u3_audio5_logmel.pt",
+                        map_location="cpu", weights_only=True)
+model = WeaverSOMAU3(audio_encoder="logmel", fusion_dim=checkpoint["fusion_dim"]).eval()
+model.spectral_audio.load_state_dict(checkpoint["weights"], strict=True)
+with torch.inference_mode():
+    result = model(obs, quality, context, modalities={"audio": {"values": waveform_16khz}})
+    logits = result["modality_logits"]["audio"][:, :len(checkpoint["classes"])]
+```
+
+Pass normalized 16 kHz mono PCM as `waveform_16khz`, shaped `[batch, samples]`. For variable lengths, pass a boolean `valid` mask alongside it. Use the checkpoint class order and restrict classification to its five trained outputs. The default waveform encoder loads earlier U3 checkpoints through its existing interface.
 
 ## Checkpoint handling
 

@@ -121,6 +121,42 @@ def test_invalid_input(model, inputs):
     print("PASS: masked chemical channel and missing sensory stream preserve original model")
 
 
+def test_spectral_audio():
+    config = dict(core_dim=64, depth=1, ff_dim=128, fusion_dim=64, quantum_qubits=2)
+    torch.manual_seed(23)
+    plain = WeaverSOMAU3(**config).eval()
+    torch.manual_seed(23)
+    spectral = WeaverSOMAU3(audio_encoder="logmel", **config).eval()
+    waveform = torch.randn(2, 4096)
+    valid = torch.ones_like(waveform, dtype=torch.bool)
+    valid[0, 1800:] = False
+    valid[1] = False
+    audio = {"values": waveform, "valid": valid}
+    corrupted = {"values": waveform.masked_fill(~valid, float("nan")), "valid": valid}
+    obs, quality, context = torch.zeros(2, 8, 7), torch.ones(2, 8, 3), torch.zeros(2, 8)
+    with torch.no_grad():
+        unrelated = {"text": {"values": torch.zeros(2, 5, dtype=torch.long)}}
+        original = plain(obs, quality, context, modalities=unrelated)
+        output = spectral(obs, quality, context, modalities=unrelated)
+        assert all(torch.equal(original[key], output[key]) for key in LEGACY_OUTPUTS)
+        assert torch.equal(original["modality_logits"]["text"], output["modality_logits"]["text"])
+
+        output = spectral(obs, quality, context, modalities={"audio": audio})
+        changed = spectral(obs, quality, context, modalities={"audio": corrupted})
+        assert torch.equal(output["modality_logits"]["audio"], changed["modality_logits"]["audio"])
+        assert output["sensory_token_mask"][0].any() and not output["sensory_token_mask"][1].any()
+        stem = spectral.spectral_audio
+        direct = stem.classify(*stem(waveform, valid))
+        assert torch.equal(output["modality_logits"]["audio"], direct)
+        assert "audio" not in spectral(obs, quality, context, modalities={
+            "audio": {"values": waveform, "quality": torch.zeros_like(waveform)}
+        })["modality_logits"]
+        assert spectral(obs, quality, context, modalities={
+            "audio": {"values": waveform[:, :1]}
+        })["modality_logits"]["audio"].shape == (2, 16)
+    print("PASS: spectral audio integration, masked values, short inputs, and other modality parity")
+
+
 def main():
     if len(sys.argv) > 2:
         raise SystemExit("usage: python U3/test_u3.py [trusted_U1_checkpoint.pt]")
@@ -128,6 +164,7 @@ def main():
     model, inputs = test_exact_legacy(sys.argv[1] if len(sys.argv) == 2 else None)
     test_trainability(model, inputs)
     test_invalid_input(model, inputs)
+    test_spectral_audio()
     print("SOMA U3 engineering smoke tests: PASS; NO recognition or training claim")
 
 

@@ -21,6 +21,7 @@ from weaver_soma_u2 import WeaverSOMA100M, count_parameters  # noqa: E402
 from unified_model import HORIZON, STATE_CENTER, STATE_SCALE  # noqa: E402
 from quantum_native import VariationalQuantumFeatures  # noqa: E402
 from evolution import EvolutionProposalHead  # noqa: E402
+from audio_spectral import SpectralAudioStem  # noqa: E402
 
 U1_SHA256 = "3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f"
 U2_STAGE4_SHA256 = "14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149"
@@ -59,7 +60,7 @@ class WeaverSOMAU3(WeaverSOMA100M):
     modalities is a mapping name -> {values, valid?, quality?, timestamps?}.
     text: [B,T] integer bytes 0..255 (not pretrained language).
     vision: [B,F,3,H,W] float frames; valid [B,F].
-    audio: [B,S] mono waveform; valid [B,S] (not pretrained sound labels).
+    audio: [B,S] mono waveform; valid [B,S]. The logmel encoder expects 16 kHz.
     touch: [B,T,6], olfaction: [B,T,8], rf: [B,T,8], spatial: [B,T,6].
     These dimensions are research contracts, not universal sensor standards.
     """
@@ -69,10 +70,12 @@ class WeaverSOMAU3(WeaverSOMA100M):
               "olfaction": 8, "rf": 8, "spatial": 8}
 
     def __init__(self, *, fusion_dim=128, max_modality_tokens=128, quantum_qubits=4,
-                 quantum_layers=2, **u2_kwargs):
+                 quantum_layers=2, audio_encoder="waveform", **u2_kwargs):
         super().__init__(**u2_kwargs)
         if fusion_dim % 4 or fusion_dim < 32 or max_modality_tokens < 1:
             raise ValueError("fusion_dim must be >=32, divisible by 4; token limit >=1")
+        if audio_encoder not in ("waveform", "logmel"):
+            raise ValueError("audio_encoder must be waveform or logmel")
         self._u2_keys = frozenset(self.state_dict())
         self.fusion_dim = fusion_dim
         self.max_modality_tokens = max_modality_tokens
@@ -101,6 +104,8 @@ class WeaverSOMAU3(WeaverSOMA100M):
                                           for name, n in self.LABELS.items()})
         # Trainable proposal head is part of THIS neural model; mutation execution is not.
         self.evolution_head = EvolutionProposalHead(signal_count=8, width=64)
+        self.spectral_audio = (SpectralAudioStem(fusion_dim, self.LABELS["audio"])
+                               if audio_encoder == "logmel" else None)
 
     @staticmethod
     def _file_hash(path: str | Path) -> str:
@@ -180,9 +185,15 @@ class WeaverSOMAU3(WeaverSOMA100M):
             audio = torch.where(valid_samples.bool(), values, torch.zeros_like(values))
             if quality is not None:
                 audio = torch.where(quality > 0, audio * quality.clamp(0, 1), torch.zeros_like(audio))
-            tokens = self.audio_conv(audio.unsqueeze(1)).transpose(1, 2)
-            default_mask = F.adaptive_max_pool1d(valid_samples.float().unsqueeze(1),
-                                                  tokens.shape[1]).squeeze(1) > 0
+            if self.spectral_audio is None:
+                tokens = self.audio_conv(audio.unsqueeze(1)).transpose(1, 2)
+                default_mask = F.adaptive_max_pool1d(valid_samples.float().unsqueeze(1),
+                                                      tokens.shape[1]).squeeze(1) > 0
+            else:
+                effective_valid = valid_samples.bool()
+                if quality is not None:
+                    effective_valid = effective_valid & (quality > 0)
+                tokens, default_mask = self.spectral_audio(audio, effective_valid)
         else:
             if name not in self.CHANNELS:
                 raise ValueError(f"unknown SOMA modality: {name}")
@@ -227,13 +238,16 @@ class WeaverSOMAU3(WeaverSOMA100M):
         length = tokens.shape[1]
         if length == 0:
             raise ValueError("empty sensory input")
-        position = self.position_embed(torch.arange(length, device=tokens.device))
-        tokens = tokens + position.unsqueeze(0) + self.type_embed[name]
+        spectral_audio = name == "audio" and self.spectral_audio is not None
+        if not spectral_audio:
+            position = self.position_embed(torch.arange(length, device=tokens.device))
+            tokens = tokens + position.unsqueeze(0) + self.type_embed[name]
         if timestamps is not None:
             rel = (timestamps - timestamps[:, :1]).to(tokens.dtype)
             phase = torch.stack((rel.sin(), rel.cos() - 1.0), dim=-1)
             tokens = tokens + self.time_embed(phase)
-        tokens = self.token_norm(tokens)
+        if not spectral_audio:
+            tokens = self.token_norm(tokens)
         return tokens * valid.unsqueeze(-1).to(tokens.dtype), valid
 
     def _refresh_legacy_heads(self, out: dict, common: torch.Tensor, obs: torch.Tensor):
@@ -279,8 +293,11 @@ class WeaverSOMAU3(WeaverSOMA100M):
             tokens.append(encoded)
             masks.append(valid)
             if valid.any():
-                pooled = encoded.sum(dim=1) / valid.sum(dim=1).clamp(min=1).unsqueeze(-1)
-                auxiliary[name] = self.label_heads[name](pooled)
+                if name == "audio" and self.spectral_audio is not None:
+                    auxiliary[name] = self.spectral_audio.classify(encoded, valid)
+                else:
+                    pooled = encoded.sum(dim=1) / valid.sum(dim=1).clamp(min=1).unsqueeze(-1)
+                    auxiliary[name] = self.label_heads[name](pooled)
                 if name == "text":
                     auxiliary["text_token_logits"] = self.label_heads["text"](encoded)
         merged = torch.cat(tokens, dim=1)
