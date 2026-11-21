@@ -521,3 +521,49 @@ verify predictions, masks, routing traces, and simulator parity across
 checkouts. Timing starts with tensors in memory and excludes capture,
 transcription, voice synthesis, and any lookahead needed to fill an input
 window.
+
+## Local duplex device pilot
+
+`live_voice.py` reuses the session coordinator with a duplex PortAudio
+transport. One callback fills a 20 ms output block and records ADC, callback,
+and scheduled DAC timestamps. The worker owns recognition and playback state.
+Cancellation clears the next output block the worker can affect. Audio already
+submitted to the device may still play. Playback acknowledgements use elapsed
+DAC timestamps from the device driver. They describe a scheduling estimate.
+A physical loopback microphone or electrical capture is needed for acoustic
+mute measurements.
+
+On Ubuntu, use a headset or select the matched source and sink of an existing
+PipeWire echo-cancel configuration. Use the route names or indices shown by
+the device listing. The pilot accepts 16 kHz mono int16 and uses a local
+two-intent PocketSphinx grammar with pre-rendered Flite replies.
+
+```bash
+# PortAudio and FFmpeg with Flite must already be installed on the target.
+python -m pip install pocketsphinx==5.0.4 sounddevice==0.5.6
+python U3/live_voice.py --devices
+python U3/live_voice.py --live --input-device INPUT --output-device OUTPUT --trace pilot.jsonl
+python U3/benchmark_live_loopback.py --run-dir runs/device-loopback
+```
+
+The live trace option records recognized text and timing metadata. Use it
+with consent. For the pilot, keep the microphone and output route fixed per
+run. Include clean turns, labeled within-turn pauses, self-echo without user
+speech, and true interruptions. Use an independent record of source speech
+onset and audible output for the device acceptance test.
+
+The six synthetic cases separate interruption, a 420 ms internal pause, and
+self-echo. The two interruption tests scheduled mute 100 ms after the
+fixture's energy onset and emitted no old-response blocks after that mute.
+Timing from file insertion includes leading silence and measured 460 ms.
+A 300 ms timeout split the 420 ms pause. A 600 ms timeout kept it together.
+Injected echo interrupted playback once. Exact subtraction of the known
+fixture echo prevented that interruption. The subtraction is confined to the
+synthetic benchmark. Physical audio I/O and the configured PipeWire
+echo-cancel pair still require laptop verification.
+
+[PortAudio stream callback and clocks](https://python-sounddevice.readthedocs.io/en/latest/api/streams.html) ·
+[PipeWire echo-cancel module](https://docs.pipewire.org/page_module_echo_cancel.html) ·
+[Full-Duplex-Bench](https://doi.org/10.1109/ASRU65441.2025.11433838) ·
+[Full-Duplex-Bench-v2](https://doi.org/10.18653/v1/2026.acl-short.4) ·
+[OpenAI Realtime evaluation guide](https://developers.openai.com/cookbook/examples/realtime_eval_guide)
