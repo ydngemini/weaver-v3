@@ -656,3 +656,43 @@ open-domain evidence grounding.
 [PEFT LoRA guide](https://huggingface.co/docs/peft/main/conceptual_guides/lora) ·
 [TRL supervised fine-tuning guide](https://huggingface.co/docs/trl/sft_trainer) ·
 [Replay and forgetting in language-model training](https://aclanthology.org/2025.acl-long.105/)
+
+## Source-linked answers for structured evidence
+
+The optional structured evidence path takes a question and single-line
+records in the previous pilot's format. A trained PyTorch ranker reads
+the question, and a supported-word gate checks that the selected field
+matches a single known field or synonym. The resolver reads the value
+directly from the selected source and returns its source ID and character
+span. Missing records, conflicting values, and unsupported questions
+have distinct abstention reasons. When identical values agree, the trace
+retains both records.
+
+```python
+from grounded_pointer import answer_prompt, load_pointer
+
+ranker, threshold = load_pointer("runs/evidence/soma_grounded_pointer.pt")
+prompt = "[A] city: São Paulo.\n[B] food: rice.\nQuestion: Which town is listed?\nAnswer:"
+answer = answer_prompt(prompt, ranker, threshold)
+print(answer.text())  # São Paulo [A]
+for source in answer.evidence:
+    assert prompt[source.start:source.end] == source.value
+```
+
+```sh
+python U3/benchmark_grounded_pointer.py --previous-predictions runs/grounded-text/predictions.jsonl --run-dir runs/evidence
+```
+
+Pass `--external-oos /path/to/oos-eval/data/data_full.json` to replay the
+1,000 CLINC150 out-of-scope questions against a fixed evidence card. The
+training questions and calibration wording are disjoint. The calibration
+set selects the abstention margin before the replay. Comparisons include
+the previous free decoder, literal field matching, a synonym dictionary,
+and the same ranker without the supported-word gate. The evidence path
+can copy values it has never seen. Unfamiliar ways of asking for a field
+may still lead to abstention. Arbitrary document understanding and voice
+integration are outside this pilot.
+
+[Source copying research](https://aclanthology.org/P17-1099/) ·
+[Unanswerable QA](https://aclanthology.org/P18-2124/) ·
+[CLINC150](https://github.com/clinc/oos-eval)
