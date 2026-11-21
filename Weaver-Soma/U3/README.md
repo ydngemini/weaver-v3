@@ -127,10 +127,18 @@ advisory. The monitor accepts too many sounds outside its five classes and has
 no validated novelty detector. Recalibrate when changing the encoder, signal
 pipeline, or operating environment.
 
+Each score carries an audit trace with the original summary values, named
+feature contributions, intercept, threshold, and the loaded checkpoint SHA-256.
+The intercept plus feature contributions reconstructs the reported log odds.
+Reason codes are defined by `AudioDecisionReason`. Traces describe the linear
+correctness monitor. The acoustic encoder requires separate intervention tests
+to investigate its learned representations.
+
 The simulated body model predicts motion with a copy of the proposed command
 and five recent command/response pairs. Its trainer compares paired command
 reversals against a no-command ablation, a state-and-command model, and a
-linear baseline. It requires no hardware. The residual is a prediction
+linear baseline. The trainer saves the linear weights and verifies the exact
+input and command-reversal decompositions. It requires no hardware. The residual is a prediction
 mismatch and does not identify what caused the mismatch.
 
 ## Checkpoint handling

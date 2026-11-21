@@ -1,13 +1,31 @@
 """Read-only audio metacognition for the native five-class SOMA encoder."""
 from __future__ import annotations
 
+from enum import IntEnum
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 AUDIO_CLASSES = ("dog", "rain", "siren", "coughing", "sneezing")
 SPECTRAL_GROUPS = 8
-FEATURE_COUNT = len(AUDIO_CLASSES) + 7 + 2 * SPECTRAL_GROUPS
+FEATURE_NAMES = (
+    *(f"probability_{name}" for name in AUDIO_CLASSES),
+    "top_probability", "probability_margin", "entropy", "valid_sample_fraction",
+    "log_rms", "clipped_fraction", "normalized_roughness",
+    *(f"spectral_group_{index}_mean" for index in range(SPECTRAL_GROUPS)),
+    *(f"spectral_group_{index}_spread" for index in range(SPECTRAL_GROUPS)),
+)
+FEATURE_COUNT = len(FEATURE_NAMES)
+
+
+class AudioDecisionReason(IntEnum):
+    AT_OR_ABOVE_THRESHOLD = 0
+    BELOW_THRESHOLD = 1
+    MISSING_SAMPLES = 2
+    ZERO_SIGNAL = 3
+    NO_ENCODED_EVIDENCE = 4
+    NONFINITE_EVIDENCE = 5
 
 
 def spectral_input(values, valid, quality=None):
@@ -56,24 +74,50 @@ class AudioSelfMonitor(nn.Module):
         self.register_buffer("center", torch.zeros(FEATURE_COUNT))
         self.register_buffer("scale", torch.ones(FEATURE_COUNT))
         self.register_buffer("threshold", torch.tensor(0.5))
+        self.loaded_checkpoint_sha256: str | None = None
+
+    def standardize(self, features):
+        return ((features - self.center) / self.scale).clamp(-8, 8).to(self.linear.weight.dtype)
 
     def log_odds(self, features):
-        standardized = ((features - self.center) / self.scale).clamp(-8, 8)
-        return self.linear(standardized.to(self.linear.weight.dtype)).squeeze(-1)
+        return self.linear(self.standardize(features)).squeeze(-1)
 
     def forward(self, class_logits, waveform, sample_valid, tokens, token_valid):
-        observed = sample_valid.any(dim=1) & token_valid.any(dim=1)
+        observed = sample_valid.any(dim=1)
+        token_present = token_valid.any(dim=1)
         has_signal = (waveform.ne(0) & sample_valid).any(dim=1)
-        finite = torch.isfinite(class_logits).all(dim=1)
-        score_available = observed & has_signal & finite
+        finite_logits = torch.isfinite(class_logits).all(dim=1)
         features = monitor_features(
-            class_logits.masked_fill(~finite.unsqueeze(1), 0),
+            class_logits.masked_fill(~finite_logits.unsqueeze(1), 0),
             waveform, sample_valid, tokens, token_valid,
         )
-        scores = self.log_odds(features).sigmoid()
+        finite = finite_logits & torch.isfinite(features).all(dim=1)
+        score_available = observed & has_signal & token_present & finite
+        features = features.masked_fill(~score_available.unsqueeze(1), 0)
+        standardized = self.standardize(features)
+        log_odds = self.linear(standardized).squeeze(-1)
+        scores = log_odds.sigmoid()
+        reason = torch.full_like(observed, AudioDecisionReason.AT_OR_ABOVE_THRESHOLD, dtype=torch.long)
+        reason.masked_fill_(scores < self.threshold, AudioDecisionReason.BELOW_THRESHOLD)
+        reason.masked_fill_(~finite, AudioDecisionReason.NONFINITE_EVIDENCE)
+        reason.masked_fill_(~token_present, AudioDecisionReason.NO_ENCODED_EVIDENCE)
+        reason.masked_fill_(~has_signal, AudioDecisionReason.ZERO_SIGNAL)
+        reason.masked_fill_(~observed, AudioDecisionReason.MISSING_SAMPLES)
         return {
             "p_correct": scores.masked_fill(~score_available, 0),
             "samples_observed": observed,
             "score_available": score_available,
-            "recommend_abstain": ~score_available | (scores < self.threshold),
+            "recommend_abstain": reason != AudioDecisionReason.AT_OR_ABOVE_THRESHOLD,
+            "decision_reason": reason,
+            "audit": {
+                "feature_names": FEATURE_NAMES,
+                "features": features,
+                "log_odds_contributions": (standardized * self.linear.weight).masked_fill(
+                    ~score_available.unsqueeze(1), 0,
+                ),
+                "intercept": self.linear.bias.expand_as(log_odds).masked_fill(~score_available, 0),
+                "log_odds": log_odds.masked_fill(~score_available, 0),
+                "threshold": self.threshold,
+                "loaded_checkpoint_sha256": self.loaded_checkpoint_sha256,
+            },
         }

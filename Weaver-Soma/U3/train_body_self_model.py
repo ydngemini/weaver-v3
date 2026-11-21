@@ -104,6 +104,12 @@ def evaluate(models, body, command):
     return output
 
 
+def decompose_linear_motion(model, state_action):
+    """Exact velocity terms attributable to each input of the linear baseline."""
+    terms = state_action.unsqueeze(1) * model.weight.unsqueeze(0)
+    return model.bias.expand(len(state_action), -1), terms
+
+
 def command_batch(seed, size):
     gen = torch.Generator().manual_seed(seed)
     return torch.empty(size, 2).uniform_(-1, 1, generator=gen)
@@ -162,6 +168,21 @@ def main():
         linear.bias.copy_(coefficients[-1])
     # The linear baseline sees the same state and command as the action-only MLP.
     models["linear_state_action"] = linear
+    paired_command = command_batch(47, len(standard.pose))
+    paired_inputs = predictors(standard, paired_command)["state_action"]
+    reversed_inputs = predictors(standard, -paired_command)["state_action"]
+    with torch.inference_mode():
+        intercept, terms = decompose_linear_motion(linear, paired_inputs)
+        torch.testing.assert_close(intercept + terms.sum(dim=2), linear(paired_inputs))
+        torch.testing.assert_close(
+            2 * terms[:, :, -2:].sum(dim=2), linear(paired_inputs) - linear(reversed_inputs),
+        )
+    linear_checkpoint = args.run_dir / "soma_u3_body_linear_sim.pt"
+    torch.save({
+        "architecture": "SOMA-U3-simulated-body-linear-v1",
+        "feature_names": ("pose_x", "pose_y", "velocity_x", "velocity_y", "command_x", "command_y"),
+        "weights": linear.state_dict(),
+    }, linear_checkpoint)
     history_model = models["state_action_history"]
     checkpoint = args.run_dir / "soma_u3_body_self_model_sim.pt"
     torch.save({"architecture": "SOMA-U3-simulated-body-forward-model-v1",
@@ -175,6 +196,8 @@ def main():
         "changed_gain": evaluate(models, shifted, command_batch(48, len(shifted.pose))),
         "residual_alerts": evaluate_residual(history_model, calibration, standard, shifted),
         "checkpoint_sha256": sha256(checkpoint),
+        "linear_checkpoint_sha256": sha256(linear_checkpoint),
+        "linear_decomposition_verified": True,
     }
     (args.run_dir / "metrics.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2), flush=True)

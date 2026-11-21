@@ -6,6 +6,7 @@ on base-only calls. No real QPU, olfactory hardware, or actuator access.
 from __future__ import annotations
 from copy import deepcopy
 import hashlib
+import io
 import sys
 from pathlib import Path
 from collections.abc import Mapping
@@ -155,7 +156,9 @@ class WeaverSOMAU3(WeaverSOMA100M):
         """Install a paired five-class audio stem and read-only correctness monitor."""
         if self.spectral_audio is None:
             raise ValueError("the audio self-monitor requires audio_encoder='logmel'")
-        obj = torch.load(str(path), map_location="cpu", weights_only=True)
+        # Hash and deserialize the same bytes, even if the filename is replaced during load.
+        checkpoint = Path(path).read_bytes()
+        obj = torch.load(io.BytesIO(checkpoint), map_location="cpu", weights_only=True)
         if (not isinstance(obj, dict) or obj.get("architecture") != "SOMA-U3-audio-self-monitor-v1"
                 or obj.get("classes") != AUDIO_CLASSES or obj.get("sample_rate") != 16000
                 or obj.get("fusion_dim") != self.fusion_dim):
@@ -170,6 +173,7 @@ class WeaverSOMAU3(WeaverSOMA100M):
         if (monitor.scale <= 0).any() or not 0 < monitor.threshold < 1:
             raise ValueError("invalid audio self-monitor calibration")
         self.spectral_audio.load_state_dict(stem.state_dict(), strict=True)
+        monitor.loaded_checkpoint_sha256 = hashlib.sha256(checkpoint).hexdigest()
         self.audio_self_monitor = monitor.train(self.training)
         return monitor
 

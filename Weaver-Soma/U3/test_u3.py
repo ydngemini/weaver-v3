@@ -159,7 +159,7 @@ def test_spectral_audio():
 
 
 def test_audio_monitor(tmp_dir):
-    from audio_self_monitor import AUDIO_CLASSES, AudioSelfMonitor
+    from audio_self_monitor import AUDIO_CLASSES, AudioDecisionReason, AudioSelfMonitor
 
     cfg = dict(core_dim=64, depth=1, ff_dim=128, fusion_dim=64, quantum_qubits=2)
     model = WeaverSOMAU3(audio_encoder="logmel", **cfg).eval()
@@ -183,6 +183,13 @@ def test_audio_monitor(tmp_dir):
         readout = after["audio_self_monitor"]
         assert readout["score_available"].tolist() == [True, False]
         assert readout["recommend_abstain"][1] and readout["p_correct"][1] == 0
+        assert readout["decision_reason"][1] == AudioDecisionReason.MISSING_SAMPLES
+        audit = readout["audit"]
+        contribution = audit["log_odds_contributions"]
+        assert contribution.shape[1] == len(audit["feature_names"])
+        torch.testing.assert_close(audit["intercept"] + contribution.sum(1), audit["log_odds"])
+        assert audit["loaded_checkpoint_sha256"] == model._file_hash(checkpoint)
+        assert not contribution[1].any()
         assert "audio_self_monitor" not in model(obs, quality, context)
         empty = model(obs, quality, context, modalities={"audio": {
             "values": torch.zeros_like(waveform), "valid": torch.zeros_like(waveform, dtype=torch.bool)
@@ -194,6 +201,7 @@ def test_audio_monitor(tmp_dir):
             "values": torch.zeros_like(waveform)
         }})["audio_self_monitor"]
         assert silent["samples_observed"].all() and not silent["score_available"].any()
+        assert (silent["decision_reason"] == AudioDecisionReason.ZERO_SIGNAL).all()
     active_monitor = model.audio_self_monitor
     payload["monitor_weights"]["threshold"] = torch.tensor(float("nan"))
     torch.save(payload, checkpoint)
