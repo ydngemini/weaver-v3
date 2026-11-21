@@ -27,6 +27,7 @@ from audio_spectral import SpectralAudioStem  # noqa: E402
 from audio_self_monitor import AUDIO_CLASSES, AudioSelfMonitor, spectral_input  # noqa: E402
 from audio_scope import ARCHITECTURE as AUDIO_SCOPE_ARCHITECTURE  # noqa: E402
 from audio_scope import AudioScopeMonitor, temporal_scope_features  # noqa: E402
+from motion_inputs import InertialActivityStem, MotionVisionStem, retain_observed_tokens  # noqa: E402
 
 U1_SHA256 = "3eb0746806f3842ec2d8121a7bcf30f5351b1b26b70e2c53debdac2ea5030c8f"
 U2_STAGE4_SHA256 = "14d170d70f7d16d2abc23721f4f4cc3a9b3d115651dffbb2e343ebfb1f135149"
@@ -75,12 +76,15 @@ class WeaverSOMAU3(WeaverSOMA100M):
               "olfaction": 8, "rf": 8, "spatial": 8}
 
     def __init__(self, *, fusion_dim=128, max_modality_tokens=128, quantum_qubits=4,
-                 quantum_layers=2, audio_encoder="waveform", **u2_kwargs):
+                 quantum_layers=2, audio_encoder="waveform", vision_encoder="patch",
+                 enable_imu=False, **u2_kwargs):
         super().__init__(**u2_kwargs)
         if fusion_dim % 4 or fusion_dim < 32 or max_modality_tokens < 1:
             raise ValueError("fusion_dim must be >=32, divisible by 4; token limit >=1")
         if audio_encoder not in ("waveform", "logmel"):
             raise ValueError("audio_encoder must be waveform or logmel")
+        if vision_encoder not in ("patch", "motion"):
+            raise ValueError("vision_encoder must be patch or motion")
         self._u2_keys = frozenset(self.state_dict())
         self.fusion_dim = fusion_dim
         self.max_modality_tokens = max_modality_tokens
@@ -113,6 +117,8 @@ class WeaverSOMAU3(WeaverSOMA100M):
                                if audio_encoder == "logmel" else None)
         self.audio_self_monitor: AudioSelfMonitor | None = None
         self.audio_scope_monitor: AudioScopeMonitor | None = None
+        self.motion_vision = MotionVisionStem(fusion_dim) if vision_encoder == "motion" else None
+        self.inertial = InertialActivityStem(fusion_dim) if enable_imu else None
 
     @staticmethod
     def _file_hash(path: str | Path) -> str:
@@ -337,6 +343,15 @@ class WeaverSOMAU3(WeaverSOMA100M):
             return out  # EXACT 15-key legacy contract when diagnostics are absent.
         tokens, masks, auxiliary = [], [], {}
         for name, sample in modalities.items():
+            motion = self._motion_input(name, sample, obs.shape[0])
+            if motion is not None:
+                retained, observed = retain_observed_tokens(motion.tokens, motion.valid, self.max_modality_tokens)
+                tokens.append(retained)
+                masks.append(observed)
+                out.setdefault("motion_evidence", {})[name] = motion.evidence
+                if motion.evidence["score_available"].any():
+                    auxiliary[name] = motion.logits
+                continue
             if name not in self.LABELS:
                 raise ValueError(f"unknown SOMA modality: {name}")
             encoded, valid = self._encode(name, sample)
@@ -388,3 +403,15 @@ class WeaverSOMAU3(WeaverSOMA100M):
         out["quantum_expectations"] = qfeatures
         out["sensory_token_mask"] = validity
         return out
+
+    def _motion_input(self, name, sample, batch):
+        enabled = (name == "vision" and self.motion_vision is not None
+                   or name == "imu" and self.inertial is not None)
+        if not enabled:
+            return None
+        values = sample.get("values")
+        if values is None or values.ndim == 0 or values.shape[0] != batch:
+            raise ValueError(f"{name} values must match the body batch size")
+        if name == "vision":
+            return self.motion_vision(values, valid=sample.get("valid"), timestamps=sample.get("timestamps"))
+        return self.inertial(values, valid=sample.get("valid"), quality=sample.get("quality"))

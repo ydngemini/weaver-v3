@@ -354,3 +354,47 @@ python U3/test_u3.py
 python U3/test_evolution.py
 ```
 These are research checks, not AGI or deployed autonomous neural evolution.
+
+## Camera motion and phone IMU
+
+The optional camera motion path uses timestamped RGB windows to track the
+center of contrast in the image and estimate horizontal and vertical motion.
+It scores four directions and exposes the measured velocity, usable frame
+pairs, and the exact contributions to each class score. It withholds direction
+if pairs are missing, motion is weak, or directions conflict. Camera movement,
+clutter and lighting can affect the center of contrast.
+
+The optional IMU path expects six 50 Hz channels in order: acceleration xyz
+in g, then angular velocity xyz in rad/s. Keep missing samples in their original
+time slots and mark them invalid. Per-axis quality of zero excludes an axis.
+The causal convolutional encoder emits features for each observed slot and a
+six-activity window score. Read coverage and score availability in
+`out["motion_evidence"]`. At least 32 observed time slots are required to
+score a window. Validation uses 128-sample UCI HAR windows with the original
+waist-mounted setup. The score does not establish device-placement transfer.
+
+```python
+model = WeaverSOMAU3(fusion_dim=64, vision_encoder="motion", enable_imu=True).eval()
+vision = torch.load("runs/motion/vision_motion.pt", map_location="cpu", weights_only=True)
+imu = torch.load("runs/motion/imu_activity.pt", map_location="cpu", weights_only=True)
+model.motion_vision.load_state_dict(vision["weights"], strict=True)
+model.inertial.load_state_dict(imu["weights"], strict=True)
+out = model(obs, quality, context, modalities={
+    "vision": {"values": rgb_frames, "timestamps": frame_times_seconds},
+    "imu": {"values": accel_and_gyro, "quality": per_axis_quality},
+})
+```
+
+RGB values are floats in [0,1] shaped [B,F,3,H,W]. The camera input accepts a
+per-frame validity mask. IMU values and quality are [B,T,6]. When a batch mixes
+scorable and unscorable windows, use each row's `score_available` flag.
+The token budget prioritizes observed samples before thinning. The CPU trainer
+fits separate readouts and verifies both through the normal U3 forward path.
+
+```sh
+python U3/benchmark_motion_inputs.py --mnist-dir /path/to/mnist \
+  --har-dir "/path/to/UCI HAR Dataset" --run-dir runs/motion
+```
+
+[MNIST image files](https://github.com/cvdfoundation/mnist) ·
+[UCI Human Activity Recognition Using Smartphones](https://archive.ics.uci.edu/dataset/240/human+activity+recognition+using+smartphones)
