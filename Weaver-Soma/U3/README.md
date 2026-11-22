@@ -598,6 +598,9 @@ on the same frozen checkpoint.
 The [data scaling pilot](ASR_DATA_SCALE_PILOT.md) continues acoustic
 training with matched optimizer budgets and tests a fresh speaker holdout
 with the same frozen decoder.
+The [long acoustic training runner](ASR_LONG_TRAINING.md) streams the
+larger LibriSpeech partitions, saves resumable state, and checks the
+retained checkpoint against the starting weights on held-out speech.
 
 ## Native text decoder pilot
 
