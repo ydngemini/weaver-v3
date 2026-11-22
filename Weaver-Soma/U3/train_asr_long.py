@@ -11,7 +11,6 @@ import multiprocessing
 from pathlib import Path
 import shutil
 import subprocess
-from tempfile import TemporaryDirectory
 from time import perf_counter
 
 import numpy as np
@@ -71,16 +70,19 @@ def _shard(data, scratch, source):
     if local.is_file():
         return local, False
     target = scratch / source.replace("/", "-")
+    if target.is_file():
+        return target, True
     partial = target.with_suffix(".part")
     base = f"https://huggingface.co/datasets/openslr/librispeech_asr/resolve/{REVISION}/{source}"
-    for attempt in range(3):
+    for attempt in range(4):
         try:
-            subprocess.run(["curl", "-fsSL", "--retry", "1", "--max-time", "140",
+            subprocess.run(["curl", "-fsSL", "--continue-at", "-", "--max-time", "600",
+                            "--speed-time", "60", "--speed-limit", "1024",
                             f"{base}?download=true&attempt={attempt}", "-o", str(partial)], check=True)
             partial.replace(target)
             return target, True
         except subprocess.CalledProcessError:
-            if attempt == 2:
+            if attempt == 3:
                 raise
     raise AssertionError("unreachable shard download state")
 
@@ -88,28 +90,24 @@ def _shard(data, scratch, source):
 @contextmanager
 def _prefetch(data, out, sources, depth=3):
     """Keep only a small rolling window of remotely retrieved shards."""
-    with TemporaryDirectory(prefix=".prefetch-", dir=out) as temporary:
-        with ThreadPoolExecutor(max_workers=depth) as network:
-            def stream():
-                pending = {}
-                for offset, source in enumerate(sources):
-                    if offset == 0:
-                        for item in sources[:depth]:
-                            pending[item] = network.submit(_shard, data, Path(temporary), item)
-                    path, created = pending.pop(source).result()
-                    try:
-                        yield source, path
-                    finally:
-                        if created:
-                            path.unlink(missing_ok=True)
-                    if offset + depth < len(sources):
-                        following = sources[offset + depth]
-                        pending[following] = network.submit(_shard, data, Path(temporary), following)
-            items = stream()
-            try:
-                yield items
-            finally:
-                items.close()
+    scratch = out / ".download_cache"
+    scratch.mkdir(exist_ok=True)
+    with ThreadPoolExecutor(max_workers=depth) as network:
+        def stream():
+            pending = {item: network.submit(_shard, data, scratch, item) for item in sources[:depth]}
+            for offset, source in enumerate(sources):
+                path, created = pending.pop(source).result()
+                if offset + depth < len(sources):
+                    following = sources[offset + depth]
+                    pending[following] = network.submit(_shard, data, scratch, following)
+                yield source, path
+                if created:
+                    path.unlink(missing_ok=True)
+        items = stream()
+        try:
+            yield items
+        finally:
+            items.close()
 
 
 def _replay(data, model):
@@ -247,6 +245,8 @@ def run(args):
         print("initial gate", json.dumps(initial), flush=True)
 
     done = {item["file"] for item in journal["shards"]}
+    for source in done:
+        (out / ".download_cache" / source.replace("/", "-")).unlink(missing_ok=True)
     for index, (partition, sources) in enumerate(groups.items()):
         if args.finish or (args.max_hours is not None and journal["corpus_hours"] >= args.max_hours):
             break

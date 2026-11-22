@@ -14,8 +14,8 @@ from train-clean-100, train-clean-360, and train-other-500. For each shard, the 
 pinned by the stored catalog. Speaker IDs and utterance IDs
 are checked against the held-out partitions and earlier shards. Missing
 training shards are downloaded in a rolling window and removed from the
-temporary cache after consumption. Previously downloaded input files are
-left in place.
+cache after consumption. Interrupted transfers resume from their saved
+byte offsets. Previously downloaded input files are left in place.
 
 CTC continuation uses AdamW, the 32-utterance batching protocol from the
 native training pilot, and a learning rate of 0.00065, 0.00052, or 0.00035
