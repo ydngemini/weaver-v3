@@ -581,8 +581,10 @@ on held-out AMI speakers. At its calibrated cutoff, the head matched the
 
 The [speech command pilot](NATIVE_SPEECH_COMMANDS_PILOT.md) evaluates a
 CPU-trained, causal keyword head with a 16 kHz PCM interface and per-label
-confidence scores. Its held-out background false accepts keep this
-checkpoint in offline evaluation.
+confidence scores. The [noise rejection pilot](SPEECH_NOISE_REJECTION_PILOT.md)
+fine-tunes the same architecture and compares threshold-only and
+synthetic-negative controls. It reports environmental and unsupported-word
+errors separately.
 
 ## Native text decoder pilot
 
