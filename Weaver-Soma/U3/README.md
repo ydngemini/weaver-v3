@@ -577,6 +577,13 @@ compares a CPU-trained acoustic head against the two fixed silence timeouts
 on held-out AMI speakers. At its calibrated cutoff, the head matched the
 600 ms control and stays outside the live voice path.
 
+## Native streaming speech commands
+
+The [speech command pilot](NATIVE_SPEECH_COMMANDS_PILOT.md) evaluates a
+CPU-trained, causal keyword head with a 16 kHz PCM interface and per-label
+confidence scores. Its held-out background false accepts keep this
+checkpoint in offline evaluation.
+
 ## Native text decoder pilot
 
 `native_text_decoder.py` implements a small causal Transformer with tied
