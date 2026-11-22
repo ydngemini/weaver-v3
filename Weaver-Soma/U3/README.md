@@ -586,6 +586,13 @@ fine-tunes the same architecture and compares threshold-only and
 synthetic-negative controls. It reports environmental and unsupported-word
 errors separately.
 
+## Native streaming transcription
+
+The [transcription pilot](NATIVE_ASR_PILOT.md) trains a causal character
+CTC model and reports word and character errors on held-out LibriSpeech.
+Its streaming runner emits timestamped characters and checks packetized
+output against whole-clip inference.
+
 ## Native text decoder pilot
 
 `native_text_decoder.py` implements a small causal Transformer with tied
