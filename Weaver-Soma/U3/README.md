@@ -592,6 +592,9 @@ The [transcription pilot](NATIVE_ASR_PILOT.md) trains a causal character
 CTC model and reports word and character errors on held-out LibriSpeech.
 Its streaming runner emits timestamped characters and checks packetized
 output against whole-clip inference.
+The [beam decoding pilot](ASR_BEAM_DECODING_PILOT.md) measures how an
+acoustic beam and a train-transcript character model affect word errors
+on the same frozen checkpoint.
 
 ## Native text decoder pilot
 
