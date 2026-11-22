@@ -595,6 +595,9 @@ output against whole-clip inference.
 The [beam decoding pilot](ASR_BEAM_DECODING_PILOT.md) measures how an
 acoustic beam and a train-transcript character model affect word errors
 on the same frozen checkpoint.
+The [data scaling pilot](ASR_DATA_SCALE_PILOT.md) continues acoustic
+training with matched optimizer budgets and tests a fresh speaker holdout
+with the same frozen decoder.
 
 ## Native text decoder pilot
 
